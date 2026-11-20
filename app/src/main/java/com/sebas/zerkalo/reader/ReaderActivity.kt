@@ -75,6 +75,10 @@ data class TocEntry(val title: String, val link: Link, val depth: Int)
 val ReaderFonts = listOf("Literata", "Mincho", "Garamond", "Gótica", "Original")
 private val fontFamilies = listOf("Literata", "Shippori Mincho", "EB Garamond", "Zen Kaku Gothic New", null)
 
+/** Colores de letra para papel oscuro. El último lo elige la persona. */
+val InkNames = listOf("Original", "Azul claro", "Blanco cálido", "Gris perla", "Ámbar suave", "Mío")
+val InkColors = listOf(0, 0xFFC7D8EA.toInt(), 0xFFEEE6D8.toInt(), 0xFFCFCBC5.toInt(), 0xFFD9C3A0.toInt(), 0)
+
 /** Estado que ve la capa de controles (Compose). */
 class ReaderUi {
     var loading by mutableStateOf(true)
@@ -138,6 +142,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             insets
         }
         applyPaper()
+        applyBrightness(ui.settings.brightness)
         lifecycleScope.launch { open() }
     }
 
@@ -274,7 +279,16 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         if (show) c.show(WindowInsetsCompat.Type.systemBars()) else c.hide(WindowInsetsCompat.Type.systemBars())
     }
 
-    private fun paletteFor(r: ReaderSettings): Palette = when (r.paper) {
+    private fun paletteFor(r: ReaderSettings): Palette {
+        val base = basePalette(r)
+        if (!base.isDark || r.ink == 0) return base
+        val argb = if (r.ink == 5) r.customInk else InkColors.getOrElse(r.ink) { 0 }
+        if (argb == 0) return base
+        val ink = androidx.compose.ui.graphics.Color(argb)
+        return base.copy(text = ink, text2 = ink.copy(alpha = 0.72f))
+    }
+
+    private fun basePalette(r: ReaderSettings): Palette = when (r.paper) {
         0 -> Chashitsu
         1 -> Nogal
         2 -> SumiPalette
@@ -307,14 +321,25 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             textAlign = if (fam == null) null else if (r.justify) TextAlign.JUSTIFY else TextAlign.START,
             hyphens = if (fam == null) null else r.justify,
             publisherStyles = fam == null,
-            scroll = false,
+            scroll = r.scroll,
         )
+    }
+
+    /** Brillo propio del lector (no cambia el del sistema). */
+    private fun applyBrightness(b: Float) {
+        window.attributes = window.attributes.apply {
+            screenBrightness = if (b < 0f) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE else b.coerceIn(0.02f, 1f)
+        }
     }
 
     fun updateSettings(r: ReaderSettings) {
         Prefs.setReader(r)
+        val old = ui.settings
         ui.settings = r
         ui.palette = paletteFor(r)
+        if (old.brightness != r.brightness) applyBrightness(r.brightness)
+        // El brillo y el filtro cálido no necesitan rehacer las páginas.
+        if (old.copy(brightness = r.brightness, warmth = r.warmth) == r) return
         applyPaper()
         navigator?.submitPreferences(preferences(r, ui.palette))
         lifecycleScope.launch { applyHighlights() }

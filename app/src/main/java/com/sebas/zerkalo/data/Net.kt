@@ -56,9 +56,9 @@ object Net {
     )
 
     /** GET de texto con un reintento si el servidor está ocupado. */
-    suspend fun text(url: String, timeout: Int = 15_000): String = withContext(Dispatchers.IO) {
+    suspend fun text(url: String, timeout: Int = 15_000, tries: Int = 2): String = withContext(Dispatchers.IO) {
         var last: NetError? = null
-        repeat(2) { attempt ->
+        repeat(tries) { attempt ->
             try {
                 val c = open(url, timeout)
                 val code = c.responseCode
@@ -70,7 +70,7 @@ object Net {
             } catch (e: Exception) {
                 last = explain(e)
                 val retry = (last?.code ?: 0) >= 500 || e is SocketTimeoutException
-                if (!retry || attempt == 1) throw last!!
+                if (!retry || attempt == tries - 1) throw last!!
                 delay(1200)
             }
         }

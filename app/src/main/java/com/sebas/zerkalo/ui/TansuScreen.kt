@@ -85,22 +85,45 @@ object Downloads {
     private fun set(k: String, s: State) = states.update { it + (k to s) }
 }
 
-/** Carga una fila: primero lo guardado (al instante) y luego lo fresco de internet. */
-@Composable
-private fun rememberRow(key: String, fetch: suspend () -> Page): RowState {
-    var st by remember(key) { mutableStateOf(Catalogs.cached(key).let { RowState(items = it?.items ?: emptyList(), next = it?.next) }) }
-    LaunchedEffect(key) {
-        st = st.copy(loading = true, error = null)
-        st = try {
-            val p = Catalogs.load(key, fetch)
-            Log.i("Zerkalo", "ZK_TANSU $key ${p.items.size}")
-            RowState(p.items, loading = false, next = p.next)
-        } catch (e: Exception) {
-            Log.w("Zerkalo", "ZK_TANSU_ERROR $key ${e.message}")
-            st.copy(loading = false, error = e.message ?: "No se pudo conectar")
+/**
+ * Las filas del Tansu se cargan una sola vez por sesión, fuera de la pantalla:
+ * si deslizas rápido o cambias de pestaña, la carga sigue y no vuelve a empezar.
+ */
+object CatalogStore {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    val rows = MutableStateFlow<Map<String, RowState>>(emptyMap())
+    private val running = HashSet<String>()
+
+    fun ensure(key: String, fetch: suspend () -> Page, force: Boolean = false) {
+        synchronized(running) {
+            val cur = rows.value[key]
+            if (!force && cur != null && (cur.error == null) && (!cur.loading || key in running)) return
+            if (key in running) return
+            running += key
+        }
+        val cached = rows.value[key]?.takeIf { it.items.isNotEmpty() } ?: Catalogs.cached(key)?.let { RowState(it.items, next = it.next) }
+        rows.update { it + (key to (cached ?: RowState()).copy(loading = true, error = null)) }
+        scope.launch {
+            val t0 = System.currentTimeMillis()
+            val st = try {
+                val p = Catalogs.load(key, fetch)
+                Log.i("Zerkalo", "ZK_TANSU $key ${p.items.size} en ${System.currentTimeMillis() - t0} ms")
+                RowState(p.items, loading = false, next = p.next)
+            } catch (e: Exception) {
+                Log.w("Zerkalo", "ZK_TANSU_ERROR $key ${e.message}")
+                (rows.value[key] ?: RowState()).copy(loading = false, error = e.message ?: "No se pudo conectar")
+            }
+            rows.update { it + (key to st) }
+            synchronized(running) { running -= key }
         }
     }
-    return st
+}
+
+@Composable
+private fun rememberRow(key: String, fetch: suspend () -> Page): RowState {
+    val all by CatalogStore.rows.collectAsState()
+    LaunchedEffect(key) { CatalogStore.ensure(key, fetch) }
+    return all[key] ?: RowState()
 }
 
 @Composable
@@ -135,18 +158,18 @@ fun TansuScreen(haze: HazeState) {
                 }
             }
             if (query.isNotEmpty()) {
-                item(key = "sg$query$lang") { CatalogRow("En Project Gutenberg", "", rememberRow("pg-s:$lang:$query") { Catalogs.gutenberg(lang, search = query) }, "Sin resultados en este idioma.") { preview = it } }
-                item(key = "sw$query$lang") { CatalogRow("En Wikisource", "", rememberRow("ws:$lang:$query") { Catalogs.wikisource(query, lang) }) { preview = it } }
-                item(key = "so$query") { CatalogRow("Libros académicos", "OAPEN", rememberRow("oa:$query") { Catalogs.oapen(query) }) { preview = it } }
+                item(key = "sg$query$lang") { TansuRow("En Project Gutenberg", "", "pg-s:$lang:$query", { Catalogs.gutenberg(lang, search = query) }, "Sin resultados en este idioma.") { preview = it } }
+                item(key = "sw$query$lang") { TansuRow("En Wikisource", "", "ws:$lang:$query", { Catalogs.wikisource(query, lang) }) { preview = it } }
+                item(key = "so$query") { TansuRow("Libros académicos", "OAPEN", "oa:$query", { Catalogs.oapen(query) }) { preview = it } }
             } else {
-                item(key = "pop$lang") { CatalogRow("Los más leídos", "Project Gutenberg", rememberRow("pg:$lang") { Catalogs.gutenberg(lang) }) { preview = it } }
+                item(key = "pop$lang") { TansuRow("Los más leídos", "Project Gutenberg", "pg:$lang", { Catalogs.gutenberg(lang) }) { preview = it } }
                 Catalogs.TOPICS.take(6).forEach { t ->
-                    item(key = "t${t.id}$lang") { CatalogRow(t.name, "", rememberRow("pg:$lang:${t.id}") { Catalogs.gutenberg(lang, topic = t.id) }) { preview = it } }
+                    item(key = "t${t.id}$lang") { TansuRow(t.name, "", "pg:$lang:${t.id}", { Catalogs.gutenberg(lang, topic = t.id) }) { preview = it } }
                 }
-                if (lang == "en") item(key = "se") { CatalogRow("Recién editados", "Standard Ebooks", rememberRow("se") { Catalogs.standardEbooks() }) { preview = it } }
+                if (lang == "en") item(key = "se") { TansuRow("Recién editados", "Standard Ebooks", "se", { Catalogs.standardEbooks() }) { preview = it } }
                 item(key = "oa$lang") {
                     val term = mapOf("es" to "historia", "fr" to "histoire", "pt" to "história", "de" to "Geschichte", "it" to "storia")[lang] ?: "history"
-                    CatalogRow(if (lang == "es") "Ensayo y ciencia abiertos" else "Open access", "OAPEN", rememberRow("oa:$term") { Catalogs.oapen(term) }) { preview = it }
+                    TansuRow(if (lang == "es") "Ensayo y ciencia abiertos" else "Open access", "OAPEN", "oa:$term", { Catalogs.oapen(term) }) { preview = it }
                 }
                 if (cats.isNotEmpty()) item(key = "mine") {
                     Column(Modifier.padding(top = 30.dp)) {
@@ -173,7 +196,13 @@ fun TansuScreen(haze: HazeState) {
 }
 
 @Composable
-private fun CatalogRow(title: String, kicker: String, st: RowState, empty: String = "Nada por aquí todavía.", onItem: (CatalogItem) -> Unit) {
+private fun TansuRow(title: String, kicker: String, key: String, fetch: suspend () -> Page, empty: String = "Nada por aquí todavía.", onItem: (CatalogItem) -> Unit) {
+    val st = rememberRow(key, fetch)
+    CatalogRow(title, kicker, st, empty, onRetry = { CatalogStore.ensure(key, fetch, force = true) }, onItem = onItem)
+}
+
+@Composable
+private fun CatalogRow(title: String, kicker: String, st: RowState, empty: String = "Nada por aquí todavía.", onRetry: () -> Unit = {}, onItem: (CatalogItem) -> Unit) {
     val p = LocalPalette.current
     Column(Modifier.padding(top = 28.dp)) {
         SectionTitle(title, kicker = kicker)
@@ -185,7 +214,11 @@ private fun CatalogRow(title: String, kicker: String, st: RowState, empty: Strin
             st.loading -> LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), userScrollEnabled = false) {
                 items(4) { Box(Modifier.size(100.dp, 148.dp).clip(RoundedCornerShape(6.dp)).background(p.surface.copy(alpha = 0.8f))) }
             }
-            st.error != null -> Text("No se pudo conectar: ${st.error}", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(horizontal = 20.dp))
+            st.error != null -> Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(st.error, style = Type.uiSmall, color = p.text2, modifier = Modifier.weight(1f))
+                Spacer(Modifier.width(10.dp))
+                SmallPill("Reintentar", false) { onRetry() }
+            }
             else -> Text(empty, style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(horizontal = 20.dp))
         }
     }

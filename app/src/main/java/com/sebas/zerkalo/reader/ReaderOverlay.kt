@@ -102,6 +102,9 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
             return@Box
         }
 
+        // Filtro cálido: un velo ámbar muy suave sobre la página (no recibe toques).
+        if (ui.settings.warmth > 0f) Box(Modifier.fillMaxSize().background(Color(0xFFFF8A2B).copy(alpha = ui.settings.warmth * 0.24f)))
+
         // Cinta del shiori en la esquina, como un marcapáginas de tela.
         AnimatedVisibility(ui.bookmarked, Modifier.align(Alignment.TopEnd).padding(end = 28.dp), enter = slideInVertically { -it }, exit = slideOutVertically { -it }) {
             Box(Modifier.size(14.dp, 54.dp).background(p.accent))
@@ -162,10 +165,7 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                     Spacer(Modifier.weight(1f))
                     RoundPill("toc", { ui.sheet = "toc" })
                     Spacer(Modifier.width(8.dp))
-                    RoundPill(if (ui.palette.isDark) "sun" else "moon", {
-                        val next = if (ui.palette.isDark) 0 else 1
-                        act.settings(ui.settings.copy(paper = next))
-                    })
+                    RoundPill("sun", { ui.sheet = "luz" })
                     Spacer(Modifier.width(8.dp))
                     RoundPill("aa", { ui.sheet = "type" })
                     Spacer(Modifier.width(8.dp))
@@ -180,6 +180,7 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
     when (ui.sheet) {
         "toc" -> TocSheet(ui, act) { ui.sheet = null }
         "type" -> TypeSheet(ui, act) { ui.sheet = null }
+        "luz" -> LightSheet(ui, act) { ui.sheet = null }
     }
     ui.activeMark?.let { MarkSheet(it, act) { ui.activeMark = null } }
     ui.noteFor?.let { NoteSheet(it, act) { ui.noteFor = null } }
@@ -276,6 +277,8 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
     val s = ui.settings
     Sheet(onClose) {
         Text("Lectura", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+        Label("Modo")
+        Segmented(listOf("Páginas", "Desplazamiento continuo"), if (s.scroll) 1 else 0, { act.settings(s.copy(scroll = it == 1)) })
         Label("Letra")
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(ReaderFonts.size) { i ->
@@ -310,9 +313,74 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
             }
             ZSwitch(s.justify) { act.settings(s.copy(justify = it)) }
         }
+    }
+}
+
+/** Luz: brillo, filtro cálido, papel y color de la letra. */
+@Composable
+private fun LightSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    val s = ui.settings
+    val sliderColors = SliderDefaults.colors(thumbColor = p.accent, activeTrackColor = p.accent, inactiveTrackColor = p.line)
+    Sheet(onClose) {
+        Text("Luz", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+        Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Brillo automático", style = Type.ui, color = p.text)
+                Text("El del teléfono", style = Type.uiSmall, color = p.text2)
+            }
+            ZSwitch(s.brightness < 0f) { act.settings(s.copy(brightness = if (it) -1f else 0.5f)) }
+        }
+        if (s.brightness >= 0f) {
+            var b by remember { mutableFloatStateOf(s.brightness) }
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                ZIcon("moon", p.text2, 18.dp)
+                Slider(
+                    value = b, onValueChange = { b = it; act.settings(ui.settings.copy(brightness = it)) }, valueRange = 0.02f..1f,
+                    colors = sliderColors, modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+                )
+                ZIcon("sun", p.text2, 20.dp)
+            }
+        }
+        Label("Filtro cálido", if (s.warmth <= 0f) "apagado" else "${(s.warmth * 100).toInt()} %")
+        var w by remember { mutableFloatStateOf(s.warmth) }
+        Slider(value = w, onValueChange = { w = it; act.settings(ui.settings.copy(warmth = it)) }, valueRange = 0f..1f, colors = sliderColors)
         Label("Papel")
         Segmented(listOf("Crema", "Nogal", "Sumi", "Como la app"), if (s.paper in 0..2) s.paper else 3, { act.settings(s.copy(paper = if (it == 3) -1 else it)) })
+        if (ui.palette.isDark) {
+            Label("Color de la letra")
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                items(InkNames.size) { i ->
+                    val c = when (i) { 0 -> null; 5 -> Color(s.customInk); else -> Color(InkColors[i]) }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(64.dp).clickable { act.settings(s.copy(ink = i)) }) {
+                        Box(
+                            Modifier.size(44.dp).clip(CircleShape).background(p.bg)
+                                .then(if (i == s.ink) Modifier.background(p.accent.copy(alpha = 0.25f)) else Modifier),
+                            contentAlignment = Alignment.Center,
+                        ) { Text("Aa", fontFamily = Fonts.literata, fontSize = 17.sp, color = c ?: originalInk(s)) }
+                        Text(InkNames[i], style = Type.uiSmall.copy(fontSize = 11.sp), color = if (i == s.ink) p.accent else p.text2, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
+                    }
+                }
+            }
+            if (s.ink == 5) {
+                // Color propio: tono y claridad; la saturación se mantiene suave para no cansar la vista.
+                val hsv = remember(s.customInk) { FloatArray(3).also { android.graphics.Color.colorToHSV(s.customInk, it) } }
+                var hue by remember { mutableFloatStateOf(hsv[0]) }
+                var light by remember { mutableFloatStateOf(hsv[2]) }
+                fun push() = act.settings(ui.settings.copy(customInk = android.graphics.Color.HSVToColor(floatArrayOf(hue, 0.22f, light))))
+                Label("Tono")
+                Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(Brush.horizontalGradient((0..6).map { Color.hsv(it * 60f, 0.35f, 0.9f) })))
+                Slider(value = hue, onValueChange = { hue = it }, onValueChangeFinished = { push() }, valueRange = 0f..359f, colors = sliderColors)
+                Label("Claridad")
+                Slider(value = light, onValueChange = { light = it }, onValueChangeFinished = { push() }, valueRange = 0.55f..1f, colors = sliderColors)
+            }
+        }
     }
+}
+
+private fun originalInk(s: com.sebas.zerkalo.data.ReaderSettings): Color = when (s.paper) {
+    2 -> Color(0xFFE9CDA4)
+    else -> Color(0xFFF0E6D4)
 }
 
 @Composable

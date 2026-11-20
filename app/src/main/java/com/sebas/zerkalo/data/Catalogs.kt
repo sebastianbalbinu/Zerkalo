@@ -3,6 +3,11 @@ package com.sebas.zerkalo.data
 import android.content.Context
 import android.util.Xml
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -77,21 +82,37 @@ object Catalogs {
 
     private fun gutenbergCover(id: String) = "https://www.gutenberg.org/cache/epub/$id/pg$id.cover.medium.jpg"
 
-    /** Gutendex primero (rápido y con resúmenes); si falla, el catálogo OPDS oficial de Gutenberg. */
-    suspend fun gutenberg(lang: String, topic: String? = null, search: String? = null): Page {
+    /**
+     * Gutendex y el catálogo OPDS oficial de Gutenberg compiten: gana el primero que responda con libros.
+     * Gutendex sale con ventaja (trae resúmenes); si tarda o se cae, el OPDS entra a los 3 segundos.
+     */
+    suspend fun gutenberg(lang: String, topic: String? = null, search: String? = null): Page = coroutineScope {
         val q = buildString {
             append("https://gutendex.com/books/?mime_type=application%2Fepub")
             if (lang.isNotEmpty()) append("&languages=").append(lang)
             topic?.let { append("&topic=").append(enc(it)) }
             search?.let { append("&search=").append(enc(it)) }
         }
-        return try {
-            parseGutendex(Net.text(q, timeout = 12_000), lang)
-        } catch (e: Exception) {
-            android.util.Log.w("Zerkalo", "Gutendex falló (${e.message}); uso el OPDS de Gutenberg")
-            val terms = listOfNotNull(search, topic?.let { "s.$it" }, if (lang.isNotEmpty()) "l.$lang" else null).joinToString(" ")
-            opdsGutenberg("https://www.gutenberg.org/ebooks/search.opds/?sort_order=downloads&query=" + enc(terms))
+        val terms = listOfNotNull(search, topic?.let { "s.$it" }, if (lang.isNotEmpty()) "l.$lang" else null).joinToString(" ")
+        val opdsUrl = "https://www.gutenberg.org/ebooks/search.opds/?sort_order=downloads&query=" + enc(terms)
+        val results = Channel<Pair<String, Result<Page>>>(2)
+        launch { results.send("gutendex" to runCatching { parseGutendex(Net.text(q, timeout = 20_000, tries = 1), lang) }) }
+        launch { delay(3000); results.send("opds" to runCatching { opdsGutenberg(opdsUrl) }) }
+        var error: Throwable? = null
+        var empty: Page? = null
+        repeat(2) {
+            val (who, r) = results.receive()
+            val page = r.getOrNull()
+            if (page != null) {
+                android.util.Log.i("Zerkalo", "ZK_FUENTE $who ok ${page.items.size} ($terms)")
+                if (page.items.isNotEmpty()) { coroutineContext.cancelChildren(); return@coroutineScope page }
+                empty = page
+            } else {
+                error = r.exceptionOrNull()
+                android.util.Log.w("Zerkalo", "ZK_FUENTE $who falló: ${error?.message} ($terms)")
+            }
         }
+        empty ?: throw (error ?: NetError("Sin resultados"))
     }
 
     private fun parseGutendex(json: String, lang: String): Page {

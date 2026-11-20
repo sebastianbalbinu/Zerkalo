@@ -25,7 +25,8 @@ class ZerkaloApp : Application(), ImageLoaderFactory {
     override fun newImageLoader(): ImageLoader = ImageLoader.Builder(this)
         .memoryCache { MemoryCache.Builder(this).maxSizePercent(0.15).build() }
         .diskCache { DiskCache.Builder().directory(cacheDir.resolve("portadas")).maxSizeBytes(80L * 1024 * 1024).build() }
-        .crossfade(180)
+        .crossfade(160)
+        .allowRgb565(true) // las portadas no tienen transparencia: la mitad de memoria
         .respectCacheHeaders(false)
         .build()
 }
