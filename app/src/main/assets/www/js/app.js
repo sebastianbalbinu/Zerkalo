@@ -1,4 +1,5 @@
 // Zerkalo · 鏡 — la app
+window.__step && window.__step('módulos cargados');
 import * as db from './db.js';
 import * as N from './native.js';
 import { ic, enso } from './icons.js';
@@ -566,4 +567,7 @@ async function renderSettings() {
 
 // ---------------------------------------------------------------- inicio
 markTab('home');
-go('home').finally(() => requestAnimationFrame(() => { try { window.ZerkaloNative && window.ZerkaloNative.ready(); } catch (e) {} }));
+window.__step && window.__step('abriendo biblioteca');
+const sayReady = () => { try { window.ZerkaloNative && window.ZerkaloNative.ready(); } catch (e) {} };
+go('home').then(() => window.__step && window.__step('biblioteca lista')).catch(e => window.__step && window.__step('falló: ' + e.message)).finally(sayReady);
+setTimeout(sayReady, 7000);

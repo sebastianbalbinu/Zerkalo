@@ -13,8 +13,9 @@ function open() {
       n.createIndex('bookId', 'bookId');
       d.createObjectStore('kv', { keyPath: 'k' });
     };
-    r.onsuccess = () => res(r.result);
-    r.onerror = () => rej(r.error);
+    r.onsuccess = () => { window.__step && window.__step('base de datos abierta'); res(r.result); };
+    r.onblocked = () => window.__step && window.__step('base de datos bloqueada');
+    r.onerror = () => { window.__step && window.__step('base de datos error: ' + (r.error && r.error.message)); rej(r.error); };
   });
   return dbp;
 }

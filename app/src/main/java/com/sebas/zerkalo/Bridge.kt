@@ -155,6 +155,9 @@ class Bridge(private val act: MainActivity) {
     fun log(msg: String) = act.addError(msg)
 
     @JavascriptInterface
+    fun step(msg: String) = act.trace("· $msg")
+
+    @JavascriptInterface
     fun appInfo(): String = JSONObject()
         .put("versionCode", Updates.currentCode(act))
         .put("versionName", try { act.packageManager.getPackageInfo(act.packageName, 0).versionName } catch (e: Exception) { "" })

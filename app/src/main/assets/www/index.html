@@ -16,6 +16,8 @@
     if (t === 'oled') document.documentElement.classList.add('oled');
     // Cualquier error queda registrado en Android, por si algo no abre.
     var N = window.ZerkaloNative;
+    window.__step = function (m) { try { N && N.step(m); } catch (e) {} };
+    window.__step('html leído');
     function log(m) { try { N && N.log(String(m).slice(0, 300)); } catch (e) {} }
     window.addEventListener('error', function (e) {
       if (e.target && e.target !== window && (e.target.src || e.target.href)) log('No cargó ' + (e.target.src || e.target.href));
@@ -31,6 +33,7 @@
 <div class="toast" id="toast"></div>
 <script src="vendor/jszip.min.js"></script>
 <script src="vendor/epub.min.js"></script>
+<script>window.__step && window.__step('epub.js listo: ' + (typeof window.ePub));</script>
 <script type="module" src="js/app.js"></script>
 </body>
 </html>

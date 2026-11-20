@@ -46,6 +46,11 @@ class MainActivity : ComponentActivity() {
     private var overlayShownAt = 0L
     private var webReady = false
     private val errors = mutableListOf<String>()
+    private val traceLog = java.util.Collections.synchronizedList(mutableListOf<String>())
+    @Volatile private var served = 0
+    @Volatile private var lastServed = ""
+    @Volatile private var progress = 0
+    fun trace(msg: String) { if (traceLog.size < 40) traceLog.add(msg) }
 
     val booksDir: File by lazy { File(filesDir, "books").apply { mkdirs() } }
 
@@ -87,9 +92,11 @@ class MainActivity : ComponentActivity() {
         bridge = Bridge(this)
         web.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(m: ConsoleMessage): Boolean {
-                if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR) addError("${m.message()} (${m.sourceId()?.substringAfterLast('/')}:${m.lineNumber()})")
+                val line = "${m.messageLevel()}: ${m.message()} (${m.sourceId()?.substringAfterLast('/')}:${m.lineNumber()})"
+                if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR) addError(line) else trace(line)
                 return true
             }
+            override fun onProgressChanged(view: WebView, newProgress: Int) { progress = newProgress }
         }
 
         with(web.settings) {
@@ -109,7 +116,9 @@ class MainActivity : ComponentActivity() {
         web.addJavascriptInterface(bridge, "ZerkaloNative")
         web.webViewClient = object : WebViewClientCompat() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
-                val r = loader.shouldInterceptRequest(request.url) ?: return null
+                val r = loader.shouldInterceptRequest(request.url)
+                if (r == null) { trace("sin manejar: ${request.url}"); return null }
+                served++; lastServed = request.url.path ?: ""
                 // Tipo de archivo explícito: los módulos JS no cargan si Android adivina mal.
                 val path = request.url.path ?: ""
                 val mime = when (path.substringAfterLast('.', "").lowercase()) {
@@ -144,7 +153,10 @@ class MainActivity : ComponentActivity() {
                 return true
             }
 
+            override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) { trace("empezó a cargar") }
+
             override fun onPageFinished(view: WebView, url: String) {
+                trace("página cargada")
                 pageReady = true
                 if (insetsJs.isNotEmpty()) view.evaluateJavascript(insetsJs, null)
                 pendingJs.forEach { view.evaluateJavascript(it, null) }
@@ -239,8 +251,9 @@ class MainActivity : ComponentActivity() {
             setTextIsSelectable(true)
             setPadding(48, 24, 48, 48)
             text = "La biblioteca tarda en abrir.\nToca aquí para reintentar o manda una captura de este mensaje:\n\n" +
-                (if (errors.isEmpty()) "Sin errores registrados (WebView ${android.webkit.WebView.getCurrentWebViewPackage()?.versionName ?: "?"})"
-                 else errors.joinToString("\n")) +
+                (if (errors.isEmpty()) "Sin errores" else errors.joinToString("\n")) +
+                "\n\nArchivos servidos: $served (último ${lastServed.substringAfterLast('/')}) · progreso $progress%\n" +
+                traceLog.takeLast(16).joinToString("\n") +
                 "\n\nWebView ${android.webkit.WebView.getCurrentWebViewPackage()?.versionName ?: "?"}"
             setOnClickListener { v -> errors.clear(); this@MainActivity.overlay.removeView(v); web.reload(); web.postDelayed({ if (!webReady) showDiagnostics() }, 12000) }
         }
