@@ -29,7 +29,10 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // R8: quita el código que no se usa y optimiza el resto (APK más liviana y más rápida).
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.getByName("zerkalo")
         }
     }
@@ -86,4 +89,7 @@ dependencies {
     // Desenfoque progresivo (Haze, Apache 2.0) y portadas (Coil, Apache 2.0)
     implementation("dev.chrisbanes.haze:haze:1.7.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
+
+    // Instala los perfiles de arranque que traen Compose y las demás librerías: abre y desliza más rápido.
+    implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 }
