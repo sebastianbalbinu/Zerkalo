@@ -7,6 +7,8 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.webkit.ConsoleMessage
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
@@ -18,7 +20,12 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.webkit.WebViewAssetLoader
+import androidx.webkit.WebResourceErrorCompat
 import androidx.webkit.WebViewClientCompat
+import android.widget.FrameLayout
+import android.widget.TextView
+import android.view.Gravity
+import android.view.ViewGroup
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
@@ -35,6 +42,10 @@ class MainActivity : ComponentActivity() {
     private var pageReady = false
     private val pendingJs = mutableListOf<String>()
     private var insetsJs = ""
+    private lateinit var overlay: FrameLayout
+    private var overlayShownAt = 0L
+    private var webReady = false
+    private val errors = mutableListOf<String>()
 
     val booksDir: File by lazy { File(filesDir, "books").apply { mkdirs() } }
 
@@ -60,10 +71,26 @@ class MainActivity : ComponentActivity() {
             .addPathHandler("/books/", WebViewAssetLoader.InternalStoragePathHandler(this, booksDir))
             .build()
 
+        WebView.setWebContentsDebuggingEnabled(true)
         web = WebView(this)
         web.setBackgroundColor(if (isNight()) Color.parseColor("#2E231D") else Color.parseColor("#F7F2E8"))
-        setContentView(web)
+        val root = FrameLayout(this)
+        root.addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        overlay = FrameLayout(this)
+        overlay.addView(LoadingView(this, isNight()), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        overlay.isClickable = true
+        root.addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        setContentView(root)
+        overlayShownAt = System.currentTimeMillis()
+        // Si en 12 s la biblioteca no avisó que está lista, se muestra qué falló (para poder arreglarlo).
+        web.postDelayed({ if (!webReady) showDiagnostics() }, 12000)
         bridge = Bridge(this)
+        web.webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(m: ConsoleMessage): Boolean {
+                if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR) addError("${m.message()} (${m.sourceId()?.substringAfterLast('/')}:${m.lineNumber()})")
+                return true
+            }
+        }
 
         with(web.settings) {
             javaScriptEnabled = true
@@ -81,8 +108,33 @@ class MainActivity : ComponentActivity() {
         web.isVerticalScrollBarEnabled = false
         web.addJavascriptInterface(bridge, "ZerkaloNative")
         web.webViewClient = object : WebViewClientCompat() {
-            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? =
-                loader.shouldInterceptRequest(request.url)
+            override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
+                val r = loader.shouldInterceptRequest(request.url) ?: return null
+                // Tipo de archivo explícito: los módulos JS no cargan si Android adivina mal.
+                val path = request.url.path ?: ""
+                val mime = when (path.substringAfterLast('.', "").lowercase()) {
+                    "js", "mjs" -> "text/javascript"
+                    "css" -> "text/css"
+                    "html" -> "text/html"
+                    "png" -> "image/png"
+                    "jpg", "jpeg" -> "image/jpeg"
+                    "woff2" -> "font/woff2"
+                    "json" -> "application/json"
+                    "epub" -> "application/epub+zip"
+                    else -> null
+                }
+                if (mime != null) r.mimeType = mime
+                if (mime != null && (mime.startsWith("text/") || mime == "application/json")) r.encoding = "utf-8"
+                return r
+            }
+
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceErrorCompat) {
+                if (request.url.host == "appassets.androidplatform.net") addError("No cargó ${request.url.path}")
+            }
+
+            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+                if (request.url.host == "appassets.androidplatform.net") addError("HTTP ${errorResponse.statusCode} en ${request.url.path}")
+            }
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
@@ -164,6 +216,36 @@ class MainActivity : ComponentActivity() {
 
     fun isNight(): Boolean =
         (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
+
+    fun addError(msg: String) = runOnUiThread {
+        if (errors.size < 12) errors.add(msg)
+    }
+
+    /** La interfaz ya dibujó la biblioteca: se desvanece la pantalla de carga. */
+    fun onWebReady() = runOnUiThread {
+        if (webReady) return@runOnUiThread
+        webReady = true
+        val wait = (1700L - (System.currentTimeMillis() - overlayShownAt)).coerceAtLeast(0L)
+        overlay.postDelayed({
+            overlay.animate().alpha(0f).setDuration(480).withEndAction { (overlay.parent as? ViewGroup)?.removeView(overlay) }.start()
+        }, wait)
+    }
+
+    private fun showDiagnostics() {
+        val dark = isNight()
+        val tv = TextView(this).apply {
+            setTextColor(if (dark) Color.parseColor("#CDBAA3") else Color.parseColor("#5C4B3F"))
+            textSize = 12f
+            setTextIsSelectable(true)
+            setPadding(48, 24, 48, 48)
+            text = "La biblioteca tarda en abrir.\nToca aquí para reintentar o manda una captura de este mensaje:\n\n" +
+                (if (errors.isEmpty()) "Sin errores registrados (WebView ${android.webkit.WebView.getCurrentWebViewPackage()?.versionName ?: "?"})"
+                 else errors.joinToString("\n")) +
+                "\n\nWebView ${android.webkit.WebView.getCurrentWebViewPackage()?.versionName ?: "?"}"
+            setOnClickListener { errors.clear(); overlay.removeView(this); web.reload(); web.postDelayed({ if (!webReady) showDiagnostics() }, 12000) }
+        }
+        overlay.addView(tv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
+    }
 
     /** Ejecuta JS en la página (o lo deja en cola si aún carga). */
     fun js(code: String) = runOnUiThread {

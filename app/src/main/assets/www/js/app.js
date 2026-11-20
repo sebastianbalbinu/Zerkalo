@@ -566,7 +566,4 @@ async function renderSettings() {
 
 // ---------------------------------------------------------------- inicio
 markTab('home');
-go('home').finally(() => setTimeout(() => {
-  const s = document.getElementById('splash'); if (!s) return;
-  s.classList.add('out'); setTimeout(() => s.remove(), 800);
-}, 900));
+go('home').finally(() => requestAnimationFrame(() => { try { window.ZerkaloNative && window.ZerkaloNative.ready(); } catch (e) {} }));

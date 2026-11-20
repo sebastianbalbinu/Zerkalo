@@ -14,11 +14,18 @@
     var sys = window.ZerkaloNative ? window.ZerkaloNative.systemDark() : matchMedia('(prefers-color-scheme: dark)').matches;
     if (t === 'dark' || t === 'oled' || (t === 'system' && sys)) document.documentElement.classList.add('dark');
     if (t === 'oled') document.documentElement.classList.add('oled');
+    // Cualquier error queda registrado en Android, por si algo no abre.
+    var N = window.ZerkaloNative;
+    function log(m) { try { N && N.log(String(m).slice(0, 300)); } catch (e) {} }
+    window.addEventListener('error', function (e) {
+      if (e.target && e.target !== window && (e.target.src || e.target.href)) log('No cargó ' + (e.target.src || e.target.href));
+      else log((e.message || 'Error') + ' · ' + (e.filename || '').split('/').pop() + ':' + (e.lineno || ''));
+    }, true);
+    window.addEventListener('unhandledrejection', function (e) { log('Promesa: ' + (e.reason && (e.reason.message || e.reason))); });
   })();
 </script>
 </head>
 <body>
-<div id="splash"><img class="logo-light" src="img/logo-light.png" alt="Zerkalo"><img class="logo-dark" src="img/logo-dark.png" alt="Zerkalo"></div>
 <div id="app"></div>
 <nav class="tabbar" id="tabbar"></nav>
 <div class="toast" id="toast"></div>

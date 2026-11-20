@@ -146,6 +146,14 @@ class Bridge(private val act: MainActivity) {
     @JavascriptInterface
     fun systemDark(): Boolean = act.isNight()
 
+    /** La interfaz terminó de dibujarse. */
+    @JavascriptInterface
+    fun ready() = act.onWebReady()
+
+    /** Errores de la interfaz, para mostrarlos si algo no abre. */
+    @JavascriptInterface
+    fun log(msg: String) = act.addError(msg)
+
     @JavascriptInterface
     fun appInfo(): String = JSONObject()
         .put("versionCode", Updates.currentCode(act))
