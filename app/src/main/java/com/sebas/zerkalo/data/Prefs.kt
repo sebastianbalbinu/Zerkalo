@@ -16,6 +16,11 @@ data class ReaderSettings(
     val margin: Int = 1,        // 0 estrechos, 1 medios, 2 amplios
     val justify: Boolean = true,
     val paper: Int = -1,        // -1 = el mismo de la app; 0 crema, 1 nogal, 2 sumi
+    val scroll: Boolean = false, // desplazamiento continuo en vez de páginas
+    val ink: Int = 0,           // color de letra en papel oscuro: 0 original, 1 azul claro, 2 blanco cálido, 3 gris perla, 4 ámbar suave, 5 propio
+    val customInk: Int = 0xFFC7D8EA.toInt(),
+    val brightness: Float = -1f, // -1 = el del sistema
+    val warmth: Float = 0f,     // filtro cálido, 0..1
 )
 
 data class OpdsCatalog(val name: String, val url: String)
@@ -32,6 +37,8 @@ object Prefs {
         reader.value = ReaderSettings(
             font = sp.getInt("rFont", 0), size = sp.getInt("rSize", 100), lineHeight = sp.getFloat("rLh", 1.6f),
             margin = sp.getInt("rMargin", 1), justify = sp.getBoolean("rJustify", true), paper = sp.getInt("rPaper", -1),
+            scroll = sp.getBoolean("rScroll", false), ink = sp.getInt("rInk", 0), customInk = sp.getInt("rCustomInk", 0xFFC7D8EA.toInt()),
+            brightness = sp.getFloat("rBright", -1f), warmth = sp.getFloat("rWarm", 0f),
         )
         catalogs.value = runCatching {
             val a = JSONArray(sp.getString("opds", "[]"))
@@ -44,7 +51,9 @@ object Prefs {
     fun setReader(r: ReaderSettings) {
         reader.value = r
         sp.edit().putInt("rFont", r.font).putInt("rSize", r.size).putFloat("rLh", r.lineHeight)
-            .putInt("rMargin", r.margin).putBoolean("rJustify", r.justify).putInt("rPaper", r.paper).apply()
+            .putInt("rMargin", r.margin).putBoolean("rJustify", r.justify).putInt("rPaper", r.paper)
+            .putBoolean("rScroll", r.scroll).putInt("rInk", r.ink).putInt("rCustomInk", r.customInk)
+            .putFloat("rBright", r.brightness).putFloat("rWarm", r.warmth).apply()
     }
 
     fun setCatalogs(list: List<OpdsCatalog>) {
