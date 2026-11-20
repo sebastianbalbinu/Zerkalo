@@ -22,7 +22,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.9"
+          gradle-version: "8.14.3"
 
       - name: Preparar llave de firma
         env:
@@ -91,7 +91,7 @@ jobs:
       - name: Renombrar capturas
         if: always()
         run: |
-          for f in shot1.png shot2.png logcat.txt; do [ -f "$f" ] && mv "$f" "api${{ matrix.api }}-$f"; done; ls
+          for f in shot1.png shot2.png shot3.png shot4.png logcat.txt; do [ -f "$f" ] && mv "$f" "api${{ matrix.api }}-$f"; done; ls
 
       - name: Publicar capturas de la prueba
         if: always()
@@ -103,6 +103,8 @@ jobs:
           files: |
             api${{ matrix.api }}-shot1.png
             api${{ matrix.api }}-shot2.png
+            api${{ matrix.api }}-shot3.png
+            api${{ matrix.api }}-shot4.png
             api${{ matrix.api }}-logcat.txt
 
   publicar:
@@ -118,5 +120,5 @@ jobs:
           tag_name: v1.0.${{ github.run_number }}
           name: Zerkalo 1.0.${{ github.run_number }}
           make_latest: true
-          body: APK probada en emuladores Android 14, 15 y 16. Si ya tienes Zerkalo, se actualiza sola.
+          body: Zerkalo nativa: lector EPUB con Readium, probado en emuladores Android 14, 15 y 16. Si ya tienes Zerkalo, se actualiza sola.
           files: Zerkalo.apk
