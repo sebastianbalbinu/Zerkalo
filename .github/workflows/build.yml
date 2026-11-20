@@ -56,6 +56,10 @@ jobs:
   probar:
     needs: build
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [34, 35, 36]
     steps:
       - uses: actions/checkout@v4
 
@@ -69,16 +73,22 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Probar en emulador
+      - name: Probar en emulador Android ${{ matrix.api }}
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 34
+          api-level: ${{ matrix.api }}
           arch: x86_64
           target: google_apis
+          profile: pixel_6
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: false
           script: bash .github/scripts/probar.sh
+
+      - name: Renombrar capturas
+        if: always()
+        run: |
+          for f in shot1.png shot2.png logcat.txt; do [ -f "$f" ] && mv "$f" "api${{ matrix.api }}-$f"; done; ls
 
       - name: Publicar capturas de la prueba
         if: always()
@@ -88,15 +98,22 @@ jobs:
           name: Prueba ${{ github.run_number }}
           prerelease: true
           files: |
-            shot1.png
-            shot2.png
-            logcat.txt
+            api${{ matrix.api }}-shot1.png
+            api${{ matrix.api }}-shot2.png
+            api${{ matrix.api }}-logcat.txt
 
-      - name: Publicar en Releases (solo si la prueba pasó)
+  publicar:
+    needs: probar
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+      - name: Publicar en Releases (solo si todas las pruebas pasaron)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: Zerkalo 1.0.${{ github.run_number }}
           make_latest: true
-          body: APK probada en emulador. Si ya tienes Zerkalo, se actualiza sola.
+          body: APK probada en emuladores Android 14, 15 y 16. Si ya tienes Zerkalo, se actualiza sola.
           files: Zerkalo.apk
