@@ -120,5 +120,5 @@ jobs:
           tag_name: v1.0.${{ github.run_number }}
           name: Zerkalo 1.0.${{ github.run_number }}
           make_latest: true
-          body: Zerkalo nativa: lector EPUB con Readium, probado en emuladores Android 14, 15 y 16. Si ya tienes Zerkalo, se actualiza sola.
+          body: "Zerkalo nativa: lector EPUB con Readium, probado en emuladores Android 14, 15 y 16. Si ya tienes Zerkalo, se actualiza sola."
           files: Zerkalo.apk
