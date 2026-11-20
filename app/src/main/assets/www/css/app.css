@@ -1,14 +1,14 @@
 /* Zerkalo · 鏡 — Chashitsu (claro) y Nogal (oscuro) */
 :root {
-  --bg: #F2EDE4; --card: #FBF8F3; --page: #FBF8F3; --text: #2C251E; --muted: #6E6458; --line: #E2D9CC;
-  --accent: #5F6E3E; --shu: #C4432A; --btn: #2C251E; --btn-text: #F4EFE6;
-  --chip: rgba(44, 37, 30, .07); --chip-strong: rgba(44, 37, 30, .11);
-  --glass: rgba(251, 248, 243, .74); --glass-line: rgba(44, 37, 30, .07);
-  --shadow: 0 10px 30px rgba(44, 37, 30, .08), 0 0 0 1px rgba(44, 37, 30, .04);
-  --book-shadow: 0 10px 22px rgba(44, 30, 20, .24);
+  /* Paleta Zerkalo · modo luz */
+  --bg: #F7F2E8; --surface: #EDE4D4; --tarjeta: #DFD3C1; --text: #2E231D; --muted: #5C4B3F; --accent: #C4432A;
+  --card: var(--surface); --page: #F7F2E8; --line: #DFD3C1; --shu: #C4432A; --btn: #2E231D; --btn-text: #F7F2E8;
+  --chip: #DFD3C1; --chip-strong: #D2C4AF; --seg-on: #F7F2E8;
+  --glass: rgba(237, 228, 212, .78); --glass-line: rgba(46, 35, 29, .08);
+  --shadow: 0 10px 30px rgba(46, 35, 29, .08), 0 0 0 1px rgba(46, 35, 29, .04);
+  --book-shadow: 0 10px 22px rgba(46, 30, 20, .24);
   --wood-front: url(../img/keyaki-front.png); --wood-top: url(../img/keyaki-top.png);
   --plank-shadow: 0 16px 22px -8px rgba(60, 35, 15, .38), 0 4px 5px -2px rgba(60, 35, 15, .25);
-  --hl: rgba(95, 110, 62, .22);
   --sat: env(safe-area-inset-top, 24px); --sab: env(safe-area-inset-bottom, 16px); --kb: 0px;
   --serif: 'Shippori Mincho', 'Literata', Georgia, serif;
   --sans: 'Zen Kaku Gothic New', system-ui, sans-serif;
@@ -16,15 +16,15 @@
   color-scheme: light;
 }
 :root.dark {
-  --bg: #2E231D; --card: #3A2D25; --page: #2A201A; --text: #F0E6D4; --muted: #B9AA94; --line: #4D3D32;
-  --accent: #B3C287; --btn: #F0E6D4; --btn-text: #2E231D;
-  --chip: rgba(240, 230, 212, .09); --chip-strong: rgba(240, 230, 212, .14);
-  --glass: rgba(58, 45, 37, .72); --glass-line: rgba(240, 230, 212, .07);
+  /* Paleta Zerkalo · modo oscuro */
+  --bg: #2E231D; --surface: #3B2B24; --tarjeta: #4A362C; --text: #F0E6D4; --muted: #CDBAA3; --accent: #C4432A;
+  --card: var(--surface); --page: #2E231D; --line: #4A362C; --btn: #F0E6D4; --btn-text: #2E231D;
+  --chip: #4A362C; --chip-strong: #574035; --seg-on: #5E4639;
+  --glass: rgba(59, 43, 36, .78); --glass-line: rgba(240, 230, 212, .07);
   --shadow: 0 10px 30px rgba(0, 0, 0, .3), 0 0 0 1px rgba(255, 255, 255, .04), inset 0 1px 0 rgba(255, 255, 255, .03);
   --book-shadow: 0 10px 22px rgba(0, 0, 0, .5);
   --wood-front: url(../img/nogal-front.png); --wood-top: url(../img/nogal-top.png);
   --plank-shadow: 0 16px 22px -8px rgba(0, 0, 0, .6), 0 4px 5px -2px rgba(0, 0, 0, .3);
-  --hl: rgba(179, 194, 135, .22);
   color-scheme: dark;
 }
 
@@ -219,8 +219,7 @@ img { display: block; }
 .sheet h3 { font-size: 20px; font-weight: 600; margin: 4px 0 12px; }
 .seg { display: flex; background: var(--chip); border-radius: 11px; padding: 3px; font-family: var(--sans); }
 .seg button { flex: 1; text-align: center; padding: 9px 0; border-radius: 8px; font-size: 13px; color: var(--muted); transition: background .25s, color .25s; }
-.seg button.on { background: var(--card); color: var(--text); box-shadow: 0 2px 6px rgba(0, 0, 0, .12); font-weight: 500; }
-:root.dark .seg button.on { background: #4A3A30; }
+.seg button.on { background: var(--seg-on); color: var(--text); box-shadow: 0 2px 6px rgba(0, 0, 0, .12); font-weight: 500; }
 .field-label { font-size: 15px; font-weight: 600; margin: 18px 0 9px; display: flex; justify-content: space-between; align-items: baseline; }
 .field-label small { font-family: var(--sans); font-size: 12px; font-weight: 400; color: var(--muted); }
 .swatches { display: flex; gap: 9px; flex-wrap: wrap; }
@@ -272,7 +271,7 @@ img { display: block; }
   justify-content: center; gap: 8px; padding: 0 16px; font-family: var(--sans); font-size: 15px; font-weight: 500; transition: transform .2s var(--ease), background .25s; flex: none; }
 .rpill.icon { padding: 0; width: 50px; }
 .rpill:active { transform: scale(.93); }
-.rpill.shiori.on { background: var(--accent); color: var(--page); }
+.rpill.shiori.on { background: var(--accent); color: #F7F2E8; }
 .reader .meta { display: flex; align-items: center; gap: 10px; padding: 0 8px; font-family: var(--sans); font-size: 11px; color: var(--muted); }
 .reader .meta .progress { height: 3px; }
 .reader .meta .progress > i { background: var(--accent); }
@@ -305,3 +304,13 @@ img { display: block; }
 .toast.show { opacity: 1; transform: translate(-50%, 0); }
 .dl-bar { height: 3px; border-radius: 2px; background: var(--line); overflow: hidden; margin-top: 10px; }
 .dl-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .2s; }
+
+/* ---------- portada de arranque ---------- */
+#splash { position: fixed; inset: 0; z-index: 200; background: var(--bg); display: flex; align-items: center; justify-content: center;
+  transition: opacity .7s var(--ease); }
+#splash img { width: min(64vw, 300px); animation: splashIn 1s var(--ease) both; }
+#splash.out { opacity: 0; pointer-events: none; }
+@keyframes splashIn { from { opacity: 0; transform: scale(.97); } to { opacity: 1; transform: none; } }
+.logo-light { display: block; } .logo-dark { display: none; }
+:root.dark .logo-light { display: none; } :root.dark .logo-dark { display: block; }
+.enso-img { width: 74px; margin: 0 auto 4px; opacity: .9; }

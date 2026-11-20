@@ -21,7 +21,7 @@ function isDark() { return themePref === 'dark' || (themePref === 'system' && N.
 function applyTheme() {
   const d = isDark();
   document.documentElement.classList.toggle('dark', d);
-  document.querySelector('meta[name=theme-color]').content = d ? '#2E231D' : '#F2EDE4';
+  document.querySelector('meta[name=theme-color]').content = d ? '#2E231D' : '#F7F2E8';
   N.setDarkBars(d);
 }
 function setTheme(p) { themePref = p; try { localStorage.setItem('zk-theme', p); } catch (e) {} applyTheme(); }
@@ -155,7 +155,7 @@ async function renderHome() {
         <button class="circle" data-act="settings" aria-label="Ajustes">${ic('gear', 20)}</button></div></div>
       <div class="search ${filter ? '' : 'hidden'}" id="fs">${ic('search', 18)}<input id="fq" placeholder="Título o autor" value="${esc(filter)}"></div>`;
     if (!all.length) {
-      html += `<div class="card" style="margin:24px 16px 0"><div class="empty">${enso(54).replace('enso-spin', '')}
+      html += `<div class="card" style="margin:24px 16px 0"><div class="empty"><img class="enso-img logo-light" src="img/enso-ink.png" alt=""><img class="enso-img logo-dark" src="img/enso-cream.png" alt="">
         <h3>Tu estante está esperando</h3><p>En el Tansu están las bibliotecas libres del mundo. También puedes traer tus propios EPUB.</p>
         <div class="row" style="justify-content:center;flex-wrap:wrap"><button class="btn" data-act="tansu">Abrir el Tansu</button><button class="btn ghost" data-act="import">Importar EPUB</button></div></div></div>`;
     } else {
@@ -204,7 +204,7 @@ async function openBook(book) {
   if (!book) return;
   const washi = (WASHI.find(w => w.id === (book.binding || {}).washi) || WASHI[0]).hex;
   const v = ui.view(`
-    <div class="book-hero" id="hero" style="background:linear-gradient(180deg, color-mix(in srgb, ${washi} 34%, transparent), color-mix(in srgb, ${washi} 10%, transparent) 70%, transparent)"></div>
+    <div class="book-hero" id="hero" style="background:linear-gradient(180deg, var(--tarjeta), color-mix(in srgb, var(--tarjeta) 35%, transparent) 70%, transparent)"></div>
     <div class="scroll" id="sc" style="padding-bottom:calc(var(--sab) + 110px)"></div>
     <div class="pblur bottom" style="height:calc(var(--sab) + 120px)">${PBLUR}</div>
     <div class="floating-actions"><button class="btn" data-act="read" id="rb">Empezar a leer</button>
@@ -537,7 +537,8 @@ async function renderSettings() {
         ${LIBRARIES.map(l => `<div class="list-item"><div class="grow"><div class="t">${l.name}</div><div class="s">${l.what}</div></div>
           <button class="btn small ghost" data-url="${l.donate}">Apoyar</button></div>`).join('')}
       </div>
-      <p class="g muted" style="font-size:12px;line-height:1.7;text-align:center;padding:20px 30px 0">Zerkalo · 鏡 · gratis, sin anuncios y sin servidores propios.<br>Tus libros, sellos y notas viven en tu teléfono.</p>`;
+      <div style="padding:34px 0 0;display:flex;justify-content:center"><img class="logo-light" src="img/logo-light.png" alt="Zerkalo" style="width:190px"><img class="logo-dark" src="img/logo-dark.png" alt="Zerkalo" style="width:190px"></div>
+      <p class="g muted" style="font-size:12px;line-height:1.7;text-align:center;padding:14px 30px 0">Gratis, sin anuncios y sin servidores propios.<br>Tus libros, sellos y notas viven en tu teléfono.</p>`;
   }
   sc.addEventListener('click', async e => {
     const t = e.target.closest('#tm button'); if (t) { setTheme(t.dataset.v); return draw(); }
@@ -563,4 +564,7 @@ async function renderSettings() {
 
 // ---------------------------------------------------------------- inicio
 markTab('home');
-go('home');
+go('home').finally(() => setTimeout(() => {
+  const s = document.getElementById('splash'); if (!s) return;
+  s.classList.add('out'); setTimeout(() => s.remove(), 800);
+}, 900));

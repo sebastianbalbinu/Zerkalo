@@ -133,7 +133,7 @@ class Bridge(private val act: MainActivity) {
         val c = androidx.core.view.WindowCompat.getInsetsController(act.window, act.web)
         c.isAppearanceLightStatusBars = !dark
         c.isAppearanceLightNavigationBars = !dark
-        act.web.setBackgroundColor(android.graphics.Color.parseColor(if (dark) "#2E231D" else "#F2EDE4"))
+        act.web.setBackgroundColor(android.graphics.Color.parseColor(if (dark) "#2E231D" else "#F7F2E8"))
     }
 
     /** Mantener la pantalla encendida mientras se lee. */

@@ -102,7 +102,7 @@ export async function openReader(book, ui) {
       h1, h2, h3, h4 { line-height: 1.25 !important; text-align: center !important; hyphens: manual !important; font-weight: 600 !important; }
       a { color: ${css('--accent')} !important; text-decoration: none !important; }
       img, svg, image { max-width: 100% !important; height: auto; ${dark ? 'filter: brightness(.88);' : ''} }
-      ::selection { background: ${dark ? 'rgba(179,194,135,.35)' : 'rgba(95,110,62,.25)'}; }
+      ::selection { background: ${dark ? 'rgba(196,67,42,.35)' : 'rgba(196,67,42,.22)'}; }
       hr { border: 0; height: 1px; background: ${css('--line')}; margin: 1.4em 25%; }
       pre, code { white-space: pre-wrap !important; }`;
   }

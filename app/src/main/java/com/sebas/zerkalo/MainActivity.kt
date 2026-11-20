@@ -61,7 +61,7 @@ class MainActivity : ComponentActivity() {
             .build()
 
         web = WebView(this)
-        web.setBackgroundColor(if (isNight()) Color.parseColor("#2E231D") else Color.parseColor("#F2EDE4"))
+        web.setBackgroundColor(if (isNight()) Color.parseColor("#2E231D") else Color.parseColor("#F7F2E8"))
         setContentView(web)
         bridge = Bridge(this)
 
