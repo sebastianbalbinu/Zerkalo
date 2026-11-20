@@ -15,6 +15,11 @@
         android:label="@string/app_name"
         android:theme="@style/Theme.Zerkalo">
 
+        <!-- La interfaz es local: la verificación de Safe Browsing bloqueaba la primera carga en algunos teléfonos. -->
+        <meta-data
+            android:name="android.webkit.WebView.EnableSafeBrowsing"
+            android:value="false" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

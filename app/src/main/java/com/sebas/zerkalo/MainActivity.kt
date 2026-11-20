@@ -35,11 +35,14 @@ import java.io.File
  * Todo se sirve desde https://appassets.androidplatform.net, así el lector y los libros
  * comparten origen y funcionan sin internet.
  */
+private const val START_URL = "https://appassets.androidplatform.net/assets/www/index.html"
+
 class MainActivity : ComponentActivity() {
 
     lateinit var web: WebView
     lateinit var bridge: Bridge
     private var pageReady = false
+    @Volatile private var pageStarted = false
     private val pendingJs = mutableListOf<String>()
     private var insetsJs = ""
     private lateinit var overlay: FrameLayout
@@ -110,6 +113,7 @@ class MainActivity : ComponentActivity() {
             setSupportZoom(false)
             builtInZoomControls = false
             displayZoomControls = false
+            if (Build.VERSION.SDK_INT >= 26) safeBrowsingEnabled = false
         }
         web.overScrollMode = WebView.OVER_SCROLL_NEVER
         web.isVerticalScrollBarEnabled = false
@@ -153,7 +157,7 @@ class MainActivity : ComponentActivity() {
                 return true
             }
 
-            override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) { trace("empezó a cargar") }
+            override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) { pageStarted = true; trace("empezó a cargar") }
 
             override fun onPageFinished(view: WebView, url: String) {
                 trace("página cargada")
@@ -187,18 +191,24 @@ class MainActivity : ComponentActivity() {
             }
         })
 
-        if (savedInstanceState != null) web.restoreState(savedInstanceState)
-        else web.loadUrl("https://appassets.androidplatform.net/assets/www/index.html")
+        web.loadUrl(START_URL)
+        // Plan B: si en 5 s la navegación no arrancó, se carga el mismo HTML directamente.
+        web.postDelayed({
+            if (!pageStarted) {
+                trace("plan B: carga directa")
+                try {
+                    val html = assets.open("www/index.html").bufferedReader().use { it.readText() }
+                    web.stopLoading()
+                    web.loadDataWithBaseURL(START_URL, html, "text/html", "utf-8", null)
+                } catch (e: Exception) { addError("plan B: ${e.message}") }
+            }
+        }, 5000)
 
         handleIntent(intent)
         Updates.schedule(this)
         lifecycleScope.launch { Updates.check(this@MainActivity) }
     }
 
-    override fun onSaveInstanceState(outState: Bundle) {
-        super.onSaveInstanceState(outState)
-        web.saveState(outState)
-    }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
