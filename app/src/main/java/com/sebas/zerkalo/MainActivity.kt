@@ -242,7 +242,7 @@ class MainActivity : ComponentActivity() {
                 (if (errors.isEmpty()) "Sin errores registrados (WebView ${android.webkit.WebView.getCurrentWebViewPackage()?.versionName ?: "?"})"
                  else errors.joinToString("\n")) +
                 "\n\nWebView ${android.webkit.WebView.getCurrentWebViewPackage()?.versionName ?: "?"}"
-            setOnClickListener { errors.clear(); overlay.removeView(this); web.reload(); web.postDelayed({ if (!webReady) showDiagnostics() }, 12000) }
+            setOnClickListener { v -> errors.clear(); this@MainActivity.overlay.removeView(v); web.reload(); web.postDelayed({ if (!webReady) showDiagnostics() }, 12000) }
         }
         overlay.addView(tv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
     }
