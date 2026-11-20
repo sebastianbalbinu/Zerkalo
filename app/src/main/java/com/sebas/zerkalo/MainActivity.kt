@@ -20,8 +20,6 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.webkit.WebViewAssetLoader
-import androidx.webkit.WebResourceErrorCompat
-import androidx.webkit.WebViewClientCompat
 import android.widget.FrameLayout
 import android.widget.TextView
 import android.view.Gravity
@@ -65,7 +63,10 @@ class MainActivity : ComponentActivity() {
         else importUri(uri) { ok, payload -> bridge.resolve(cb, ok, payload) }
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
+    private lateinit var root: FrameLayout
+    private lateinit var loader: WebViewAssetLoader
+    private var attempt = 0
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -73,36 +74,88 @@ class MainActivity : ComponentActivity() {
             window.isNavigationBarContrastEnforced = false
             window.isStatusBarContrastEnforced = false
         }
-
-        val loader = WebViewAssetLoader.Builder()
+        loader = WebViewAssetLoader.Builder()
             .addPathHandler("/assets/", WebViewAssetLoader.AssetsPathHandler(this))
             .addPathHandler("/books/", WebViewAssetLoader.InternalStoragePathHandler(this, booksDir))
             .build()
-
         WebView.setWebContentsDebuggingEnabled(true)
-        web = WebView(this)
-        web.setBackgroundColor(if (isNight()) Color.parseColor("#2E231D") else Color.parseColor("#F7F2E8"))
-        val root = FrameLayout(this)
-        root.addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        bridge = Bridge(this)
+
+        root = FrameLayout(this)
+        root.setBackgroundColor(if (isNight()) Color.parseColor("#2E231D") else Color.parseColor("#F7F2E8"))
         overlay = FrameLayout(this)
         overlay.addView(LoadingView(this, isNight()), FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         overlay.isClickable = true
         root.addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         setContentView(root)
         overlayShownAt = System.currentTimeMillis()
-        // Si en 12 s la biblioteca no avisó que está lista, se muestra qué falló (para poder arreglarlo).
-        web.postDelayed({ if (!webReady) showDiagnostics() }, 12000)
-        bridge = Bridge(this)
-        web.webChromeClient = object : WebChromeClient() {
-            override fun onConsoleMessage(m: ConsoleMessage): Boolean {
-                val line = "${m.messageLevel()}: ${m.message()} (${m.sourceId()?.substringAfterLast('/')}:${m.lineNumber()})"
-                if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR) addError(line) else trace(line)
-                return true
-            }
-            override fun onProgressChanged(view: WebView, newProgress: Int) { progress = newProgress }
+
+        ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            val d = resources.displayMetrics.density
+            insetsJs = "document.documentElement.style.setProperty('--sat','${bars.top / d}px');" +
+                "document.documentElement.style.setProperty('--sab','${bars.bottom / d}px');" +
+                "document.documentElement.style.setProperty('--kb','${ime.bottom / d}px');"
+            if (pageReady) web.evaluateJavascript(insetsJs, null)
+            insets
         }
 
-        with(web.settings) {
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (!pageReady) { finish(); return }
+                web.evaluateJavascript("window.__back ? window.__back() : false") { r ->
+                    if (r != "true") {
+                        isEnabled = false
+                        onBackPressedDispatcher.onBackPressed()
+                        isEnabled = true
+                    }
+                }
+            }
+        })
+
+        startWeb()
+        handleIntent(intent)
+        Updates.schedule(this)
+        lifecycleScope.launch { Updates.check(this@MainActivity) }
+    }
+
+    /**
+     * Crea el WebView y carga la interfaz. Si en unos segundos la página no arranca,
+     * prueba otra vez con un WebView nuevo (y luego carga directa), y al final muestra el diagnóstico.
+     */
+    private fun startWeb() {
+        attempt++
+        val n = attempt
+        if (::web.isInitialized) {
+            try { root.removeView(web); web.stopLoading(); web.destroy() } catch (_: Exception) {}
+        }
+        pageStarted = false
+        pageReady = false
+        web = buildWeb()
+        root.addView(web, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        trace("intento $n")
+        if (n >= 3) {
+            try {
+                val html = assets.open("www/index.html").bufferedReader().use { it.readText() }
+                web.loadDataWithBaseURL(START_URL, html, "text/html", "utf-8", null)
+            } catch (e: Exception) { addError("carga directa: ${e.message}") }
+        } else web.loadUrl(START_URL)
+        root.postDelayed({
+            if (webReady || attempt != n) return@postDelayed
+            val rp = if (Build.VERSION.SDK_INT >= 29) (if (web.webViewRenderProcess != null) "sí" else "no") else "?"
+            trace("intento $n sin arrancar (renderer: $rp)")
+            if (!pageStarted && n < 3) startWeb()
+            else showDiagnostics()
+        }, if (n < 3) 6000L else 9000L)
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun buildWeb(): WebView {
+        val w = WebView(this)
+        w.setBackgroundColor(if (isNight()) Color.parseColor("#2E231D") else Color.parseColor("#F7F2E8"))
+        if (Build.VERSION.SDK_INT >= 26) w.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
+        with(w.settings) {
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true
@@ -115,15 +168,28 @@ class MainActivity : ComponentActivity() {
             displayZoomControls = false
             if (Build.VERSION.SDK_INT >= 26) safeBrowsingEnabled = false
         }
-        web.overScrollMode = WebView.OVER_SCROLL_NEVER
-        web.isVerticalScrollBarEnabled = false
-        web.addJavascriptInterface(bridge, "ZerkaloNative")
-        web.webViewClient = object : WebViewClientCompat() {
+        w.overScrollMode = WebView.OVER_SCROLL_NEVER
+        w.isVerticalScrollBarEnabled = false
+        w.addJavascriptInterface(bridge, "ZerkaloNative")
+        w.webChromeClient = object : WebChromeClient() {
+            override fun onConsoleMessage(m: ConsoleMessage): Boolean {
+                val line = "${m.messageLevel()}: ${m.message()} (${m.sourceId()?.substringAfterLast('/')}:${m.lineNumber()})"
+                if (m.messageLevel() == ConsoleMessage.MessageLevel.ERROR) addError(line) else trace(line)
+                return true
+            }
+            override fun onProgressChanged(view: WebView, newProgress: Int) { progress = newProgress }
+        }
+        if (Build.VERSION.SDK_INT >= 29) {
+            w.setWebViewRenderProcessClient(object : android.webkit.WebViewRenderProcessClient() {
+                override fun onRenderProcessUnresponsive(view: WebView, renderer: android.webkit.WebViewRenderProcess?) { trace("el motor no responde") }
+                override fun onRenderProcessResponsive(view: WebView, renderer: android.webkit.WebViewRenderProcess?) { trace("el motor volvió") }
+            })
+        }
+        w.webViewClient = object : android.webkit.WebViewClient() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 val r = loader.shouldInterceptRequest(request.url)
-                if (r == null) { trace("sin manejar: ${request.url}"); return null }
+                if (r == null) { if (request.url.host == "appassets.androidplatform.net") trace("sin manejar: ${request.url.path}"); return null }
                 served++; lastServed = request.url.path ?: ""
-                // Tipo de archivo explícito: los módulos JS no cargan si Android adivina mal.
                 val path = request.url.path ?: ""
                 val mime = when (path.substringAfterLast('.', "").lowercase()) {
                     "js", "mjs" -> "text/javascript"
@@ -141,23 +207,20 @@ class MainActivity : ComponentActivity() {
                 return r
             }
 
-            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceErrorCompat) {
-                if (request.url.host == "appassets.androidplatform.net") addError("No cargó ${request.url.path}")
-            }
-
-            override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
-                if (request.url.host == "appassets.androidplatform.net") addError("HTTP ${errorResponse.statusCode} en ${request.url.path}")
+            override fun onReceivedError(view: WebView, request: WebResourceRequest, error: android.webkit.WebResourceError) {
+                if (request.url.host == "appassets.androidplatform.net" && request.url.path != "/favicon.ico") addError("No cargó ${request.url.path}: ${error.description}")
             }
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url
                 if (url.host == "appassets.androidplatform.net") return false
-                // Enlaces externos (créditos, donaciones): al navegador.
                 try { startActivity(Intent(Intent.ACTION_VIEW, url)) } catch (_: Exception) {}
                 return true
             }
 
-            override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) { pageStarted = true; trace("empezó a cargar") }
+            override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                pageStarted = true; trace("empezó a cargar")
+            }
 
             override fun onPageFinished(view: WebView, url: String) {
                 trace("página cargada")
@@ -166,49 +229,15 @@ class MainActivity : ComponentActivity() {
                 pendingJs.forEach { view.evaluateJavascript(it, null) }
                 pendingJs.clear()
             }
-        }
 
-        ViewCompat.setOnApplyWindowInsetsListener(web) { _, insets ->
-            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
-            val d = resources.displayMetrics.density
-            insetsJs = "document.documentElement.style.setProperty('--sat','${bars.top / d}px');" +
-                "document.documentElement.style.setProperty('--sab','${bars.bottom / d}px');" +
-                "document.documentElement.style.setProperty('--kb','${ime.bottom / d}px');"
-            if (pageReady) web.evaluateJavascript(insetsJs, null)
-            insets
-        }
-
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                web.evaluateJavascript("window.__back ? window.__back() : false") { r ->
-                    if (r != "true") {
-                        isEnabled = false
-                        onBackPressedDispatcher.onBackPressed()
-                        isEnabled = true
-                    }
-                }
+            override fun onRenderProcessGone(view: WebView, detail: android.webkit.RenderProcessGoneDetail): Boolean {
+                trace("el motor se cerró (crash=${detail.didCrash()})")
+                if (view == web) root.post { startWeb() }
+                return true
             }
-        })
-
-        web.loadUrl(START_URL)
-        // Plan B: si en 5 s la navegación no arrancó, se carga el mismo HTML directamente.
-        web.postDelayed({
-            if (!pageStarted) {
-                trace("plan B: carga directa")
-                try {
-                    val html = assets.open("www/index.html").bufferedReader().use { it.readText() }
-                    web.stopLoading()
-                    web.loadDataWithBaseURL(START_URL, html, "text/html", "utf-8", null)
-                } catch (e: Exception) { addError("plan B: ${e.message}") }
-            }
-        }, 5000)
-
-        handleIntent(intent)
-        Updates.schedule(this)
-        lifecycleScope.launch { Updates.check(this@MainActivity) }
+        }
+        return w
     }
-
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -267,7 +296,7 @@ class MainActivity : ComponentActivity() {
                 "\n\nArchivos servidos: $served (último ${lastServed.substringAfterLast('/')}) · progreso $progress%\n" +
                 traceLog.takeLast(16).joinToString("\n") +
                 "\n\nWebView ${android.webkit.WebView.getCurrentWebViewPackage()?.versionName ?: "?"}"
-            setOnClickListener { v -> errors.clear(); this@MainActivity.overlay.removeView(v); web.reload(); web.postDelayed({ if (!webReady) showDiagnostics() }, 12000) }
+            setOnClickListener { v -> errors.clear(); this@MainActivity.overlay.removeView(v); attempt = 0; startWeb() }
         }
         overlay.addView(tv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
     }
