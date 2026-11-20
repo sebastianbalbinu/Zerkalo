@@ -17,11 +17,13 @@ const PBLUR = '<i></i><i></i><i></i><i></i><i></i><i></i><i></i><b></b>';
 // ---------------------------------------------------------------- tema
 let themePref = 'system';
 try { themePref = localStorage.getItem('zk-theme') || 'system'; } catch (e) {}
-function isDark() { return themePref === 'dark' || (themePref === 'system' && N.systemDark()); }
+function isDark() { return themePref === 'dark' || themePref === 'oled' || (themePref === 'system' && N.systemDark()); }
 function applyTheme() {
   const d = isDark();
+  const oled = themePref === 'oled';
   document.documentElement.classList.toggle('dark', d);
-  document.querySelector('meta[name=theme-color]').content = d ? '#2E231D' : '#F7F2E8';
+  document.documentElement.classList.toggle('oled', oled);
+  document.querySelector('meta[name=theme-color]').content = oled ? '#000000' : d ? '#2E231D' : '#F7F2E8';
   N.setDarkBars(d);
 }
 function setTheme(p) { themePref = p; try { localStorage.setItem('zk-theme', p); } catch (e) {} applyTheme(); }
@@ -32,7 +34,7 @@ applyTheme();
 // ---------------------------------------------------------------- vistas, hojas y avisos
 const ui = {
   isDark, setTheme, themePref: () => themePref,
-  toggleTheme() { setTheme(isDark() ? 'light' : 'dark'); },
+  toggleTheme() { setTheme(themePref === 'oled' ? 'light' : isDark() ? 'oled' : 'dark'); },
   onPause: null, onResume: null,
   view(html, { tabbar: showTab = false, cls = '', root = false } = {}) {
     const el = document.createElement('div');
@@ -513,8 +515,8 @@ async function renderSettings() {
       <div style="padding:4px 16px 0"><button class="circle" data-act="back" aria-label="Volver">${ic('back', 20)}</button></div>
       <div class="head" style="padding-top:8px"><h1 class="big">Ajustes</h1></div>
       <div class="card" style="margin:20px 16px 0;padding:16px 18px">
-        <div style="font-size:17px;font-weight:600">Papel</div>
-        <div class="seg" style="margin-top:12px" id="tm">${[['system', 'Sistema'], ['light', 'Crema'], ['dark', 'Nogal']].map(([x, n]) => `<button data-v="${x}" class="${themePref === x ? 'on' : ''}">${n}</button>`).join('')}</div>
+        <div style="font-size:17px;font-weight:600">Papel</div><div class="g muted" style="font-size:12.5px;margin-top:2px">Sumi es negro puro para pantallas OLED, con letra ámbar para leer a oscuras</div>
+        <div class="seg" style="margin-top:12px" id="tm">${[['system', 'Sistema'], ['light', 'Crema'], ['dark', 'Nogal'], ['oled', 'Sumi']].map(([x, n]) => `<button data-v="${x}" class="${themePref === x ? 'on' : ''}">${n}</button>`).join('')}</div>
       </div>
       <div class="card" style="margin:12px 16px 0;padding:6px 18px">
         <div class="list-item"><div class="grow"><div class="t">Hora de lectura</div><div class="s">Un aviso amable cada día, nada más</div></div>

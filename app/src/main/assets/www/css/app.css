@@ -28,6 +28,18 @@
   color-scheme: dark;
 }
 
+:root.oled {
+  /* Sumi 墨 · negro puro para OLED, letra ámbar suave para la penumbra */
+  --bg: #000000; --surface: #0F0C0A; --tarjeta: #1B1512; --text: #E9CDA4; --muted: #A08A6E; --accent: #C4432A;
+  --card: var(--surface); --page: #000000; --line: #1E1814; --btn: #E9CDA4; --btn-text: #000000;
+  --chip: #1B1512; --chip-strong: #251D18; --seg-on: #2E241E;
+  --glass: rgba(15, 12, 10, .80); --glass-line: rgba(233, 205, 164, .06);
+  --shadow: 0 0 0 1px rgba(233, 205, 164, .05);
+  --book-shadow: 0 10px 22px rgba(0, 0, 0, .8);
+  --plank-shadow: 0 16px 22px -8px rgba(0, 0, 0, .9), 0 4px 5px -2px rgba(0, 0, 0, .6);
+}
+:root.oled .cover img, :root.oled .shelf .plank { filter: brightness(.82); }
+
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font-family: var(--serif);
   overflow: hidden; overscroll-behavior: none; -webkit-font-smoothing: antialiased; }

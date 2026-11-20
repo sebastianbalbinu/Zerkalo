@@ -334,7 +334,7 @@ export async function openReader(book, ui) {
       <div class="list-item" style="margin-top:12px"><div class="grow"><div class="t">Justificar el texto</div><div class="s">Con guiones, como un libro impreso</div></div>
         <button class="switch ${settings.justify ? 'on' : ''}" id="jt" aria-label="Justificar"></button></div>
       <div class="field-label">Papel</div>
-      <div class="seg" id="tm">${[['light', 'Crema'], ['dark', 'Nogal'], ['system', 'Sistema']].map(([x, n]) => `<button data-v="${x}" class="${ui.themePref() === x ? 'on' : ''}">${n}</button>`).join('')}</div>`);
+      <div class="seg" id="tm">${[['light', 'Crema'], ['dark', 'Nogal'], ['oled', 'Sumi'], ['system', 'Sistema']].map(([x, n]) => `<button data-v="${x}" class="${ui.themePref() === x ? 'on' : ''}">${n}</button>`).join('')}</div>`);
     const segs = (sel, fn) => s.el.querySelectorAll(sel + ' button').forEach(b => b.addEventListener('click', () => {
       s.el.querySelectorAll(sel + ' button').forEach(x => x.classList.toggle('on', x === b)); fn(b);
     }));

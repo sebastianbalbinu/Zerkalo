@@ -12,7 +12,8 @@
   (function () {
     var t = 'system'; try { t = localStorage.getItem('zk-theme') || 'system'; } catch (e) {}
     var sys = window.ZerkaloNative ? window.ZerkaloNative.systemDark() : matchMedia('(prefers-color-scheme: dark)').matches;
-    if (t === 'dark' || (t === 'system' && sys)) document.documentElement.classList.add('dark');
+    if (t === 'dark' || t === 'oled' || (t === 'system' && sys)) document.documentElement.classList.add('dark');
+    if (t === 'oled') document.documentElement.classList.add('oled');
   })();
 </script>
 </head>
