@@ -1,20 +1,11 @@
-# Zerkalo · 鏡
+# Zerkalo 鏡
 
-Lector EPUB gratuito, sin anuncios y sin servidores propios, con las bibliotecas libres del mundo:
-Project Gutenberg, Wikisource, OAPEN, Standard Ebooks y cualquier catálogo OPDS.
+Lector EPUB gratuito, sin anuncios y sin servidores propios, con alma japonesa.
 
-- Estética *chashitsu*: crema y keyaki de día, nogal de noche.
-- Encuadernación japonesa para cada libro, sellos de lectura, shiori y subrayados.
-- Se actualiza sola desde las Releases de este repositorio.
+- **App nativa** en Kotlin con Jetpack Compose: fluida y liviana.
+- **Lector**: [Readium Kotlin Toolkit](https://github.com/readium/kotlin-toolkit) (BSD), paginado, con tipografías Literata, Shippori Mincho, EB Garamond y Zen Kaku Gothic New; papel Crema, Nogal y Sumi (OLED); shiori, subrayados con notas e índice.
+- **Desenfoque progresivo** nativo con [Haze](https://github.com/chrisbanes/haze) (Apache 2.0). Portadas con [Coil](https://github.com/coil-kt/coil).
+- **Tansu**: Project Gutenberg (Gutendex con respaldo del OPDS oficial), Wikisource, OAPEN, Standard Ebooks y cualquier catálogo OPDS.
+- Importa EPUB propios y abre los que llegan por WhatsApp, Drive o Archivos. Detecta y explica los libros con DRM.
 
-## Instalar
-
-Descarga `Zerkalo.apk` de la [última versión](https://github.com/sebastianbalbinu/Zerkalo/releases/latest).
-Desde ahí, la app se actualiza sola.
-
-## Cómo está hecho
-
-- `app/src/main/java` — envoltura Android en Kotlin: WebView, puente nativo (descargas, importar EPUB,
-  recordatorio de lectura) y actualizador.
-- `app/src/main/assets/www` — la interfaz (HTML, CSS y JavaScript) y el lector (epub.js).
-- `.github/workflows/build.yml` — compila y publica la APK firmada en cada cambio.
+Cada push a `main` compila, prueba en emuladores Android 14, 15 y 16 y, si todo pasa, publica la versión en Releases. La app se actualiza sola.
