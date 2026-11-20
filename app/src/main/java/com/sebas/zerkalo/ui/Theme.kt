@@ -13,6 +13,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -137,5 +139,21 @@ fun Modifier.paperBackground(p: Palette = LocalPalette.current): Modifier {
         Wood.NONE -> null
     }
     val brush: Brush? = remember(bmp) { bmp?.let { ShaderBrush(ImageShader(it, TileMode.Repeated, TileMode.Repeated)) } }
-    return if (brush == null) this.background(p.bg) else this.background(p.bg).background(brush)
+    if (brush == null) return this.background(p.bg)
+    // Luz suave que cae desde arriba y bordes un poco más oscuros, como un mueble bajo una lámpara.
+    val glow = if (p.isDark) Color(0x1FFFE2B8) else Color(0x22FFFFFF)
+    val shade = if (p.isDark) Color(0x8C0E0805) else Color(0x1A5C4B3F)
+    return this.background(p.bg).background(brush).drawWithCache {
+        val light = Brush.radialGradient(
+            listOf(glow, Color.Transparent),
+            center = Offset(size.width * 0.5f, -size.height * 0.08f),
+            radius = size.maxDimension * 0.75f,
+        )
+        val vignette = Brush.radialGradient(
+            0.55f to Color.Transparent, 1f to shade,
+            center = Offset(size.width * 0.5f, size.height * 0.42f),
+            radius = size.maxDimension * 0.78f,
+        )
+        onDrawBehind { drawRect(light); drawRect(vignette) }
+    }
 }
