@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F2EDE4">
+<title>Zerkalo</title>
+<link rel="stylesheet" href="fonts/fonts.css">
+<link rel="stylesheet" href="css/app.css">
+<script>
+  // Tema antes de pintar, para que no parpadee.
+  (function () {
+    var t = 'system'; try { t = localStorage.getItem('zk-theme') || 'system'; } catch (e) {}
+    var sys = window.ZerkaloNative ? window.ZerkaloNative.systemDark() : matchMedia('(prefers-color-scheme: dark)').matches;
+    if (t === 'dark' || (t === 'system' && sys)) document.documentElement.classList.add('dark');
+  })();
+</script>
+</head>
+<body>
+<div id="app"></div>
+<nav class="tabbar" id="tabbar"></nav>
+<div class="toast" id="toast"></div>
+<script src="vendor/jszip.min.js"></script>
+<script src="vendor/epub.min.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
