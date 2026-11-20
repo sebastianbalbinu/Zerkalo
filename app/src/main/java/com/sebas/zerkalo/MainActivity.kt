@@ -145,8 +145,12 @@ class MainActivity : ComponentActivity() {
             if (webReady || attempt != n) return@postDelayed
             val rp = if (Build.VERSION.SDK_INT >= 29) (if (web.webViewRenderProcess != null) "sí" else "no") else "?"
             trace("intento $n sin arrancar (renderer: $rp)")
-            if (!pageStarted && n < 3) startWeb()
-            else showDiagnostics()
+            when {
+                !pageStarted && n < 3 -> startWeb()
+                // Ya arrancó pero va lento (teléfono ocupado): se le da más tiempo antes de mostrar el diagnóstico.
+                pageStarted -> root.postDelayed({ if (!webReady && attempt == n) showDiagnostics() }, 15000)
+                else -> showDiagnostics()
+            }
         }, if (n < 3) 6000L else 9000L)
     }
 
