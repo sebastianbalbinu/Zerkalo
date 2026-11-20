@@ -25,20 +25,11 @@ jobs:
           gradle-version: "8.9"
 
       - name: Preparar llave de firma
-        id: llave
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
-        run: |
-          if [ -z "$KEYSTORE_B64" ]; then
-            echo "::warning::Falta el secreto KEYSTORE_B64: agrega la llave de firma en Settings > Secrets > Actions y vuelve a ejecutar."
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "$KEYSTORE_B64" | base64 -d > app/release.keystore
-            echo "ok=true" >> "$GITHUB_OUTPUT"
-          fi
+        run: echo "$KEYSTORE_B64" | base64 -d > app/release.keystore
 
       - name: Compilar
-        if: steps.llave.outputs.ok == 'true'
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
@@ -46,7 +37,7 @@ jobs:
           gradle assembleRelease --no-daemon 2>&1 | tee build-log.txt
 
       - name: Publicar registro si falla
-        if: failure() && steps.llave.outputs.ok == 'true'
+        if: failure()
         uses: softprops/action-gh-release@v2
         with:
           tag_name: log-${{ github.run_number }}
@@ -55,14 +46,57 @@ jobs:
           files: build-log.txt
 
       - name: Renombrar APK
-        if: steps.llave.outputs.ok == 'true'
         run: cp app/build/outputs/apk/release/app-release.apk Zerkalo.apk
 
-      - name: Publicar en Releases
-        if: steps.llave.outputs.ok == 'true'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: Zerkalo.apk
+
+  probar:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: apk
+
+      - name: Activar KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Probar en emulador
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot
+          disable-animations: false
+          script: bash .github/scripts/probar.sh
+
+      - name: Publicar capturas de la prueba
+        if: always()
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: prueba-${{ github.run_number }}
+          name: Prueba ${{ github.run_number }}
+          prerelease: true
+          files: |
+            shot1.png
+            shot2.png
+            logcat.txt
+
+      - name: Publicar en Releases (solo si la prueba pasó)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v1.0.${{ github.run_number }}
           name: Zerkalo 1.0.${{ github.run_number }}
-          body: APK lista para instalar. Si ya tienes Zerkalo, se actualiza sola.
+          make_latest: true
+          body: APK probada en emulador. Si ya tienes Zerkalo, se actualiza sola.
           files: Zerkalo.apk

@@ -53,7 +53,7 @@ class MainActivity : ComponentActivity() {
     @Volatile private var served = 0
     @Volatile private var lastServed = ""
     @Volatile private var progress = 0
-    fun trace(msg: String) { if (traceLog.size < 40) traceLog.add(msg) }
+    fun trace(msg: String) { android.util.Log.i("Zerkalo", msg); if (traceLog.size < 40) traceLog.add(msg) }
 
     val booksDir: File by lazy { File(filesDir, "books").apply { mkdirs() } }
 
@@ -240,6 +240,7 @@ class MainActivity : ComponentActivity() {
         (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES
 
     fun addError(msg: String) = runOnUiThread {
+        android.util.Log.e("Zerkalo", msg)
         if (errors.size < 12) errors.add(msg)
     }
 
@@ -247,6 +248,7 @@ class MainActivity : ComponentActivity() {
     fun onWebReady() = runOnUiThread {
         if (webReady) return@runOnUiThread
         webReady = true
+        android.util.Log.i("Zerkalo", "ZK_READY")
         val wait = (1700L - (System.currentTimeMillis() - overlayShownAt)).coerceAtLeast(0L)
         overlay.postDelayed({
             overlay.animate().alpha(0f).setDuration(480).withEndAction { (overlay.parent as? ViewGroup)?.removeView(overlay) }.start()
