@@ -1,0 +1,145 @@
+package com.sebas.zerkalo.ui
+
+import android.Manifest
+import android.app.TimePickerDialog
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import com.sebas.zerkalo.Reminder
+import com.sebas.zerkalo.Updates
+import com.sebas.zerkalo.data.Catalogs
+import com.sebas.zerkalo.data.PaperPref
+import com.sebas.zerkalo.data.Prefs
+import kotlinx.coroutines.launch
+
+@Composable
+fun SettingsScreen() {
+    val p = LocalPalette.current
+    val a = LocalActions.current
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val paper by Prefs.paper.collectAsState()
+    val status by Updates.status.collectAsState()
+    val available by Updates.available.collectAsState()
+    var remOn by remember { mutableStateOf(Prefs.reminderOn) }
+    var remTime by remember { mutableStateOf(Prefs.reminderHour to Prefs.reminderMinute) }
+    var auto by remember { mutableStateOf(Updates.autoEnabled(ctx)) }
+    var catalogs by remember { mutableStateOf(false) }
+    val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
+    val version = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "" }
+
+    fun setReminder(on: Boolean, h: Int, m: Int) {
+        if (on && Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        Reminder.save(ctx, on, h, m); Reminder.schedule(ctx)
+        remOn = on; remTime = h to m
+        if (on) a.toast("Te avisaré a las %02d:%02d".format(h, m))
+    }
+
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(top = top + 10.dp, bottom = 60.dp)) {
+        item {
+            Column(Modifier.padding(horizontal = 16.dp)) {
+                CircleButton("back", a.back)
+                Text("Ajustes", style = Type.display, color = p.text, modifier = Modifier.padding(top = 12.dp, start = 4.dp))
+            }
+        }
+        item {
+            Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp)) {
+                Column {
+                    Text("Papel", style = Type.bookTitle, color = p.text)
+                    Text("Nogal es madera de nogal; Sumi es negro puro para pantallas OLED, con letra ámbar para leer a oscuras.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
+                    Gap(12)
+                    Segmented(listOf("Sistema", "Crema", "Nogal", "Sumi"), paper.ordinal, { Prefs.setPaper(PaperPref.entries[it]) })
+                }
+            }
+        }
+        item {
+            Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), PaddingValues(horizontal = 18.dp, vertical = 4.dp)) {
+                Column {
+                    ListRow("Hora de lectura", "Un aviso amable cada día, nada más") { ZSwitch(remOn) { setReminder(it, remTime.first, remTime.second) } }
+                    if (remOn) ListRow("A las", onClick = {
+                        TimePickerDialog(ctx, { _, h, m -> setReminder(true, h, m) }, remTime.first, remTime.second, true).show()
+                    }) { Text("%02d:%02d".format(remTime.first, remTime.second), style = Type.ui, color = p.text) }
+                }
+            }
+        }
+        item {
+            Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), PaddingValues(horizontal = 18.dp, vertical = 4.dp)) {
+                Column {
+                    ListRow("Zerkalo $version", status.ifBlank { "Se actualiza sola desde GitHub" }) {
+                        PillButton(if (available != null) "Actualizar" else "Buscar", {
+                            if (available != null) scope.launch {
+                                if (!Updates.canInstall(ctx)) { Updates.openInstallPermission(ctx); return@launch }
+                                Updates.available.value?.let { if (Updates.ready.value == null) Updates.download(ctx, it) }
+                                Updates.install(ctx)
+                            } else scope.launch { Updates.check(ctx, force = true) }
+                        }, ghost = available == null)
+                    }
+                    ListRow("Actualizar sola", "Descarga la versión nueva y la instala cuando no estás leyendo") {
+                        ZSwitch(auto) { auto = it; Updates.setAuto(ctx, it) }
+                    }
+                }
+            }
+        }
+        item {
+            Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), PaddingValues(horizontal = 18.dp, vertical = 4.dp)) {
+                Column {
+                    ListRow("Importar un EPUB", "Desde tu teléfono, Drive o descargas", onClick = a.importEpub) { ZIcon("chevron", p.text2, 16.dp) }
+                    ListRow("Catálogos OPDS", "Agrega otras bibliotecas libres", onClick = { catalogs = true }) { ZIcon("chevron", p.text2, 16.dp) }
+                }
+            }
+        }
+        item { SectionTitle("Las bibliotecas", modifier = Modifier.padding(top = 28.dp)) }
+        item {
+            Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), PaddingValues(horizontal = 18.dp, vertical = 4.dp)) {
+                Column {
+                    Catalogs.LIBRARIES.forEach { l ->
+                        ListRow(l.name, l.what) {
+                            PillButton("Apoyar", { runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(l.donate))) } }, ghost = true)
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            Column(Modifier.fillMaxWidth().padding(top = 34.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Logo(p.isDark, 180.dp)
+                Text(
+                    "Gratis, sin anuncios y sin servidores propios.\nTus libros, sellos y notas viven en tu teléfono.",
+                    style = Type.uiSmall, color = p.text2, textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+    if (catalogs) CatalogsSheet { catalogs = false }
+}

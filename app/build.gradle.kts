@@ -1,18 +1,19 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "com.sebas.zerkalo"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.sebas.zerkalo"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
-        versionName = "1.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
+        versionName = "2.0." + (System.getenv("GITHUB_RUN_NUMBER") ?: "0")
     }
 
     signingConfigs {
@@ -36,13 +37,13 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
-    kotlinOptions {
-        jvmTarget = "17"
+    buildFeatures {
+        compose = true
     }
-    androidResources {
-        // Los .epub, .woff2 y .png de la interfaz se guardan tal cual.
-        noCompress += listOf("woff2", "png", "js")
+    packaging {
+        resources.excludes += setOf("META-INF/*.kotlin_module", "META-INF/AL2.0", "META-INF/LGPL2.1", "META-INF/LICENSE*", "META-INF/NOTICE*")
     }
     lint {
         abortOnError = false
@@ -50,11 +51,39 @@ android {
     }
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
+        optIn.add("org.readium.r2.shared.ExperimentalReadiumApi")
+        optIn.add("androidx.compose.material3.ExperimentalMaterial3Api")
+    }
+}
+
 dependencies {
-    implementation("androidx.core:core-ktx:1.13.1")
-    implementation("androidx.activity:activity-ktx:1.9.2")
-    implementation("androidx.webkit:webkit:1.11.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.5")
-    implementation("androidx.work:work-runtime-ktx:2.9.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+
+    // Lector EPUB: Readium (código abierto, licencia BSD)
+    val readium = "3.1.2"
+    implementation("org.readium.kotlin-toolkit:readium-shared:$readium")
+    implementation("org.readium.kotlin-toolkit:readium-streamer:$readium")
+    implementation("org.readium.kotlin-toolkit:readium-navigator:$readium")
+
+    // Interfaz nativa
+    val compose = "1.9.4"
+    implementation("androidx.compose.ui:ui:$compose")
+    implementation("androidx.compose.foundation:foundation:$compose")
+    implementation("androidx.compose.animation:animation:$compose")
+    implementation("androidx.compose.material3:material3:1.4.0")
+    implementation("androidx.activity:activity-compose:1.10.1")
+    implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.7")
+    implementation("androidx.core:core-ktx:1.16.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.0")
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+
+    // Desenfoque progresivo (Haze, Apache 2.0) y portadas (Coil, Apache 2.0)
+    implementation("dev.chrisbanes.haze:haze:1.7.1")
+    implementation("io.coil-kt:coil-compose:2.7.0")
 }
