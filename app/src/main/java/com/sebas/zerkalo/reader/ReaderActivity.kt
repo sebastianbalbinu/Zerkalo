@@ -12,6 +12,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.content.res.Configuration
+import android.speech.tts.TextToSpeech
+import android.graphics.PointF
 import androidx.appcompat.app.AppCompatActivity
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -61,6 +65,9 @@ import org.readium.r2.shared.publication.Link
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
 import org.readium.r2.shared.publication.services.positionsByReadingOrder
+import org.readium.r2.shared.ExperimentalReadiumApi
+import kotlinx.coroutines.Job
+import java.util.Locale
 import org.readium.r2.shared.util.AbsoluteUrl
 import java.io.File
 import kotlin.math.abs
@@ -71,13 +78,24 @@ import org.readium.r2.navigator.preferences.Color as RColor
 /** Una entrada del índice, ya aplanada. */
 data class TocEntry(val title: String, val link: Link, val depth: Int)
 
-/** Tipografías del lector. La última es la del propio libro. */
-val ReaderFonts = listOf("Literata", "Mincho", "Garamond", "Gótica", "Original")
-private val fontFamilies = listOf("Literata", "Shippori Mincho", "EB Garamond", "Zen Kaku Gothic New", null)
 
 /** Colores de letra para papel oscuro. El último lo elige la persona. */
 val InkNames = listOf("Original", "Azul claro", "Blanco cálido", "Gris perla", "Ámbar suave", "Mío")
 val InkColors = listOf(0, 0xFFC7D8EA.toInt(), 0xFFEEE6D8.toInt(), 0xFFCFCBC5.toInt(), 0xFFD9C3A0.toInt(), 0)
+
+/** Una palabra (o frase) que se está traduciendo. */
+data class Lookup(
+    val text: String,
+    val sentence: String,
+    val from: String,
+    val to: String,
+    val translation: String? = null,
+    val sentenceTranslation: String? = null,
+    val status: String? = null,
+    val error: String? = null,
+    val saved: Boolean = false,
+    val locator: String = "",
+)
 
 /** Estado que ve la capa de controles (Compose). */
 class ReaderUi {
@@ -98,6 +116,12 @@ class ReaderUi {
     var finishedNow by mutableStateOf(false)
     var sheet by mutableStateOf<String?>(null) // "toc" | "type"
     var toast by mutableStateOf<Pair<String, Long>?>(null)
+    var studyTap by mutableStateOf(false)
+    var lookup by mutableStateOf<Lookup?>(null)
+    var hasPair by mutableStateOf(false)
+    var pairOn by mutableStateOf(false)
+    var pairTitle by mutableStateOf("")
+    var lang by mutableStateOf("")
     fun say(s: String) { toast = s to System.currentTimeMillis() }
 }
 
@@ -107,7 +131,21 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private var navigator: EpubNavigatorFragment? = null
     private val ui = ReaderUi()
     private val containerId = View.generateViewId()
+    private val pairId = View.generateViewId()
     private lateinit var root: FrameLayout
+    private lateinit var panes: LinearLayout
+    private lateinit var pairContainer: FragmentContainerView
+    private lateinit var divider: View
+
+    // La misma obra en otro idioma
+    private var pairBook: Book? = null
+    private var pairPub: Publication? = null
+    private var pairNav: EpubNavigatorFragment? = null
+    private var pairPositions: List<List<Locator>> = emptyList()
+    private var pairLang = ""
+    private var lookupJob: Job? = null
+    private var tts: TextToSpeech? = null
+    private var ttsReady = false
 
     private var positions: List<List<Locator>> = emptyList()
     private var lastPosition = 0
@@ -126,9 +164,18 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        ui.studyTap = Prefs.studyTap
         root = FrameLayout(this)
+        // Dos paneles: el libro y, si se activa, su versión en otro idioma (al lado o debajo).
+        panes = LinearLayout(this)
         val container = FragmentContainerView(this).apply { id = containerId }
-        root.addView(container, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        pairContainer = FragmentContainerView(this).apply { id = pairId; visibility = View.GONE }
+        divider = View(this).apply { visibility = View.GONE }
+        panes.addView(container)
+        panes.addView(divider)
+        panes.addView(pairContainer)
+        layoutPanes(resources.configuration)
+        root.addView(panes, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val overlay = ComposeView(this).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent { ReaderOverlay(ui, actions) }
@@ -136,7 +183,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         root.addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         setContentView(root)
         // El texto queda siempre dentro de la zona segura, aunque las barras se oculten (sin saltos).
-        ViewCompat.setOnApplyWindowInsetsListener(container) { v, insets ->
+        ViewCompat.setOnApplyWindowInsetsListener(panes) { v, insets ->
             val i = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             v.setPadding(i.left, i.top, i.right, i.bottom)
             insets
@@ -144,6 +191,23 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         applyPaper()
         applyBrightness(ui.settings.brightness)
         lifecycleScope.launch { open() }
+    }
+
+    /** Vertical: un libro encima del otro. Horizontal: uno al lado del otro. */
+    private fun layoutPanes(c: Configuration) {
+        val landscape = c.orientation == Configuration.ORIENTATION_LANDSCAPE
+        panes.orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        val w = if (landscape) 0 else ViewGroup.LayoutParams.MATCH_PARENT
+        val h = if (landscape) ViewGroup.LayoutParams.MATCH_PARENT else 0
+        val line = (resources.displayMetrics.density).toInt().coerceAtLeast(1)
+        panes.getChildAt(0).layoutParams = LinearLayout.LayoutParams(w, h, 1f)
+        divider.layoutParams = if (landscape) LinearLayout.LayoutParams(line, ViewGroup.LayoutParams.MATCH_PARENT) else LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, line)
+        pairContainer.layoutParams = LinearLayout.LayoutParams(w, h, 1f)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (::panes.isInitialized) layoutPanes(newConfig)
     }
 
     private suspend fun open() {
@@ -154,6 +218,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             return
         }
         publication = pub
+        ui.lang = book.lang.ifBlank { pub.metadata.languages.firstOrNull().orEmpty() }.ifBlank { "en" }
         ui.toc = flatten(pub.tableOfContents, 0)
         val initial = book.locator?.let { runCatching { Locator.fromJSON(JSONObject(it)) }.getOrNull() }
         val factory = EpubNavigatorFactory(pub, EpubNavigatorFactory.Configuration(defaults = EpubDefaults(pageMargins = 1.2)))
@@ -161,27 +226,14 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             initialLocator = initial,
             initialPreferences = preferences(ui.settings, ui.palette),
             listener = this,
-            configuration = EpubNavigatorFragment.Configuration {
-                servedAssets = listOf("fonts/.*")
-                selectionActionModeCallback = selectionCallback
-                declareFont("Literata", "fonts/literata_400_normal.ttf", "fonts/literata_400_italic.ttf", "fonts/literata_500_normal.ttf")
-                declareFont("Shippori Mincho", "fonts/shippori_mincho_400_normal.ttf", null, "fonts/shippori_mincho_600_normal.ttf")
-                declareFont("EB Garamond", "fonts/eb_garamond_400_normal.ttf", "fonts/eb_garamond_400_italic.ttf", null)
-                declareFont("Zen Kaku Gothic New", "fonts/zen_kaku_gothic_new_400_normal.ttf", null, "fonts/zen_kaku_gothic_new_700_normal.ttf")
-            },
+            configuration = navConfig(),
         )
         supportFragmentManager.commitNow {
             add(containerId, EpubNavigatorFragment::class.java, Bundle(), "lector")
         }
         val nav = supportFragmentManager.findFragmentByTag("lector") as EpubNavigatorFragment
         navigator = nav
-        nav.addInputListener(object : InputListener {
-            override fun onTap(event: TapEvent): Boolean {
-                val w = nav.publicationView.width.toFloat().coerceAtLeast(1f)
-                val x = event.point.x / w
-                return if (x in 0.3f..0.7f) { setControls(!ui.controls); true } else { if (ui.controls) setControls(false); false }
-            }
-        })
+        nav.addInputListener(tapListener(nav, pair = false))
         nav.addInputListener(DirectionalNavigationAdapter(nav, animatedTransition = true))
         nav.addDecorationListener("subrayados", object : DecorableNavigator.Listener {
             override fun onDecorationActivated(event: DecorableNavigator.OnActivatedEvent): Boolean {
@@ -208,7 +260,35 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         }
         ui.loading = false
         Log.i("Zerkalo", "ZK_READER_OK ${book.title}")
+        refreshPairInfo()
+        if (ui.hasPair && Prefs.pairOn(book.id)) showPair(true)
         lifecycleScope.launch { delay(1600); setControls(false) }
+    }
+
+    private fun navConfig() = EpubNavigatorFragment.Configuration {
+        servedAssets = listOf("fonts/.*")
+        selectionActionModeCallback = selectionCallback
+        val files = FontFiles.available(this@ReaderActivity).toSet()
+        ReaderFonts.forEachIndexed { i, f ->
+            if (f.css != null && f.regular != null && i in files) declareFont(f.css, "fonts/${f.regular}", f.italic?.let { "fonts/$it" }, f.bold?.let { "fonts/$it" })
+        }
+    }
+
+    /** Toques: en el centro muestran u ocultan los controles; en modo estudio, tocar una palabra la traduce. */
+    private fun tapListener(nav: EpubNavigatorFragment, pair: Boolean) = object : InputListener {
+        override fun onTap(event: TapEvent): Boolean {
+            val w = nav.publicationView.width.toFloat().coerceAtLeast(1f)
+            val x = event.point.x / w
+            if (ui.studyTap && x in 0.16f..0.84f) {
+                lifecycleScope.launch {
+                    if (!lookUpAt(nav, event.point, if (pair) pairLang else ui.lang)) {
+                        if (ui.lookup != null) { lookupJob?.cancel(); ui.lookup = null } else setControls(!ui.controls)
+                    }
+                }
+                return true
+            }
+            return if (x in 0.3f..0.7f) { setControls(!ui.controls); true } else { if (ui.controls) setControls(false); false }
+        }
     }
 
     private fun EpubNavigatorFragment.Configuration.declareFont(name: String, regular: String, italic: String?, bold: String?) {
@@ -245,6 +325,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val pos = loc.locations.position
         ui.bookmarked = pos != null && ui.marks.any { it.type == "shiori" && posOf(it) == pos }
         ui.chapterLeft = chapterLeft(pos)
+        if (turn) syncPair(loc)
         val json = loc.toJSON().toString()
         Library.update(book.id) { it.copy(progress = total.toDouble(), locator = json, lastOpened = now) }
         val last = positions.lastOrNull()?.lastOrNull()?.locations?.position
@@ -303,6 +384,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private fun applyPaper() {
         val p = ui.palette
         root.setBackgroundColor(p.bg.toArgb())
+        divider.setBackgroundColor(p.line.toArgb())
         window.decorView.setBackgroundColor(p.bg.toArgb())
         val c = WindowInsetsControllerCompat(window, root)
         c.isAppearanceLightStatusBars = !p.isDark
@@ -310,17 +392,19 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     }
 
     private fun preferences(r: ReaderSettings, p: Palette): EpubPreferences {
-        val fam = fontFamilies.getOrNull(r.font)
+        val fam = ReaderFonts.getOrNull(r.font)?.css
+        // Los estilos del libro se desactivan siempre: si no, el libro manda sobre el justificado
+        // y el interlineado (con la letra "Original" se conserva su tipografía).
         return EpubPreferences(
             backgroundColor = RColor(p.bg.toArgb()),
             textColor = RColor(p.text.toArgb()),
             fontFamily = fam?.let { FontFamily(it) },
             fontSize = r.size / 100.0,
-            lineHeight = if (fam == null) null else r.lineHeight.toDouble(),
+            lineHeight = r.lineHeight.toDouble(),
             pageMargins = listOf(0.75, 1.15, 1.6).getOrElse(r.margin) { 1.15 },
-            textAlign = if (fam == null) null else if (r.justify) TextAlign.JUSTIFY else TextAlign.START,
-            hyphens = if (fam == null) null else r.justify,
-            publisherStyles = fam == null,
+            textAlign = if (r.justify) TextAlign.JUSTIFY else TextAlign.START,
+            hyphens = r.justify,
+            publisherStyles = false,
             scroll = r.scroll,
         )
     }
@@ -342,6 +426,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         if (old.copy(brightness = r.brightness, warmth = r.warmth) == r) return
         applyPaper()
         navigator?.submitPreferences(preferences(r, ui.palette))
+        pairNav?.submitPreferences(preferences(r, ui.palette))
         lifecycleScope.launch { applyHighlights() }
     }
 
@@ -386,7 +471,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
             menu.add(Menu.NONE, 101, 0, "Subrayar")
             menu.add(Menu.NONE, 102, 1, "Nota")
-            menu.add(Menu.NONE, 103, 2, "Copiar")
+            menu.add(Menu.NONE, 104, 2, "Traducir")
+            menu.add(Menu.NONE, 103, 3, "Copiar")
             return true
         }
         override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
@@ -394,6 +480,15 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             when (item.itemId) {
                 101 -> highlight(0)
                 102 -> highlight(1, note = "")
+                104 -> lifecycleScope.launch {
+                    // La selección puede estar en cualquiera de los dos paneles.
+                    val (nav, lang) = listOfNotNull(navigator?.let { it to ui.lang }, pairNav?.let { it to pairLang })
+                        .firstOrNull { it.first.currentSelection() != null } ?: return@launch
+                    val sel = nav.currentSelection() ?: return@launch
+                    nav.clearSelection()
+                    val t = sel.locator.text.highlight?.trim().orEmpty()
+                    if (t.isNotEmpty()) startLookup(t, sel.locator.text.before.orEmpty().takeLast(160) + t + sel.locator.text.after.orEmpty().take(160), lang, sel.locator.toJSON().toString())
+                }
                 103 -> lifecycleScope.launch {
                     val t = navigator?.currentSelection()?.locator?.text?.highlight.orEmpty()
                     (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Zerkalo", t))
@@ -417,6 +512,20 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         saveNote = { loc, note -> saveHighlight(loc, 1, note); ui.noteFor = null },
         recolor = { m, c -> Library.putMark(m.copy(color = c)); ui.activeMark = null; refreshMarks() },
         seek = { f -> seek(f) },
+        toggleStudy = {
+            ui.studyTap = !ui.studyTap; Prefs.studyTap = ui.studyTap
+            ui.say(if (ui.studyTap) "Toca una palabra para traducirla" else "Modo estudio apagado")
+            if (ui.studyTap) setControls(false)
+        },
+        closeLookup = { lookupJob?.cancel(); ui.lookup = null },
+        retarget = { to -> Prefs.translateTo = to; ui.lookup?.let { startLookup(it.text, it.sentence, it.from, it.locator) } },
+        translateSentence = { translateSentence() },
+        saveWord = { saveWord() },
+        speak = { t, lang -> speak(t, lang) },
+        pairCandidates = { Library.books.value.filter { it.id != book.id }.sortedWith(compareByDescending<Book> { it.author.isNotBlank() && it.author == book.author }.thenByDescending { it.lang.isNotBlank() && it.lang != book.lang }.thenByDescending { it.lastOpened }) },
+        setPair = { other -> setPair(other) },
+        togglePair = { showPair(!ui.pairOn) },
+        syncPair = { navigator?.currentLocator?.value?.let { syncPair(it, force = true) } },
     )
 
     private fun toggleShiori() {
@@ -446,6 +555,137 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         navigator?.go(target, animated = false)
     }
 
+    // ---------------- traducir ----------------
+    @OptIn(ExperimentalReadiumApi::class)
+    private suspend fun lookUpAt(nav: EpubNavigatorFragment, point: PointF, lang: String): Boolean {
+        val js = WORD_AT_POINT.replace("__X__", point.x.toString()).replace("__Y__", point.y.toString())
+        val raw = runCatching { nav.evaluateJavascript(js) }.getOrNull()
+        if (raw.isNullOrBlank() || raw == "null") return false
+        val o = runCatching { JSONObject(raw) }.getOrNull() ?: return false
+        val word = o.optString("w").trim()
+        if (word.isEmpty()) return false
+        startLookup(word, o.optString("s"), lang, nav.currentLocator.value.toJSON().toString())
+        return true
+    }
+
+    private fun startLookup(text: String, sentence: String, from: String, locator: String) {
+        val to = Traductor.targetFor(from)
+        lookupJob?.cancel()
+        ui.lookup = Lookup(text, sentence.replace(Regex("\\s+"), " ").trim(), from, to, status = "Traduciendo…", locator = locator)
+        lookupJob = lifecycleScope.launch {
+            runCatching {
+                if (Traductor.needsDownload(from, to)) ui.lookup = ui.lookup?.copy(status = "Bajando ${Traductor.name(from.substringBefore('-'))} y ${Traductor.name(to)} (solo esta vez, unos 30 MB)…")
+                Traductor.translate(text, from, to)
+            }.onSuccess { t -> ui.lookup = ui.lookup?.copy(translation = t, status = null) }
+                .onFailure { e -> if (e !is kotlinx.coroutines.CancellationException) ui.lookup = ui.lookup?.copy(status = null, error = e.message ?: "No se pudo traducir. Revisa la conexión la primera vez.") }
+        }
+    }
+
+    private fun translateSentence() {
+        val l = ui.lookup ?: return
+        if (l.sentence.isBlank() || l.sentenceTranslation != null) return
+        ui.lookup = l.copy(sentenceTranslation = "…")
+        lifecycleScope.launch {
+            val t = runCatching { Traductor.translate(l.sentence, l.from, l.to) }.getOrElse { "No se pudo traducir la frase." }
+            ui.lookup = ui.lookup?.copy(sentenceTranslation = t)
+        }
+    }
+
+    private fun saveWord() {
+        val l = ui.lookup ?: return
+        if (l.saved || l.translation == null) return
+        Library.putMark(
+            Mark(
+                id = "w" + System.currentTimeMillis().toString(36), bookId = book.id, type = "word", locator = l.locator,
+                text = l.text, note = l.translation, chapter = ui.chapter, progress = ui.progress.toDouble(), context = l.sentence,
+            ),
+        )
+        ui.lookup = l.copy(saved = true)
+    }
+
+    private fun speak(text: String, lang: String) {
+        val say = {
+            tts?.setLanguage(Locale.forLanguageTag(lang))
+            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "zk")
+        }
+        if (tts != null && ttsReady) { say(); return }
+        tts = TextToSpeech(this) { st ->
+            ttsReady = st == TextToSpeech.SUCCESS
+            if (ttsReady) say() else ui.say("Tu teléfono no tiene voz para este idioma")
+        }
+    }
+
+    // ---------------- dos idiomas ----------------
+    private fun refreshPairInfo() {
+        pairBook = Library.book(Library.book(book.id)?.pair)
+        ui.hasPair = pairBook != null
+        ui.pairTitle = pairBook?.let { b -> b.title + (b.lang.takeIf { it.isNotBlank() }?.let { " · " + Traductor.name(it) } ?: "") }.orEmpty()
+    }
+
+    private fun setPair(other: Book?) {
+        val old = Library.book(book.id)?.pair
+        if (old != null && old != other?.id) Library.update(old) { if (it.pair == book.id) it.copy(pair = null) else it }
+        Library.update(book.id) { it.copy(pair = other?.id) }
+        other?.let { o -> Library.update(o.id) { it.copy(pair = book.id) } }
+        if (ui.pairOn) showPair(false)
+        refreshPairInfo()
+        if (other != null) showPair(true)
+    }
+
+    private fun showPair(on: Boolean) {
+        if (!on) {
+            ui.pairOn = false; Prefs.setPairOn(book.id, false)
+            pairContainer.visibility = View.GONE; divider.visibility = View.GONE
+            pairNav?.let { f -> supportFragmentManager.commitNow { remove(f) } }
+            pairNav = null; runCatching { pairPub?.close() }; pairPub = null
+            return
+        }
+        val other = pairBook ?: return
+        lifecycleScope.launch {
+            val core = (application as ZerkaloApp).readium
+            val pub = core.open(File(Library.booksDir, other.file)).getOrElse { ui.say("No se pudo abrir «${other.title}»"); return@launch }
+            pairPub = pub
+            pairLang = other.lang.ifBlank { pub.metadata.languages.firstOrNull().orEmpty() }.ifBlank { "en" }
+            val start = navigator?.currentLocator?.value?.let { mapLocator(it, publication ?: pub, pub) }
+                ?: other.locator?.let { runCatching { Locator.fromJSON(JSONObject(it)) }.getOrNull() }
+            val ff = EpubNavigatorFactory(pub, EpubNavigatorFactory.Configuration(defaults = EpubDefaults(pageMargins = 1.2)))
+                .createFragmentFactory(initialLocator = start, initialPreferences = preferences(ui.settings, ui.palette), listener = this@ReaderActivity, configuration = navConfig())
+            val frag = ff.instantiate(classLoader, EpubNavigatorFragment::class.java.name) as EpubNavigatorFragment
+            pairContainer.visibility = View.VISIBLE; divider.visibility = View.VISIBLE
+            supportFragmentManager.commitNow { replace(pairId, frag, "pareja") }
+            pairNav = frag
+            frag.addInputListener(tapListener(frag, pair = true))
+            frag.addInputListener(DirectionalNavigationAdapter(frag, animatedTransition = true))
+            ui.pairOn = true; Prefs.setPairOn(book.id, true)
+            pairPositions = runCatching { pub.positionsByReadingOrder() }.getOrDefault(emptyList())
+            navigator?.currentLocator?.value?.let { syncPair(it, force = true) }
+        }
+    }
+
+    /** Lleva la otra versión al mismo punto: mismo capítulo si ambas tienen la misma estructura; si no, la misma proporción del libro. */
+    private fun syncPair(loc: Locator, force: Boolean = false) {
+        val pn = pairNav ?: return
+        val pp = pairPub ?: return
+        val mp = publication ?: return
+        val target = mapLocator(loc, mp, pp) ?: return
+        val cur = pn.currentLocator.value
+        if (!force && cur.href.toString() == target.href.toString() && abs((cur.locations.progression ?: 0.0) - (target.locations.progression ?: 0.0)) < 0.01) return
+        pn.go(target, animated = false)
+    }
+
+    private fun mapLocator(loc: Locator, from: Publication, to: Publication): Locator? {
+        val href = loc.href.toString().substringBefore('#')
+        val idx = from.readingOrder.indexOfFirst { it.url().toString().substringBefore('#') == href }
+        val prog = loc.locations.progression ?: 0.0
+        if (idx >= 0 && from.readingOrder.size == to.readingOrder.size) {
+            return to.locatorFromLink(to.readingOrder[idx])?.copyWithLocations(progression = prog)
+        }
+        val total = loc.locations.totalProgression ?: return null
+        val all = (if (to === pairPub) pairPositions else positions).flatten()
+        if (all.isEmpty()) return to.readingOrder.getOrNull(((to.readingOrder.size - 1) * total).toInt())?.let { to.locatorFromLink(it) }
+        return all[((all.size - 1) * total).toInt().coerceIn(0, all.size - 1)]
+    }
+
     override fun onResume() {
         super.onResume()
         lastEvent = System.currentTimeMillis()
@@ -463,6 +703,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     override fun onDestroy() {
         super.onDestroy()
         runCatching { publication?.close() }
+        runCatching { pairPub?.close() }
+        runCatching { tts?.shutdown() }
     }
 
     // ---------------- EpubNavigatorFragment.Listener ----------------
@@ -486,4 +728,39 @@ class ReaderActions(
     val saveNote: (Locator, String) -> Unit,
     val recolor: (Mark, Int) -> Unit,
     val seek: (Float) -> Unit,
+    val toggleStudy: () -> Unit,
+    val closeLookup: () -> Unit,
+    val retarget: (String) -> Unit,
+    val translateSentence: () -> Unit,
+    val saveWord: () -> Unit,
+    val speak: (String, String) -> Unit,
+    val pairCandidates: () -> List<Book>,
+    val setPair: (Book?) -> Unit,
+    val togglePair: () -> Unit,
+    val syncPair: () -> Unit,
 )
+
+/** Busca la palabra bajo el dedo y su frase. Las coordenadas llegan en píxeles físicos. */
+private const val WORD_AT_POINT = """(function(){
+  var d = window.devicePixelRatio || 1, x = __X__ / d, y = __Y__ / d;
+  var r = document.caretRangeFromPoint ? document.caretRangeFromPoint(x, y) : null;
+  if (!r) return null;
+  var n = r.startContainer; if (!n || n.nodeType !== 3) return null;
+  var t = n.textContent, i = r.startOffset, re = /[\p{L}\p{M}\p{N}'’\-]/u;
+  if (i >= t.length || !re.test(t[i])) { if (i > 0 && re.test(t[i-1])) i--; else return null; }
+  var s = i, e = i;
+  while (s > 0 && re.test(t[s-1])) s--;
+  while (e < t.length && re.test(t[e])) e++;
+  var wr = document.createRange(); wr.setStart(n, s); wr.setEnd(n, e);
+  var b = wr.getBoundingClientRect();
+  if (x < b.left - 6 || x > b.right + 6 || y < b.top - 6 || y > b.bottom + 6) return null;
+  var w = t.slice(s, e).replace(/^['’\-]+|['’\-]+$/g, '');
+  var block = n.parentElement.closest('p,li,dd,dt,blockquote,h1,h2,h3,h4,h5,h6,td,div') || n.parentElement;
+  var full = block.textContent || '';
+  var pre = document.createRange(); pre.setStart(block, 0); pre.setEnd(n, s);
+  var off = pre.toString().length;
+  var a = 0; for (var k = off - 1; k >= 0; k--) { if ('.!?…\n'.indexOf(full[k]) >= 0) { a = k + 1; break; } }
+  var m = full.slice(off + w.length).search(/[.!?…\n]/);
+  var z = m < 0 ? full.length : off + w.length + m + 1;
+  return { w: w, s: full.slice(a, z).replace(/\s+/g, ' ').trim().slice(0, 500) };
+})()"""
