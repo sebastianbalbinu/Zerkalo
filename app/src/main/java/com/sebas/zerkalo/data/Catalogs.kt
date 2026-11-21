@@ -8,6 +8,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -109,30 +110,45 @@ object Catalogs {
      * El índice semanal de libros de Gutenberg para un idioma. Viene dentro de la app y se
      * renueva solo desde GitHub una vez por semana. Si no hay, devuelve null.
      */
+    private val indexLock = kotlinx.coroutines.sync.Mutex()
+
     private suspend fun gutenbergIndex(lang: String): List<IndexBook>? = withContext(Dispatchers.IO) {
         synchronized(indexes) { indexes[lang] }?.let { return@withContext it }
-        val file = File(indexDir, "gutenberg-$lang.json.gz")
-        if (!file.exists() || System.currentTimeMillis() - file.lastModified() > WEEK) {
-            runCatching { Net.download(listOf(INDEX_URL.format(lang)), file, zip = false) { } }
-                .onFailure { android.util.Log.w("Zerkalo", "ZK_INDICE $lang no se pudo renovar: ${it.message}") }
-        }
-        val bytes = when {
-            file.exists() -> file.readBytes()
-            else -> runCatching { appContext.assets.open("catalogo/gutenberg-$lang.json.gz").use { it.readBytes() } }.getOrNull()
-        } ?: return@withContext null
-        val list = runCatching {
-            val o = JSONObject(java.util.zip.GZIPInputStream(bytes.inputStream()).bufferedReader().use { it.readText() })
-            val arr = o.getJSONArray("books")
-            (0 until arr.length()).map { i ->
-                val b = arr.getJSONArray(i)
-                val t = b.optString(1); val a = b.optString(2)
-                IndexBook(b.optInt(0), t, a, b.optInt(3), b.optInt(4), b.optString(5), norm("$t $a"))
+        // Una sola carga a la vez: varias filas del Tansu piden el índice al mismo tiempo.
+        indexLock.withLock {
+            synchronized(indexes) { indexes[lang] }?.let { return@withLock it }
+            val file = File(indexDir, "gutenberg-$lang.json.gz")
+            if (!file.exists() || System.currentTimeMillis() - file.lastModified() > WEEK) {
+                val tmp = File(indexDir, "gutenberg-$lang.nuevo")
+                runCatching {
+                    Net.download(listOf(INDEX_URL.format(lang)), tmp, zip = false) { }
+                    if (!isGzip(tmp) || parseIndex(tmp.readBytes()) == null) throw NetError("archivo inválido")
+                    tmp.copyTo(file, overwrite = true)
+                }.onFailure { android.util.Log.w("Zerkalo", "ZK_INDICE $lang no se pudo renovar: ${it.message}") }
+                tmp.delete()
             }
-        }.getOrNull() ?: return@withContext null
-        android.util.Log.i("Zerkalo", "ZK_INDICE $lang ${list.size} libros")
-        synchronized(indexes) { indexes[lang] = list }
-        list
+            val list = (if (file.exists()) parseIndex(file.readBytes()) else null)
+                ?: runCatching { appContext.assets.open("catalogo/gutenberg-$lang.json.gz").use { it.readBytes() } }.getOrNull()?.let { parseIndex(it) }
+                ?: return@withLock null
+            android.util.Log.i("Zerkalo", "ZK_INDICE $lang ${list.size} libros")
+            synchronized(indexes) { indexes[lang] = list }
+            list
+        }
     }
+
+    private fun isGzip(f: File): Boolean = runCatching {
+        f.inputStream().use { val b = ByteArray(2); it.read(b) == 2 && b[0] == 0x1f.toByte() && b[1] == 0x8b.toByte() }
+    }.getOrDefault(false)
+
+    private fun parseIndex(bytes: ByteArray): List<IndexBook>? = runCatching {
+        val o = JSONObject(java.util.zip.GZIPInputStream(bytes.inputStream()).bufferedReader().use { it.readText() })
+        val arr = o.getJSONArray("books")
+        (0 until arr.length()).map { i ->
+            val b = arr.getJSONArray(i)
+            val t = b.optString(1); val a = b.optString(2)
+            IndexBook(b.optInt(0), t, a, b.optInt(3), b.optInt(4), b.optString(5), norm("$t $a"))
+        }
+    }.getOrNull()
 
     private fun IndexBook.toItem(lang: String) = CatalogItem(
         key = "pg:$id", source = "Project Gutenberg", title = title, author = author, lang = lang,
