@@ -21,6 +21,7 @@ class ZerkaloApp : Application(), ImageLoaderFactory {
         Catalogs.init(this)
         com.sebas.zerkalo.data.AudioStore.init(this)
         com.sebas.zerkalo.data.Explore.init(this)
+        com.sebas.zerkalo.data.Scanner.init(this)
     }
 
     /** Portadas: caché en memoria pequeña y caché en disco, para que el Tansu vuele la segunda vez. */

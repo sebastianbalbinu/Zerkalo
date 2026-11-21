@@ -55,6 +55,8 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.readium.r2.navigator.DecorableNavigator
 import org.readium.r2.navigator.Decoration
+import org.readium.r2.navigator.html.HtmlDecorationTemplate
+import org.readium.r2.navigator.html.HtmlDecorationTemplates
 import org.readium.r2.navigator.epub.EpubDefaults
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
@@ -280,7 +282,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                nav.currentLocator.collect { onLocator(it) }
+                nav.currentLocator.collect { onLocator(it); typeset(nav) }
             }
         }
         lifecycleScope.launch {
@@ -319,10 +321,31 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         // Readium cambiaba de capítulo con cualquier gesto un poco de lado y siempre volvía al inicio.
         disablePageTurnsWhileScrolling = true
         shouldApplyInsetsPadding = false
+        // Subrayados que parecen hechos a mano: tinta transparente que tiñe el papel, sin tapar la letra
+        decorationTemplates = HtmlDecorationTemplates.defaultTemplates().also { t ->
+            t[Decoration.Style.Highlight::class] = HtmlDecorationTemplate(
+                layout = HtmlDecorationTemplate.Layout.BOXES,
+                width = HtmlDecorationTemplate.Width.WRAP,
+                element = { deco -> markElement(deco) },
+                stylesheet = MARK_CSS,
+            )
+        }
         val files = FontFiles.available(this@ReaderActivity).toSet()
         ReaderFonts.forEachIndexed { i, f ->
             if (f.css != null && f.regular != null && i in files) declareFont(f.css, "fonts/${f.regular}", f.italic?.let { "fonts/$it" }, f.bold?.let { "fonts/$it" })
         }
+    }
+
+    private fun markElement(deco: Decoration): String {
+        val c = (deco.style as? Decoration.Style.Highlight)?.tint ?: 0xFFE2BE52.toInt()
+        val dark = ui.palette.isDark
+        val kind = ui.settings.markStyle
+        val a = when (kind) { 1, 2 -> 0.9; else -> if (dark) 0.34 else 0.5 }
+        val rgba = "rgba(${(c shr 16) and 255},${(c shr 8) and 255},${c and 255},$a)"
+        val cls = when (kind) { 1 -> "zk-pen"; 2 -> "zk-wave"; else -> if (dark) "zk-mk zk-dark" else "zk-mk" }
+        // La forma cambia un poco en cada línea, como un trazo de verdad
+        val v = (deco.id.hashCode() and 3)
+        return "<div class=\"$cls zk-v$v\" style=\"--c:$rgba\"></div>"
     }
 
     /**
@@ -520,9 +543,11 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         val nav = navigator
         if (nav != null && ui.sheet == null) {
+            // Con el menú abierto, los botones de volumen vuelven a ser solo volumen (para bajar la música)
+            val volTurns = ui.settings.volumeKeys && !ui.controls && ui.lookup == null
             val dir = when (event.keyCode) {
-                KeyEvent.KEYCODE_VOLUME_DOWN -> if (ui.settings.volumeKeys) 1 else 0
-                KeyEvent.KEYCODE_VOLUME_UP -> if (ui.settings.volumeKeys) -1 else 0
+                KeyEvent.KEYCODE_VOLUME_DOWN -> if (volTurns) 1 else 0
+                KeyEvent.KEYCODE_VOLUME_UP -> if (volTurns) -1 else 0
                 KeyEvent.KEYCODE_PAGE_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_SPACE -> 1
                 KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_DPAD_LEFT -> -1
                 else -> 0
@@ -660,15 +685,45 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             fontFamily = fam?.let { FontFamily(it) },
             fontSize = r.size / 100.0,
             lineHeight = r.lineHeight.toDouble(),
-            pageMargins = listOf(0.75, 1.15, 1.6).getOrElse(r.margin) { 1.15 },
-            textAlign = if (r.justify) TextAlign.JUSTIFY else TextAlign.START,
-            hyphens = r.justify,
-            publisherStyles = false,
+            pageMargins = pageMargins(r),
+            textAlign = if (r.justify && !r.dyslexia) TextAlign.JUSTIFY else TextAlign.START,
+            hyphens = r.justify && !r.dyslexia,
+            // Original: manda el diseño del libro (Zerkalo solo corrige lo que se rompe y respeta tu justificado)
+            publisherStyles = r.layout == 0,
             scroll = r.scroll,
             paragraphSpacing = listOf(null, 0.6, 1.2).getOrNull(r.paragraph),
             letterSpacing = listOf(null, 0.06, 0.14).getOrNull(r.spacing),
             wordSpacing = listOf(null, 0.15, 0.3).getOrNull(r.spacing),
         )
+    }
+
+    /**
+     * Márgenes de los lados. En modo Zerkalo se achican cuando la letra crece, para que la línea
+     * siga teniendo un largo cómodo (y los versos quepan) en vez de quedar con 4 palabras.
+     */
+    private fun pageMargins(r: ReaderSettings): Double {
+        val base = listOf(0.75, 1.15, 1.6).getOrElse(r.margin) { 1.15 }
+        if (r.layout != 1 || r.size <= 100) return base
+        return (base * Math.pow(100.0 / r.size, 0.9)).coerceAtLeast(0.45)
+    }
+
+    // ---------------- diagramación ----------------
+    private val typesetHref = HashMap<EpubNavigatorFragment, String>()
+
+    /** Aplica la diagramación de Zerkalo al capítulo que se ve (una vez por capítulo y al cambiar ajustes). */
+    private fun typeset(nav: EpubNavigatorFragment, force: Boolean = false) {
+        val href = nav.currentLocator.value.href.toString()
+        if (!force && typesetHref[nav] == href) return
+        typesetHref[nav] = href
+        val lang = if (nav === pairNav) pairLang else ui.lang
+        lifecycleScope.launch {
+            // Dos pasadas: al aparecer el capítulo y cuando ya cargaron las letras e imágenes
+            for (wait in listOf(60L, 700L)) {
+                delay(wait)
+                val r = runCatching { nav.evaluateJavascript(Typeset.script(ui.settings, lang)) }.getOrNull()
+                if (wait == 60L) Log.i("Zerkalo", "ZK_TYPESET $href $r")
+            }
+        }
     }
 
     /** Brillo propio del lector (no cambia el del sistema). */
@@ -701,7 +756,14 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         applyPaper()
         navigator?.submitPreferences(preferences(r, ui.palette))
         pairNav?.submitPreferences(preferences(r, ui.palette))
-        lifecycleScope.launch { applyHighlights() }
+        lifecycleScope.launch {
+            // Readium rehace las páginas; después se vuelve a diagramar con los ajustes nuevos
+            delay(250)
+            navigator?.let { typeset(it, force = true) }
+            pairNav?.let { typeset(it, force = true) }
+            if (old.markStyle != r.markStyle || old.paper != r.paper) runCatching { navigator?.applyDecorations(emptyList(), "subrayados") }
+            applyHighlights()
+        }
     }
 
     // ---------------- subrayados y shiori ----------------
@@ -709,7 +771,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val nav = navigator ?: return
         val decos = ui.marks.filter { it.type == "hl" }.mapNotNull { m ->
             val loc = runCatching { Locator.fromJSON(JSONObject(m.locator)) }.getOrNull() ?: return@mapNotNull null
-            val tint = highlightColor(m.color).copy(alpha = if (ui.palette.isDark) 0.45f else 0.55f).toArgb()
+            val tint = highlightColor(m.color).toArgb()
             Decoration(id = m.id, locator = loc, style = Decoration.Style.Highlight(tint = tint))
         }
         runCatching { nav.applyDecorations(decos, "subrayados") }
@@ -943,6 +1005,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             supportFragmentManager.commitNow { replace(pairId, frag, "pareja") }
             pairNav = frag
             frag.addInputListener(tapListener(frag, pair = true))
+            lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { frag.currentLocator.collect { typeset(frag) } } }
             ui.pairOn = true; Prefs.setPairOn(book.id, true)
             pairPositions = runCatching { pub.positionsByReadingOrder() }.getOrDefault(emptyList())
             navigator?.currentLocator?.value?.let { syncPair(it, force = true) }
@@ -1067,16 +1130,65 @@ private const val AUTO_STATE = """(function(){
 private const val AUTO_PAUSE = "(function(){ if (window.__zk) window.__zk.on = false; return 'paused'; })()"
 private const val AUTO_STOP = "(function(){ window.__zk = null; return 'off'; })()"
 
-/** Desplaza una pantalla (menos dos líneas). Devuelve "edge" si ya está al final o al inicio del capítulo. */
+/**
+ * Desplaza una pantalla sin dejar líneas cortadas: la última línea que se veía (entera o mordida)
+ * pasa a ser la primera, así nunca se pierde el hilo. Un título al final baja completo.
+ * Devuelve "edge" si ya está al final o al inicio del capítulo.
+ */
 private const val SCROLL_BY = """(function(){
-  var d = __D__, se = document.scrollingElement || document.documentElement, h = window.innerHeight;
+  var d = __D__, se = document.scrollingElement || document.documentElement, h = window.innerHeight, w = window.innerWidth;
   var lh = parseFloat(getComputedStyle(document.body).lineHeight) || 26;
   var max = se.scrollHeight - h;
   if (d > 0 && se.scrollTop >= max - 4) return 'edge';
   if (d < 0 && se.scrollTop <= 4) return 'edge';
-  window.scrollBy({ top: d * (h - 2 * lh), behavior: '__S__' });
+  function lineAt(y) {
+    var xs = [0.1, 0.25, 0.4, 0.55, 0.7, 0.85];
+    for (var i = 0; i < xs.length; i++) {
+      var r = document.caretRangeFromPoint ? document.caretRangeFromPoint(w * xs[i], y) : null;
+      if (!r) continue;
+      var n = r.startContainer;
+      if (!n || n.nodeType !== 3 || !n.textContent.trim()) continue;
+      var o = r.startOffset, len = n.textContent.length;
+      if (o < len) r.setEnd(n, o + 1); else if (o > 0) r.setStart(n, o - 1); else continue;
+      var b = r.getBoundingClientRect();
+      if (!b || b.height <= 0 || b.top > y + 3 || b.bottom < y - 3) continue;
+      var hd = n.parentElement && n.parentElement.closest('h1,h2,h3,h4,h5,h6');
+      if (hd) { var hb = hd.getBoundingClientRect(); return { top: hb.top, bottom: hb.bottom }; }
+      return { top: b.top - (lh - b.height) / 2, bottom: b.bottom + (lh - b.height) / 2 };
+    }
+    return null;
+  }
+  var delta, pad = Math.min(6, lh * 0.2);
+  if (d > 0) {
+    var y = h - 2, L = null;
+    for (var k = 0; k < 8 && !L; k++) { L = lineAt(y); y -= lh / 3; }
+    delta = L ? L.top - pad : h - 2 * lh;
+    if (delta < h * 0.45) delta = h - 2 * lh;
+  } else {
+    var y2 = 2, F = null;
+    for (var j = 0; j < 8 && !F; j++) { F = lineAt(y2); y2 += lh / 3; }
+    delta = F ? -(h - F.bottom - pad) : -(h - 2 * lh);
+    if (-delta < h * 0.45) delta = -(h - 2 * lh);
+  }
+  window.scrollBy({ top: Math.round(delta), behavior: '__S__' });
   return 'ok';
 })()"""
+
+/** Formas de los subrayados: marcador, lápiz y ondulado. */
+private const val MARK_CSS = """
+.zk-mk { background: linear-gradient(180deg, transparent 0 16%, var(--c) 16% 94%, transparent 94%); mix-blend-mode: multiply; }
+.zk-mk.zk-dark { mix-blend-mode: screen; }
+.zk-mk.zk-v0 { border-radius: 0.2em 0.55em 0.3em 0.6em / 0.5em 0.25em 0.6em 0.3em; transform: skewX(-3deg); }
+.zk-mk.zk-v1 { border-radius: 0.45em 0.25em 0.55em 0.2em / 0.3em 0.55em 0.25em 0.5em; transform: skewX(2deg); }
+.zk-mk.zk-v2 { border-radius: 0.3em 0.5em 0.2em 0.5em / 0.55em 0.3em 0.5em 0.25em; transform: skewX(-1.5deg); }
+.zk-mk.zk-v3 { border-radius: 0.5em 0.3em 0.45em 0.25em / 0.25em 0.5em 0.3em 0.6em; transform: skewX(3deg); }
+.zk-pen { border-bottom: 1.6px solid var(--c); opacity: 0.85; margin-top: 1px; }
+.zk-pen.zk-v1, .zk-pen.zk-v3 { transform: rotate(-0.3deg); }
+.zk-pen.zk-v2 { transform: rotate(0.25deg); }
+.zk-wave { background: var(--c);
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='5' viewBox='0 0 10 5'><path d='M0 3.5 Q2.5 0.5 5 3.5 T10 3.5' fill='none' stroke='black' stroke-width='1.3'/></svg>") repeat-x left bottom / 10px 5px;
+  mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='5' viewBox='0 0 10 5'><path d='M0 3.5 Q2.5 0.5 5 3.5 T10 3.5' fill='none' stroke='black' stroke-width='1.3'/></svg>") repeat-x left bottom / 10px 5px; }
+"""
 
 /** Busca la palabra bajo el dedo y su frase. Las coordenadas llegan en píxeles físicos. */
 private const val WORD_AT_POINT = """(function(){

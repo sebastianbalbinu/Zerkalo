@@ -49,6 +49,9 @@ fun SettingsScreen() {
     val paper by Prefs.paper.collectAsState()
     val status by Updates.status.collectAsState()
     val available by Updates.available.collectAsState()
+    val upProgress by Updates.progress.collectAsState()
+    val upReady by Updates.ready.collectAsState()
+    val upFailed by Updates.failed.collectAsState()
     var remOn by remember { mutableStateOf(Prefs.reminderOn) }
     var remTime by remember { mutableStateOf(Prefs.reminderHour to Prefs.reminderMinute) }
     var auto by remember { mutableStateOf(Updates.autoEnabled(ctx)) }
@@ -96,15 +99,7 @@ fun SettingsScreen() {
         item {
             Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), PaddingValues(horizontal = 18.dp, vertical = 4.dp)) {
                 Column {
-                    ListRow("Zerkalo $version", status.ifBlank { "Se actualiza sola desde GitHub" }) {
-                        PillButton(if (available != null) "Actualizar" else "Buscar", {
-                            if (available != null) scope.launch {
-                                if (!Updates.canInstall(ctx)) { Updates.openInstallPermission(ctx); return@launch }
-                                Updates.available.value?.let { if (Updates.ready.value == null) Updates.download(ctx, it) }
-                                Updates.install(ctx)
-                            } else scope.launch { Updates.check(ctx, force = true) }
-                        }, ghost = available == null)
-                    }
+                    UpdateRow(version, status, available, upProgress, upReady != null, upFailed)
                     ListRow("Actualizar sola", "Descarga la versión nueva y la instala cuando no estás leyendo") {
                         ZSwitch(auto) { auto = it; Updates.setAuto(ctx, it) }
                     }
@@ -114,7 +109,7 @@ fun SettingsScreen() {
         item {
             Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), PaddingValues(horizontal = 18.dp, vertical = 4.dp)) {
                 Column {
-                    ListRow("Importar un EPUB", "Desde tu teléfono, Drive o descargas", onClick = a.importEpub) { ZIcon("chevron", p.text2, 16.dp) }
+                    ListRow("Traer mis EPUB", "Busca en tu teléfono o elige varios a la vez", onClick = a.importEpub) { ZIcon("chevron", p.text2, 16.dp) }
                     ListRow("Catálogos OPDS", "Agrega otras bibliotecas libres", onClick = { catalogs = true }) { ZIcon("chevron", p.text2, 16.dp) }
                 }
             }
@@ -142,4 +137,47 @@ fun SettingsScreen() {
         }
     }
     if (catalogs) CatalogsSheet { catalogs = false }
+}
+
+/** Fila de actualización: dice siempre qué está pasando (buscando, % descargado, lista, se cortó). */
+@Composable
+fun UpdateRow(version: String, status: String, available: com.sebas.zerkalo.UpdateInfo?, progress: Float?, ready: Boolean, failed: Boolean) {
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    Column {
+        ListRow("Zerkalo $version", status.ifBlank { "Se actualiza sola desde GitHub" }) {
+            val label = when {
+                progress != null -> "${(progress * 100).toInt()} %"
+                ready -> "Instalar"
+                failed -> "Reintentar"
+                available != null -> "Descargar"
+                else -> "Buscar"
+            }
+            PillButton(label, { if (progress == null) scope.launch { updateAction(ctx) } }, ghost = available == null && !failed, enabled = progress == null)
+        }
+        if (progress != null) ProgressLine(progress, Modifier.fillMaxWidth().padding(bottom = 12.dp))
+    }
+}
+
+fun updateLabel(progress: Float?, ready: Boolean, failed: Boolean, available: Boolean) = when {
+    progress != null -> "${(progress * 100).toInt()} %"
+    ready -> "Instalar"
+    failed -> "Reintentar"
+    available -> "Descargar"
+    else -> "Buscar"
+}
+
+/** Lo que hace el botón de actualizar según el momento: buscar, descargar o instalar. */
+suspend fun updateAction(ctx: android.content.Context) {
+    val info = Updates.available.value
+    if (info == null) { Updates.check(ctx, force = true); return }
+    if (Updates.ready.value == null) Updates.download(ctx, info)
+    if (Updates.ready.value != null) {
+        if (!Updates.canInstall(ctx)) {
+            Updates.openInstallPermission(ctx)
+            AppEvents.toast("Permite a Zerkalo instalar apps y vuelve a tocar Instalar")
+            return
+        }
+        Updates.install(ctx)
+    }
 }
