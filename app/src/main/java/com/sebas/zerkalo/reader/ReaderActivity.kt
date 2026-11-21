@@ -131,6 +131,10 @@ class ReaderUi {
     var pairLinked by mutableStateOf(true)      // las dos ediciones pasan página juntas
     var pairLangLabel by mutableStateOf("")     // idioma de la pareja, en dos letras
     var landscape by mutableStateOf(false)
+    var band by mutableFloatStateOf(24f)    // alto de la franja de la cámara, en dp
+    var camX by mutableFloatStateOf(0.5f)   // centro de la cámara (0 izquierda, 1 derecha)
+    var camHalf by mutableFloatStateOf(0f)  // medio ancho de la cámara, en dp
+    var typeTab by mutableIntStateOf(0)     // pestaña abierta en las opciones de lectura
     var pairSwap by mutableStateOf(false)       // la pareja va arriba (o a la izquierda)
     var pairRatio by mutableIntStateOf(50)      // % de la pantalla para el libro principal
     var lang by mutableStateOf("")
@@ -258,19 +262,25 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     }
 
     /**
-     * Márgenes del texto. Normal: debajo de la barra de estado. "Usar toda la pantalla": el texto sube
-     * hasta la altura de la cámara. Arriba y abajo se suma el margen elegido (compacto, normal o amplio).
+     * Márgenes del texto, como en Moon+ Reader: arriba queda la franja de la cámara (ahí van la hora y el
+     * avance) y el texto empieza justo debajo; abajo llega hasta el borde de la pantalla.
+     * El espacio de arriba y abajo crece con el tamaño de la letra (estrechos, normales o amplios).
      */
     private fun applyMargins() {
         val insets = lastInsets ?: return
         val r = ui.settings
         val i = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-        val dp = resources.displayMetrics.density
-        val extra = (listOf(6, 22, 42).getOrElse(r.vMargin) { 22 } * dp).toInt()
-        val top = if (r.fullscreen) extra else i.top + extra
-        // Abajo queda sitio para el pie (hora y %); en pantalla completa se ignora la barra de gestos.
-        val bottom = (if (r.fullscreen) (14 * dp).toInt() else i.bottom) + extra + (12 * dp).toInt()
+        val dm = resources.displayMetrics
+        val em = 16f * dm.density * resources.configuration.fontScale * (r.size / 100f)
+        val top = i.top + (listOf(0.2f, 0.9f, 1.8f).getOrElse(r.margin) { 0.9f } * em).toInt()
+        val bottom = (listOf(0.35f, 1.1f, 2.1f).getOrElse(r.margin) { 1.1f } * em).toInt()
         panes.setPadding(i.left, top, i.right, bottom)
+        // Dónde está la cámara, para poner la hora a un lado y el avance al otro
+        ui.band = i.top / dm.density
+        val cut = insets.displayCutout?.boundingRects?.firstOrNull { it.top <= 4 }
+        val w = root.width.takeIf { it > 0 } ?: dm.widthPixels
+        ui.camX = cut?.let { (it.exactCenterX() / w).coerceIn(0.15f, 0.85f) } ?: 0.5f
+        ui.camHalf = (cut?.width()?.div(2f) ?: 0f) / dm.density
     }
 
     /**
@@ -790,7 +800,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             textAlign = if (r.justify && !r.dyslexia) TextAlign.JUSTIFY else TextAlign.START,
             hyphens = r.justify && !r.dyslexia,
             // Original: manda el diseño del libro (Zerkalo solo corrige lo que se rompe y respeta tu justificado)
-            publisherStyles = r.layout == 0,
+            publisherStyles = r.layout == 0 || r.layout == 3,
             scroll = r.scroll,
             paragraphSpacing = listOf(null, 0.6, 1.2).getOrNull(r.paragraph),
             letterSpacing = listOf(null, 0.06, 0.14).getOrNull(r.spacing),
@@ -804,7 +814,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
      */
     private fun pageMargins(r: ReaderSettings): Double {
         val base = listOf(0.75, 1.15, 1.6).getOrElse(r.margin) { 1.15 }
-        if (r.layout != 1 || r.size <= 100) return base
+        if (r.size <= 100) return base
         return (base * Math.pow(100.0 / r.size, 0.9)).coerceAtLeast(0.45)
     }
 
@@ -854,12 +864,12 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         ui.palette = paletteFor(r)
         if (old.brightness != r.brightness) applyBrightness(r.brightness)
         if (old.veil != r.veil) applyVeil()
-        if (old.fullscreen != r.fullscreen || old.vMargin != r.vMargin) applyMargins()
+        if (old.margin != r.margin || old.size != r.size) applyMargins()
         if (ui.auto && (old.autoSpeed != r.autoSpeed || old.autoPage != r.autoPage || old.scroll != r.scroll)) startAuto()
         // Estos ajustes no necesitan rehacer las páginas.
         if (old.copy(
                 brightness = r.brightness, veil = r.veil, ruler = r.ruler, haptic = r.haptic, volumeKeys = r.volumeKeys, breaks = r.breaks, animate = r.animate,
-                fullscreen = r.fullscreen, vMargin = r.vMargin, autoSpeed = r.autoSpeed, autoPage = r.autoPage,
+                fullscreen = r.fullscreen, vMargin = r.vMargin, autoSpeed = r.autoSpeed, autoPage = r.autoPage, info = r.info,
             ) == r
         ) return
         applyPaper()
@@ -1310,6 +1320,14 @@ private const val SCROLL_BY = """(function(){
     if (-delta < h * 0.45) delta = -(h - 2 * lh);
   }
   window.scrollBy({ top: Math.round(delta), behavior: '__S__' });
+  // Al terminar de moverse, si la primera línea quedó mordida arriba, se acomoda para verla entera.
+  var fix = function(){
+    window.removeEventListener('scrollend', fix);
+    var y = 1, F = null;
+    for (var j = 0; j < 4 && !F; j++) { F = lineAt(y); y += lh / 3; }
+    if (F && F.top < -1 && F.bottom > 1) window.scrollBy({ top: Math.round(F.top - pad), behavior: 'auto' });
+  };
+  if ('onscrollend' in window && '__S__' === 'smooth') window.addEventListener('scrollend', fix); else setTimeout(fix, 60);
   return 'ok';
 })()"""
 

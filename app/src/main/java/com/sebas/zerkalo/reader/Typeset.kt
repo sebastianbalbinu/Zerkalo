@@ -10,7 +10,10 @@ import com.sebas.zerkalo.data.ReaderSettings
  *   Si un verso no cabe, el poema baja un poco de tamaño (hasta 12 %) antes de partir la línea.
  * - Modo Zerkalo: justificado solo con líneas de 40 letras o más, títulos proporcionados,
  *   sin títulos solos al final de la página, epígrafes con ancho cómodo, líneas sin palabras sueltas.
- * - En todos los modos: imágenes y tablas nunca más anchas que la pantalla.
+ * - En todos los modos: imágenes y tablas nunca más anchas que la pantalla, versalitas respetadas y
+ *   ninguna palabra más grande que el texto que la rodea.
+ * - Original y Zerkalo: sin justificado en líneas angostas (menos de 42 letras), que dejan huecos grandes.
+ * - Ninguna (modo 3): el libro tal cual; se deshace todo lo de Zerkalo.
  *
  * Todo se hace con estilos en línea marcados con data-zk-*, así se puede deshacer y rehacer cuando
  * cambian los ajustes, sin tocar el texto (los subrayados guardados siguen en su sitio).
@@ -45,10 +48,18 @@ window.__zkRun = function(){
     if ((' ' + a + ' ').indexOf(' ' + prop + ' ') < 0) e.setAttribute('data-zk-s', (a + ' ' + prop).trim());
   }
   function txt(e) { return (e.textContent || '').replace(/\s+/g, ' ').trim(); }
+  // Letras por línea medidas con la letra real (no un cálculo aproximado)
+  var cv = (window.__zkCv = window.__zkCv || d.createElement('canvas').getContext('2d')), cw = {};
+  function perLine(e, cs) {
+    var f = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+    if (!(f in cw)) { cv.font = f; cw[f] = cv.measureText('de la conquista del infinito y lo desconocido').width / 45; }
+    return cw[f] > 0 ? e.clientWidth / cw[f] : 99;
+  }
 
   // 2) Estilos generales
   var st = d.getElementById('zk-type');
   if (!st) { st = d.createElement('style'); st.id = 'zk-type'; (d.head || d.documentElement).appendChild(st); }
+  if (O.mode === 3) { st.textContent = ''; return 'ninguna'; }
   var css = 'img,svg,video{max-width:100% !important;height:auto !important;object-fit:contain}img{max-height:92vh}' +
     'table{max-width:100% !important}pre{white-space:pre-wrap !important}';
   if (O.mode === 1) css += 'h1,h2,h3,h4,h5,h6{break-after:avoid;break-inside:avoid;text-wrap:balance}' +
@@ -121,14 +132,26 @@ window.__zkRun = function(){
       continue;
     }
     if (cs.textAlign === 'justify' || cs.textAlignLast === 'justify') {
-      var fs = parseFloat(cs.fontSize) || 16;
-      var narrow = e.clientWidth > 0 && e.clientWidth / (fs * 0.5) < 40;
-      if (!O.justify || (O.mode === 1 && narrow)) {
+      var narrow = (O.mode === 0 || O.mode === 1) && e.clientWidth > 0 && perLine(e, cs) < 42;
+      if (!O.justify || narrow) {
         set(e, 'text-align', 'left'); set(e, 'text-align-last', 'auto');
         set(e, 'hyphens', 'manual'); set(e, '-webkit-hyphens', 'manual');
       }
     }
   }
+  // Versalitas: mayúsculas pequeñas como las pensó la editorial; y ninguna palabra más grande que su párrafo
+  var SC = /(^|[\s_-])(versalita|versalitas|versal|smallcaps|small-caps|small_caps|smcp|sc|caps|vers)([\s_-]|$)/i;
+  var inl = b.querySelectorAll('span,small,abbr,acronym,em,i,b,strong,cite,dfn,var,a,font');
+  for (var i = 0; i < inl.length && i < 4000; i++) {
+    var e = inl[i], par = e.parentElement;
+    if (!par) continue;
+    var cs = getComputedStyle(e), pf = parseFloat(getComputedStyle(par).fontSize) || 16, f = parseFloat(cs.fontSize) || pf;
+    var t = txt(e), caps = t.length > 1 && t === t.toUpperCase() && /[A-ZÁÉÍÓÚÑÜ]/.test(t);
+    var smallcaps = cs.fontVariantCaps === 'small-caps' || cs.fontVariantCaps === 'all-small-caps' || SC.test(e.getAttribute('class') || '') || (e.tagName === 'SMALL' && caps);
+    if (smallcaps) set(e, 'font-variant-caps', caps ? 'all-small-caps' : 'small-caps');
+    if (!e.closest('h1,h2,h3,h4,h5,h6,[data-zk~=verse],sup,sub') && e.closest('p,li,blockquote') && f > pf * 1.12) set(e, 'font-size', '1em');
+  }
+
   var vl = b.querySelectorAll('[data-zk~=vline]');
   for (var i = 0; i < vl.length; i++) {
     var e = vl[i];

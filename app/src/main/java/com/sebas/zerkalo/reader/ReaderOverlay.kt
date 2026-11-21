@@ -132,13 +132,19 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
             Box(Modifier.size(14.dp, 54.dp).background(p.accent))
         }
 
-        // Pie discreto mientras se lee: hora y avance
-        AnimatedVisibility(!ui.controls, Modifier.align(Alignment.BottomCenter), enter = fadeIn(tween(400)), exit = fadeOut(tween(150))) {
-            Text(
-                listOf(ui.clock, "${(ui.progress * 100).toInt()} %").filter { it.isNotBlank() }.joinToString("   ·   "),
-                style = Type.uiSmall.copy(fontSize = 11.sp), color = p.text2.copy(alpha = 0.6f),
-                modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = 6.dp),
-            )
+        // Hora y avance junto a la cámara, en la franja de arriba (así el texto llega hasta abajo)
+        AnimatedVisibility(!ui.controls && ui.settings.info, Modifier.align(Alignment.TopCenter), enter = fadeIn(tween(400)), exit = fadeOut(tween(150))) {
+            val info = Type.uiSmall.copy(fontSize = 11.sp)
+            val c = p.text2.copy(alpha = 0.65f)
+            val gap = (ui.camHalf + 10f).dp
+            Row(Modifier.fillMaxWidth().height(ui.band.coerceAtLeast(18f).dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(ui.camX).fillMaxHeight(), contentAlignment = Alignment.CenterEnd) {
+                    Text(ui.clock, style = info, color = c, maxLines = 1, modifier = Modifier.padding(end = gap))
+                }
+                Box(Modifier.weight(1f - ui.camX).fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
+                    Text("${(ui.progress * 100).toInt()} %", style = info, color = c, maxLines = 1, modifier = Modifier.padding(start = gap))
+                }
+            }
         }
 
         // Modo traducir: aviso y botón para salir sin tener que abrir el menú
@@ -720,101 +726,113 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
     Sheet(onClose) {
       Column(Modifier.heightIn(max = 640.dp).verticalScroll(rememberScrollState())) {
         Text("Lectura", style = Type.title.copy(fontSize = 21.sp), color = p.text)
-        Label("Modo")
-        Segmented(listOf("Páginas", "Desplazamiento continuo"), if (s.scroll) 1 else 0, { act.settings(s.copy(scroll = it == 1)) })
-        Label("Diagramación")
-        Segmented(listOf("Original", "Zerkalo", "Mía"), s.layout, { act.settings(s.copy(layout = it)) })
-        Text(
-            when (s.layout) {
-                0 -> "El diseño de la editorial, tal cual. Zerkalo solo arregla lo que se rompe en el teléfono."
-                2 -> "Tus ajustes se aplican a todo el libro, sin reglas automáticas."
-                else -> "Diagramación cuidada: poemas verso a verso, títulos proporcionados, márgenes que se adaptan a la letra y justificado solo donde queda bien."
-            },
-            style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp),
-        )
-        Label("Letra")
-        val ctx = LocalContext.current
-        val font = ReaderFonts.getOrElse(s.font) { ReaderFonts[0] }
-        Row(
-            Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(p.card.copy(alpha = 0.7f)).clickable { ui.sheet = "fonts" }
-                .padding(horizontal = 18.dp, vertical = 14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Column(Modifier.weight(1f)) {
-                Text(font.name, fontFamily = FontFiles.preview(ctx, s.font), fontSize = 19.sp, color = p.text)
-                Text(font.note, style = Type.uiSmall, color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(12.dp))
+        Segmented(listOf("Texto", "Página", "Comodidad"), ui.typeTab, { ui.typeTab = it })
+        when (ui.typeTab) {
+            // ---------- Texto: cómo se ven las letras ----------
+            0 -> {
+                Label("Letra")
+                val ctx = LocalContext.current
+                val font = ReaderFonts.getOrElse(s.font) { ReaderFonts[0] }
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(p.card.copy(alpha = 0.7f)).clickable { ui.sheet = "fonts" }
+                        .padding(horizontal = 18.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(font.name, fontFamily = FontFiles.preview(ctx, s.font), fontSize = 19.sp, color = p.text)
+                        Text(font.note, style = Type.uiSmall, color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    Text("Cambiar", style = Type.uiSmall, color = p.accent)
+                    ZIcon("chevron", p.accent, 16.dp)
+                }
+                Label("Tamaño", "${s.size} %")
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    RoundPill("minus", { act.settings(s.copy(size = (s.size - 10).coerceAtLeast(70))) })
+                    var v by remember(s.size) { mutableFloatStateOf(s.size.toFloat()) }
+                    ZSlider(
+                        value = v, onChange = { v = it }, range = 70f..200f,
+                        onFinished = { act.settings(ui.settings.copy(size = (v / 5).toInt() * 5)) },
+                        modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+                    )
+                    RoundPill("plus", { act.settings(s.copy(size = (s.size + 10).coerceAtMost(200))) })
+                }
+                Label("Interlineado")
+                val lhs = listOf(1.4f, 1.6f, 1.85f)
+                Segmented(listOf("Compacto", "Medio", "Amplio"), lhs.indexOfFirst { kotlin.math.abs(it - s.lineHeight) < 0.05f }.coerceAtLeast(0), { act.settings(s.copy(lineHeight = lhs[it])) })
+                Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Justificar el texto", style = Type.ui, color = p.text)
+                        Text(if (s.justify) "Con guiones, como un libro impreso. Los poemas y las líneas angostas no se justifican" else "Apagado en todo el libro: alineado a la izquierda", style = Type.uiSmall, color = p.text2)
+                    }
+                    ZSwitch(s.justify) { act.settings(s.copy(justify = it)) }
+                }
+                Label("Espacio entre párrafos")
+                Segmented(listOf("Como el libro", "Separados", "Aireados"), s.paragraph, { act.settings(s.copy(paragraph = it)) })
+                Label("Espacio entre letras", "más amplio ayuda con la dislexia")
+                Segmented(listOf("Normal", "Amplio", "Muy amplio"), s.spacing, { act.settings(s.copy(spacing = it)) })
+                SwitchRow(
+                    "Modo dislexia",
+                    "Letra Lexend, más espacio entre letras y palabras, interlineado amplio y sin justificar",
+                    s.dyslexia,
+                ) { on ->
+                    act.settings(
+                        if (on) ui.settings.copy(dyslexia = true, font = 6, spacing = 1, justify = false, lineHeight = 1.85f, paragraph = maxOf(ui.settings.paragraph, 1))
+                        else ui.settings.copy(dyslexia = false, spacing = 0, justify = true, lineHeight = 1.6f),
+                    )
+                }
             }
-            Text("Cambiar", style = Type.uiSmall, color = p.accent)
-            ZIcon("chevron", p.accent, 16.dp)
-        }
-        Label("Tamaño", "${s.size} %")
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            RoundPill("minus", { act.settings(s.copy(size = (s.size - 10).coerceAtLeast(70))) })
-            var v by remember(s.size) { mutableFloatStateOf(s.size.toFloat()) }
-            ZSlider(
-                value = v, onChange = { v = it }, range = 70f..200f,
-                onFinished = { act.settings(ui.settings.copy(size = (v / 5).toInt() * 5)) },
-                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-            )
-            RoundPill("plus", { act.settings(s.copy(size = (s.size + 10).coerceAtMost(200))) })
-        }
-        Label("Interlineado")
-        val lhs = listOf(1.4f, 1.6f, 1.85f)
-        Segmented(listOf("Compacto", "Medio", "Amplio"), lhs.indexOfFirst { kotlin.math.abs(it - s.lineHeight) < 0.05f }.coerceAtLeast(0), { act.settings(s.copy(lineHeight = lhs[it])) })
-        Label("Márgenes")
-        Segmented(listOf("Estrechos", "Medios", "Amplios"), s.margin, { act.settings(s.copy(margin = it)) })
-        Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Justificar el texto", style = Type.ui, color = p.text)
-                Text(if (s.justify) "Con guiones, como un libro impreso. Los poemas nunca se justifican" else "Apagado en todo el libro: alineado a la izquierda", style = Type.uiSmall, color = p.text2)
+            // ---------- Página: cómo se arma la página ----------
+            1 -> {
+                Label("Diagramación")
+                val order = listOf(3, 0, 1, 2)
+                Segmented(listOf("Ninguna", "Original", "Zerkalo", "Mía"), order.indexOf(s.layout).coerceAtLeast(0), { act.settings(s.copy(layout = order[it])) })
+                Text(
+                    when (s.layout) {
+                        3 -> "El libro tal cual, sin ningún arreglo de Zerkalo."
+                        0 -> "El diseño de la editorial. Zerkalo solo arregla lo que se rompe en el teléfono: versalitas, palabras de otro tamaño y huecos en líneas angostas."
+                        2 -> "Tus ajustes se aplican a todo el libro, sin reglas automáticas."
+                        else -> "Diagramación cuidada: poemas verso a verso, títulos proporcionados y justificado solo donde queda bien."
+                    },
+                    style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp),
+                )
+                Label("Márgenes", "se ajustan al tamaño de la letra")
+                Segmented(listOf("Estrechos", "Normales", "Amplios"), s.margin, { act.settings(s.copy(margin = it)) })
+                Text(
+                    if (s.margin == 0) "El texto empieza junto a la cámara y llega hasta abajo de la pantalla." else "Más aire alrededor del texto, en proporción a la letra.",
+                    style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp),
+                )
+                Label("Pasar página")
+                Segmented(listOf("Páginas", "Desplazamiento"), if (s.scroll) 1 else 0, { act.settings(s.copy(scroll = it == 1)) })
+                SwitchRow("Animación al pasar página", "Apágala si prefieres un cambio instantáneo", s.animate) { act.settings(ui.settings.copy(animate = it)) }
+                SwitchRow("Hora y avance junto a la cámara", "Se ven arriba mientras lees", s.info) { act.settings(ui.settings.copy(info = it)) }
             }
-            ZSwitch(s.justify) { act.settings(s.copy(justify = it)) }
+            // ---------- Comodidad ----------
+            else -> {
+                SwitchRow("Regla de lectura", "Resalta la línea que lees; arrástrala desde la derecha", s.ruler) { act.settings(ui.settings.copy(ruler = it)) }
+                SwitchRow("Botones de volumen", "Bajar volumen: siguiente · subir: anterior", s.volumeKeys) { act.settings(ui.settings.copy(volumeKeys = it)) }
+                SwitchRow("Vibración suave al pasar página", "", s.haptic) { act.settings(ui.settings.copy(haptic = it)) }
+                SwitchRow("Pausas para los ojos", "Un aviso suave cada 20 minutos de lectura", s.breaks) { act.settings(ui.settings.copy(breaks = it)) }
+                Label("Avance automático", if (s.scroll) "${s.autoSpeed.toInt()} píxeles por segundo" else "una página cada ${s.autoPage.toInt()} s")
+                if (s.scroll) {
+                    var v by remember(s.autoSpeed) { mutableFloatStateOf(s.autoSpeed) }
+                    ZSlider(v, { v = it }, range = 4f..200f, onFinished = { act.settings(ui.settings.copy(autoSpeed = v)) })
+                } else {
+                    var v by remember(s.autoPage) { mutableFloatStateOf(s.autoPage) }
+                    ZSlider(v, { v = it }, range = 5f..180f, onFinished = { act.settings(ui.settings.copy(autoPage = v)) })
+                }
+                Text(
+                    if (s.scroll) "El texto sube solo; tocar o deslizar lo pausa. Al acabar un capítulo sigue con el siguiente."
+                    else "Pasa de página solo. En desplazamiento el texto sube suave, como un teleprompter.",
+                    style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 2.dp),
+                )
+                PillButton(if (ui.auto) "Detener avance automático" else "Empezar avance automático", { act.toggleAuto(); onClose() }, Modifier.fillMaxWidth().padding(top = 10.dp), icon = if (ui.auto) "pause" else "auto")
+                Text(
+                    "Toques: izquierda o arriba, página anterior · derecha o abajo, siguiente · centro, menú. Desliza por el borde izquierdo para el brillo. Atrás cierra lo que esté abierto antes de salir del libro.",
+                    style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 14.dp),
+                )
+            }
         }
-        SwitchRow(
-            "Modo dislexia",
-            "Letra Lexend, más espacio entre letras y palabras, interlineado amplio y sin justificar (así no quedan huecos irregulares)",
-            s.dyslexia,
-        ) { on ->
-            act.settings(
-                if (on) ui.settings.copy(dyslexia = true, font = 6, spacing = 1, justify = false, lineHeight = 1.85f, paragraph = maxOf(ui.settings.paragraph, 1))
-                else ui.settings.copy(dyslexia = false, spacing = 0, justify = true, lineHeight = 1.6f),
-            )
-        }
-        Label("Pantalla")
-        SwitchRow("Usar toda la pantalla", "El texto sube hasta la cámara y se ocultan la hora y la batería del sistema", s.fullscreen) { act.settings(ui.settings.copy(fullscreen = it)) }
-        Label("Margen arriba y abajo")
-        Segmented(listOf("Compacto", "Normal", "Amplio"), s.vMargin, { act.settings(ui.settings.copy(vMargin = it)) })
-
-        Label("Avance automático", if (s.scroll) "${s.autoSpeed.toInt()} píxeles por segundo" else "una página cada ${s.autoPage.toInt()} s")
-        if (s.scroll) {
-            var v by remember(s.autoSpeed) { mutableFloatStateOf(s.autoSpeed) }
-            ZSlider(v, { v = it }, range = 4f..200f, onFinished = { act.settings(ui.settings.copy(autoSpeed = v)) })
-        } else {
-            var v by remember(s.autoPage) { mutableFloatStateOf(s.autoPage) }
-            ZSlider(v, { v = it }, range = 5f..180f, onFinished = { act.settings(ui.settings.copy(autoPage = v)) })
-        }
-        Text(
-            if (s.scroll) "El texto sube solo; tocar o deslizar lo pausa. Al acabar un capítulo sigue con el siguiente."
-            else "Pasa de página solo. En desplazamiento continuo el texto sube suave, como un teleprompter.",
-            style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 2.dp),
-        )
-        PillButton(if (ui.auto) "Detener avance automático" else "Empezar avance automático", { act.toggleAuto(); onClose() }, Modifier.fillMaxWidth().padding(top = 10.dp), icon = if (ui.auto) "pause" else "auto")
-
-        Label("Espacio entre párrafos")
-        Segmented(listOf("Como el libro", "Separados", "Aireados"), s.paragraph, { act.settings(s.copy(paragraph = it)) })
-        Label("Espacio entre letras", "más amplio ayuda con la dislexia")
-        Segmented(listOf("Normal", "Amplio", "Muy amplio"), s.spacing, { act.settings(s.copy(spacing = it)) })
-
-        Label("Comodidad")
-        SwitchRow("Regla de lectura", "Resalta la línea que lees; arrástrala desde la derecha", s.ruler) { act.settings(ui.settings.copy(ruler = it)) }
-        SwitchRow("Animación al pasar página", "Apágala si prefieres un cambio instantáneo", s.animate) { act.settings(ui.settings.copy(animate = it)) }
-        SwitchRow("Vibración suave al pasar página", "", s.haptic) { act.settings(ui.settings.copy(haptic = it)) }
-        SwitchRow("Botones de volumen", "Bajar volumen: siguiente · subir: anterior", s.volumeKeys) { act.settings(ui.settings.copy(volumeKeys = it)) }
-        SwitchRow("Pausas para los ojos", "Un aviso suave cada 20 minutos de lectura", s.breaks) { act.settings(ui.settings.copy(breaks = it)) }
-        Text(
-            "Toques: izquierda o arriba, página anterior · derecha o abajo, siguiente · centro, menú. Desliza por el borde izquierdo para el brillo.",
-            style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 14.dp),
-        )
       }
     }
 }

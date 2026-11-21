@@ -55,6 +55,58 @@ object Library {
         }
     }
 
+    /** Nombre para reconocer el mismo libro aunque el archivo se llame distinto: título + apellido del autor. */
+    fun sameKey(title: String, author: String): String {
+        val who = author.split(',', ';', '&').firstOrNull().orEmpty().split(' ').filter { it.length > 2 }.maxByOrNull { it.length }.orEmpty()
+        return Importer.cleanName(title) + "|" + Importer.cleanName(who)
+    }
+
+    /** El libro que ya está en la biblioteca con el mismo título y autor (si lo hay). */
+    fun twinOf(title: String, author: String, exceptId: String): Book? {
+        val k = sameKey(title, author)
+        if (k.startsWith("|")) return null
+        return _books.value.firstOrNull { it.id != exceptId && sameKey(it.title, it.author) == k }
+    }
+
+    /**
+     * Junta los libros repetidos: se queda el que tiene más subrayados, avance o lectura reciente,
+     * y le pasa al que queda los subrayados, el tiempo de lectura, las etiquetas y el favorito del otro.
+     * Devuelve cuántas copias quitó.
+     */
+    fun dedupe(): Int {
+        val groups = _books.value.groupBy { sameKey(it.title, it.author) }.filter { (k, g) -> g.size > 1 && !k.startsWith("|") }
+        if (groups.isEmpty()) return 0
+        var removed = 0
+        for ((_, g) in groups) {
+            val marksOf = _marks.value.groupingBy { it.bookId }.eachCount()
+            val keep = g.maxWith(compareBy<Book>({ marksOf[it.id] ?: 0 }, { it.progress }, { it.lastOpened }, { -it.addedAt }))
+            val others = g.filter { it.id != keep.id }
+            val ids = others.map { it.id }.toSet()
+            _marks.update { l -> l.map { if (it.bookId in ids) it.copy(bookId = keep.id) else it } }
+            _sessions.update { l -> l.map { if (it.bookId in ids) it.copy(bookId = keep.id) else it } }
+            _books.update { l ->
+                l.filterNot { it.id in ids }.map { b ->
+                    when {
+                        b.id == keep.id -> b.copy(
+                            favorite = g.any { it.favorite }, tags = g.flatMap { it.tags }.distinct(),
+                            pair = b.pair ?: others.firstNotNullOfOrNull { it.pair },
+                            finishedAt = if (b.finishedAt > 0) b.finishedAt else others.maxOf { it.finishedAt },
+                        )
+                        b.pair in ids -> b.copy(pair = keep.id)
+                        else -> b
+                    }
+                }
+            }
+            for (o in others) {
+                File(booksDir, o.file).takeIf { o.file != keep.file }?.delete()
+                o.cover?.takeIf { it != keep.cover }?.let { File(coversDir, it).delete() }
+                removed++
+            }
+        }
+        save()
+        return removed
+    }
+
     fun book(id: String?): Book? = _books.value.firstOrNull { it.id == id }
     fun byKey(key: String): Book? = _books.value.firstOrNull { it.key == key }
 
@@ -71,6 +123,8 @@ object Library {
     fun remove(book: Book) {
         File(booksDir, book.file).delete()
         book.cover?.let { File(coversDir, it).delete() }
+        // Portadas elegidas por la persona y la original del EPUB
+        coversDir.listFiles()?.filter { it.name == "${book.id}.jpg" || it.name.startsWith("${book.id}-c") }?.forEach { it.delete() }
         _books.update { l -> l.filterNot { it.id == book.id } }
         _marks.update { l -> l.filterNot { it.bookId == book.id } }
         _sessions.update { l -> l.filterNot { it.bookId == book.id } }
