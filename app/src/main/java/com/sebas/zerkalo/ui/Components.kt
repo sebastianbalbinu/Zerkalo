@@ -1,5 +1,7 @@
 package com.sebas.zerkalo.ui
 
+import androidx.compose.foundation.layout.windowInsetsPadding
+
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.drag
@@ -82,6 +84,30 @@ fun ProgressiveEdge(@Suppress("UNUSED_PARAMETER") state: HazeState, top: Boolean
         else Brush.verticalGradient(listOf(Color.Transparent, p.bg.copy(alpha = 0.35f), p.bg.copy(alpha = 0.8f)))
     }
     Box(modifier.fillMaxWidth().height(height).background(brush))
+}
+
+/**
+ * Cabecera que aparece solo al bajar: arriba no hay franja (la madera llega hasta el borde),
+ * y cuando el título grande sale de la pantalla queda un título pequeño, como en Apple Books.
+ */
+@Composable
+fun CollapsingTop(title: String, state: androidx.compose.foundation.lazy.LazyListState, modifier: Modifier = Modifier) {
+    val p = LocalPalette.current
+    val show by remember { androidx.compose.runtime.derivedStateOf { state.firstVisibleItemIndex > 0 || state.firstVisibleItemScrollOffset > 150 } }
+    androidx.compose.animation.AnimatedVisibility(
+        show, modifier.fillMaxWidth(),
+        enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(180)),
+        exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(140)),
+    ) {
+        Box(
+            Modifier.fillMaxWidth()
+                .background(Brush.verticalGradient(listOf(p.bg.copy(alpha = 0.97f), p.bg.copy(alpha = 0.93f), p.bg.copy(alpha = 0f)), endY = Float.POSITIVE_INFINITY))
+                .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.statusBars).height(52.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(title, style = Type.ui.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), color = p.text, modifier = Modifier.padding(bottom = 8.dp))
+        }
+    }
 }
 
 /** Texturas de madera: se decodifican una sola vez para toda la app. */

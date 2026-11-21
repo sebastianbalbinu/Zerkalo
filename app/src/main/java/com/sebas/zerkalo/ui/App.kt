@@ -98,6 +98,8 @@ object AppEvents {
     val toast = MutableStateFlow<Pair<String, Long>?>(null)
     /** Libro que hay que abrir en el lector apenas exista (lo usa la prueba automática). */
     val openBook = MutableStateFlow<String?>(null)
+    /** Pestaña que hay que mostrar (por ejemplo, al tocar la notificación del audiolibro). */
+    val tab = MutableStateFlow<Int?>(null)
     fun toast(msg: String) { toast.value = msg to System.currentTimeMillis() }
 }
 
@@ -105,7 +107,7 @@ fun openReader(ctx: Context, book: Book) {
     ctx.startActivity(Intent(ctx, ReaderActivity::class.java).putExtra("id", book.id))
 }
 
-private val TABS = listOf("home" to "Biblioteca", "tansu" to "Tansu", "taller" to "Taller", "notas" to "Notas")
+private val TABS = listOf("home" to "Biblioteca", "tansu" to "Tansu", "escuchar" to "Escuchar", "notas" to "Notas")
 
 @Composable
 fun ZerkaloRoot(onReady: () -> Unit) {
@@ -147,6 +149,8 @@ fun ZerkaloRoot(onReady: () -> Unit) {
         val id = toOpen ?: return@LaunchedEffect
         books.firstOrNull { it.id == id }?.let { AppEvents.openBook.value = null; openReader(ctx, it) }
     }
+    val wantTab by AppEvents.tab.collectAsState()
+    LaunchedEffect(wantTab) { wantTab?.let { stack.clear(); tab = it; AppEvents.tab.value = null } }
     val incoming by AppEvents.incoming.collectAsState()
     LaunchedEffect(incoming) {
         incoming?.let { AppEvents.incoming.value = null; doImport(it, openAfter = true) }
@@ -178,10 +182,12 @@ fun ZerkaloRoot(onReady: () -> Unit) {
                 when (t) {
                     0 -> LibraryScreen(haze, onReady)
                     1 -> TansuScreen(haze)
-                    2 -> TallerTab(haze, books)
+                    2 -> EscucharScreen(haze)
                     else -> NotasScreen(haze)
                 }
             }
+            // Reproductor pequeño mientras suena un audiolibro
+            if (stack.isEmpty()) MiniPlayer(Modifier.align(Alignment.BottomCenter))
             TabBar(tab, haze, Modifier.align(Alignment.BottomCenter)) { i ->
                 stack.clear(); tab = i
             }
