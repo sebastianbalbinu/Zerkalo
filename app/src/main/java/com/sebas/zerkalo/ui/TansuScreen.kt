@@ -1,5 +1,13 @@
 package com.sebas.zerkalo.ui
 
+import androidx.compose.runtime.mutableIntStateOf
+
+import androidx.compose.ui.draw.shadow
+
+import androidx.compose.ui.unit.Dp
+
+import com.sebas.zerkalo.data.Explore
+
 import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -138,6 +146,15 @@ fun TansuScreen(haze: HazeState) {
     val cats by Prefs.catalogs.collectAsState()
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    var surprise by remember { mutableStateOf(false) }
+    // El Tansu del día: estantes que rotan, sin repetir libros y sin los que ya tienes
+    val books by Library.books.collectAsState()
+    var plan by remember { mutableStateOf<Explore.Plan?>(null) }
+    LaunchedEffect(lang, books.size) {
+        val t0 = System.currentTimeMillis()
+        plan = Explore.plan(lang)
+        Log.i("Zerkalo", "ZK_TANSU plan $lang ${plan?.total ?: 0} libros, ${plan?.genres?.size ?: 0} géneros en ${System.currentTimeMillis() - t0} ms")
+    }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(Modifier.fillMaxSize().hazeSource(haze), state = listState, contentPadding = PaddingValues(top = top + 18.dp, bottom = 150.dp)) {
@@ -164,10 +181,46 @@ fun TansuScreen(haze: HazeState) {
                 item(key = "si$query$lang") { TansuRow("En Internet Archive", "Dominio público", "ia-s:$lang:$query", { Catalogs.internetArchive(lang, query) }) { preview = it } }
                 item(key = "so$query") { TansuRow("Libros académicos", "OAPEN", "oa:$query", { Catalogs.oapen(query) }) { preview = it } }
             } else {
-                item(key = "pop$lang") { TansuRow("Los más leídos", "Project Gutenberg", "pg:$lang", { Catalogs.gutenberg(lang) }) { preview = it } }
+                val pl = plan
+                item(key = "size$lang") { ExploreHeader(pl, lang) { surprise = true } }
+                if (pl == null) {
+                    // Sin catálogo propio (no debería pasar): las filas de antes, desde internet
+                    item(key = "pop$lang") { TansuRow("Los más leídos", "Project Gutenberg", "pg:$lang", { Catalogs.gutenberg(lang) }) { preview = it } }
+                } else {
+                    pl.forYou.forEach { sh -> item(key = sh.key + lang) { PlanShelf(sh, lang) { preview = it } } }
+                    pl.top?.let { sh -> item(key = "top$lang") { PlanShelf(sh, lang) { preview = it } } }
+                    if (pl.moods.isNotEmpty()) item(key = "moods$lang") {
+                        Column(Modifier.padding(top = 30.dp)) {
+                            SectionTitle("¿Qué te apetece?", kicker = "Según el momento")
+                            LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 14.dp)) {
+                                items(pl.moods, key = { it.query.value }) { t -> ExploreTile(t, 156.dp, 96.dp) { a.open(Screen.Shelf(lang, t.query.kind, t.query.value, t.query.title)) } }
+                            }
+                        }
+                    }
+                    pl.genreShelves.take(3).forEach { sh -> item(key = sh.key + lang) { PlanShelf(sh, lang) { preview = it } } }
+                }
                 if (lang == "es") item(key = "tx") { TansuRow("Biblioteca en español", "textos.info", "tx", { Catalogs.opdsBooks(Catalogs.TEXTOS, "textos.info") }) { preview = it } }
-                Catalogs.TOPICS.take(6).forEach { t ->
-                    item(key = "t${t.id}$lang") { TansuRow(t.name, "", "pg:$lang:${t.id}", { Catalogs.gutenberg(lang, topic = t.id) }) { preview = it } }
+                pl?.genreShelves?.drop(3)?.forEach { sh -> item(key = sh.key + lang) { PlanShelf(sh, lang) { preview = it } } }
+                if (pl != null && pl.genres.isNotEmpty()) item(key = "wall$lang") {
+                    Column(Modifier.padding(top = 32.dp)) {
+                        SectionTitle("Todos los géneros", more = "${pl.genres.size}")
+                        Column(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            pl.genres.chunked(2).forEach { pair ->
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    pair.forEach { t -> ExploreTile(t, null, 78.dp, Modifier.weight(1f)) { a.open(Screen.Shelf(lang, t.query.kind, t.query.value, t.query.title)) } }
+                                    if (pair.size == 1) Spacer(Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                }
+                if (pl != null && pl.eras.isNotEmpty()) item(key = "eras$lang") {
+                    Column(Modifier.padding(top = 30.dp)) {
+                        SectionTitle("Por época", kicker = "Cuando vivieron sus autores")
+                        LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 14.dp)) {
+                            items(pl.eras, key = { it.query.value }) { t -> ExploreTile(t, 150.dp, 84.dp) { a.open(Screen.Shelf(lang, t.query.kind, t.query.value, t.query.title)) } }
+                        }
+                    }
                 }
                 item(key = "ug") { TansuRow("Licencias abiertas", "Unglue.it", "ug", { Catalogs.opdsBooks(Catalogs.UNGLUE, "Unglue.it") }) { preview = it } }
                 item(key = "ia$lang") { TansuRow("Dominio público escaneado", "Internet Archive", "ia:$lang", { Catalogs.internetArchive(lang) }) { preview = it } }
@@ -199,6 +252,156 @@ fun TansuScreen(haze: HazeState) {
     }
     preview?.let { PreviewSheet(it) { preview = null } }
     if (catalogsSheet) CatalogsSheet { catalogsSheet = false }
+    if (surprise) SurpriseSheet(lang) { surprise = false }
+}
+
+/** Cuántos libros hay: para que se note lo grande que es la biblioteca. */
+@Composable
+private fun ExploreHeader(plan: Explore.Plan?, lang: String, onSurprise: () -> Unit) {
+    val p = LocalPalette.current
+    val name = Catalogs.LANGS.firstOrNull { it.id == lang }?.name ?: lang
+    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                if (plan != null) "${String.format(java.util.Locale.forLanguageTag("es"), "%,d", plan.total).replace(',', '.')} libros en $name" else "Libros en $name",
+                style = Type.ui.copy(fontSize = 15.sp), color = p.text,
+            )
+            Text("y más de 75.000 en Project Gutenberg, gratis y para siempre", style = Type.uiSmall, color = p.text2)
+        }
+        Row(
+            Modifier.clip(RoundedCornerShape(20.dp)).background(p.text).clickable(onClick = onSurprise).padding(horizontal = 14.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ZIcon("auto", p.bg, 15.dp)
+            Text("  Sorpréndeme", style = Type.uiSmall, color = p.bg)
+        }
+    }
+}
+
+/** Un estante del Tansu del día, con "Ver todo" cuando hay más. */
+@Composable
+private fun PlanShelf(sh: Explore.Shelf, lang: String, onItem: (CatalogItem) -> Unit) {
+    val a = LocalActions.current
+    val p = LocalPalette.current
+    if (sh.items.isEmpty()) return
+    Column(Modifier.padding(top = 28.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Bottom) {
+            Box(Modifier.weight(1f)) { SectionTitle(sh.title, kicker = sh.kicker) }
+            sh.more?.let { q ->
+                Text(
+                    "Ver todo", style = Type.uiSmall, color = p.accent,
+                    modifier = Modifier.padding(end = 20.dp, bottom = 3.dp).clip(RoundedCornerShape(8.dp)).clickable { a.open(Screen.Shelf(lang, q.kind, q.value, q.title)) }.padding(4.dp),
+                )
+            }
+        }
+        Gap(14)
+        LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            items(sh.items, key = { it.key }) { ItemCard(it) { onItem(it) } }
+        }
+    }
+}
+
+/** Colores de las tarjetas de género y momento (tonos de tinta japonesa, apagados). */
+private val TILE_COLORS = listOf(
+    0xFF7A3B2E, 0xFF3F5A4A, 0xFF2F4B6B, 0xFF6B5A2E, 0xFF5A3D5C, 0xFF2E5E5E, 0xFF7A5230, 0xFF4A4A6A,
+    0xFF6A2F3A, 0xFF3E5B2F, 0xFF5B4636, 0xFF2D4F4A,
+)
+
+@Composable
+private fun ExploreTile(t: Explore.Tile, width: Dp?, height: Dp, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    val c = androidx.compose.ui.graphics.Color(TILE_COLORS[(t.query.value.hashCode() and 0x7fffffff) % TILE_COLORS.size])
+    Column(
+        (if (width != null) modifier.width(width) else modifier).height(height).shadow(4.dp, RoundedCornerShape(14.dp)).clip(RoundedCornerShape(14.dp))
+            .background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(c, c.copy(alpha = 0.78f))))
+            .clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Text(t.query.title, style = Type.ui.copy(fontSize = 15.sp, lineHeight = 18.sp), color = androidx.compose.ui.graphics.Color(0xFFF6EFE4), maxLines = 2, overflow = TextOverflow.Ellipsis)
+        Text(
+            listOf(t.subtitle, "${t.count} libros").filter { it.isNotBlank() }.joinToString(" · "),
+            style = Type.uiSmall.copy(fontSize = 11.5.sp), color = androidx.compose.ui.graphics.Color(0xCCF6EFE4), maxLines = 1,
+        )
+    }
+}
+
+/** Un libro al azar, en grande: "Otro" para seguir hojeando, o agregarlo. */
+@Composable
+private fun SurpriseSheet(lang: String, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    val core = (LocalContext.current.applicationContext as ZerkaloApp).readium
+    var item by remember { mutableStateOf<CatalogItem?>(null) }
+    var seen by remember { mutableStateOf(setOf<String>()) }
+    var n by remember { mutableIntStateOf(0) }
+    val dl by Downloads.states.collectAsState()
+    LaunchedEffect(n) { item = Explore.surprise(lang, seen)?.also { seen = seen + it.key } }
+    ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface) {
+        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 30.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Caption("Sorpréndeme", accent = true)
+            val it = item
+            if (it == null) {
+                Text("Buscando un libro…", style = Type.ui, color = p.text2, modifier = Modifier.padding(40.dp))
+            } else {
+                androidx.compose.animation.AnimatedContent(it, label = "sorpresa") { b ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                        Box(Modifier.padding(top = 14.dp)) { ItemCover(b, 150.dp, 222.dp) }
+                        Text(b.title, style = Type.title.copy(fontSize = 21.sp, lineHeight = 26.sp), color = p.text, textAlign = TextAlign.Center, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 16.dp))
+                        if (b.author.isNotBlank()) Text(b.author, style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
+                        if (b.summary.isNotBlank()) Text(
+                            b.summary.take(420), style = Type.body.copy(fontSize = 14.sp), color = p.text.copy(alpha = 0.88f),
+                            maxLines = 7, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 12.dp),
+                        )
+                    }
+                }
+                val st = dl[it.key]
+                Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PillButton("Otro", { n++ }, Modifier.weight(1f), ghost = true, icon = "auto")
+                    PillButton(
+                        when { st?.book != null -> "En tu estante"; st?.running == true -> "Descargando…"; else -> "Lo quiero" },
+                        { Downloads.start(core, it) }, Modifier.weight(1f), enabled = st?.running != true && st?.book == null, icon = "download",
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Todos los libros de un género, momento, época o autor, con desplazamiento sin fin. */
+@Composable
+fun ShelfScreen(lang: String, kind: String, value: String, title: String) {
+    val p = LocalPalette.current
+    val a = LocalActions.current
+    val q = remember(kind, value, title) { Explore.Query(kind, value, title) }
+    var all by remember { mutableStateOf<List<CatalogItem>?>(null) }
+    var limit by remember { mutableIntStateOf(60) }
+    var preview by remember { mutableStateOf<CatalogItem?>(null) }
+    LaunchedEffect(q, lang) { all = Explore.all(lang, q) }
+    val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val grid = androidx.compose.foundation.lazy.grid.rememberLazyGridState()
+    val list = all.orEmpty()
+    // Al acercarse al final se muestran 60 más
+    LaunchedEffect(grid, list.size) {
+        androidx.compose.runtime.snapshotFlow { grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }.collect { last ->
+            if (last > limit - 15 && limit < list.size) limit += 60
+        }
+    }
+    LazyVerticalGrid(
+        GridCells.Adaptive(104.dp), Modifier.fillMaxSize(), state = grid,
+        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = top + 10.dp, bottom = 60.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(18.dp),
+    ) {
+        item(span = { androidx.compose.foundation.lazy.grid.GridItemSpan(maxLineSpan) }) {
+            Column {
+                CircleButton("back", a.back)
+                Text(title, style = Type.title.copy(fontSize = 28.sp), color = p.text, modifier = Modifier.padding(top = 12.dp))
+                Text(
+                    if (all == null) "Abriendo el estante…" else "${list.size} libros · los más leídos primero",
+                    style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp, bottom = 6.dp),
+                )
+            }
+        }
+        items(list.take(limit), key = { it.key }) { ItemCard(it) { preview = it } }
+    }
+    preview?.let { PreviewSheet(it) { preview = null } }
 }
 
 @Composable
@@ -260,6 +463,15 @@ fun PreviewSheet(item: CatalogItem, onClose: () -> Unit) {
                     Caption(item.source, accent = true)
                     Text(item.title, style = Type.title.copy(fontSize = 21.sp, lineHeight = 26.sp), color = p.text, modifier = Modifier.padding(top = 4.dp), maxLines = 4, overflow = TextOverflow.Ellipsis)
                     if (item.author.isNotBlank()) Text(item.author, style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp))
+                    if (item.source == "Project Gutenberg" && item.author.isNotBlank()) {
+                        val surname = item.author.split(",").first().split(' ').filter { it.length > 2 }.lastOrNull()
+                        if (surname != null) Text(
+                            "Más de este autor", style = Type.uiSmall, color = p.accent,
+                            modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(8.dp)).clickable {
+                                onClose(); a.open(Screen.Shelf(item.lang.ifBlank { Prefs.tansuLang }, "author", surname, item.author))
+                            }.padding(vertical = 2.dp),
+                        )
+                    }
                     Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Catalogs.LANGS.firstOrNull { it.id == item.lang }?.let { Chip(it.name) }
                         Chip("EPUB libre")

@@ -31,10 +31,17 @@ object Catalogs {
         Lang("es", "Español"), Lang("en", "English"), Lang("fr", "Français"), Lang("pt", "Português"),
         Lang("de", "Deutsch"), Lang("it", "Italiano"), Lang("ru", "Русский"), Lang("ja", "日本語"), Lang("la", "Latina"),
     )
+    /** Mismo orden que TOPICS en .github/scripts/catalogo.py (cada género es un bit). */
     val TOPICS = listOf(
         Topic("fiction", "Novela"), Topic("poetry", "Poesía"), Topic("short stories", "Cuentos"),
         Topic("drama", "Teatro"), Topic("philosophy", "Filosofía"), Topic("history", "Historia"),
-        Topic("adventure", "Aventura"), Topic("science fiction", "Ciencia ficción"), Topic("children", "Infantil"),
+        Topic("adventure", "Aventura"), Topic("science fiction", "Ciencia ficción y fantasía"), Topic("children", "Infantil y juvenil"),
+        Topic("mystery", "Misterio y policial"), Topic("horror", "Terror y gótico"), Topic("romance", "Romance"),
+        Topic("humor", "Humor y sátira"), Topic("myths", "Mitos, leyendas y fábulas"), Topic("travel", "Viajes"),
+        Topic("biography", "Biografías, diarios y cartas"), Topic("essays", "Ensayo"), Topic("science", "Ciencia"),
+        Topic("religion", "Religión y espiritualidad"), Topic("politics", "Política y sociedad"), Topic("art", "Arte y música"),
+        Topic("classics", "Clásicos griegos y latinos"), Topic("war", "Guerra"), Topic("nature", "Naturaleza"),
+        Topic("psychology", "Psicología y vida"),
     )
     val LIBRARIES = listOf(
         FreeLibrary("Project Gutenberg", "Más de 75.000 libros de dominio público", "https://www.gutenberg.org/donate/"),
@@ -98,13 +105,17 @@ object Catalogs {
     private fun gutenbergCover(id: String) = "https://gutenberg.pglaf.org/cache/epub/$id/pg$id.cover.medium.jpg"
 
     // ---------------- Índice propio de Gutenberg ----------------
-    private class IndexBook(val id: Int, val title: String, val author: String, val downloads: Int, val mask: Int, val summary: String, val norm: String)
+    class IndexBook(
+        val id: Int, val title: String, val author: String, val downloads: Int, val mask: Int, val summary: String, val norm: String,
+        val birth: Int = 0, // año de nacimiento del autor (0 = no se sabe)
+        val kb: Int = 0,    // tamaño del EPUB sin imágenes (0 = no se sabe)
+    )
 
     private val indexes = HashMap<String, List<IndexBook>>()
     private const val INDEX_URL = "https://github.com/sebastianbalbinu/Zerkalo/releases/download/catalogo/gutenberg-%s.json.gz"
     private const val WEEK = 7L * 24 * 3600 * 1000
 
-    private fun norm(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+    fun norm(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
 
     /**
      * El índice semanal de libros de Gutenberg para un idioma. Viene dentro de la app y se
@@ -112,7 +123,7 @@ object Catalogs {
      */
     private val indexLock = kotlinx.coroutines.sync.Mutex()
 
-    private suspend fun gutenbergIndex(lang: String): List<IndexBook>? = withContext(Dispatchers.IO) {
+    suspend fun gutenbergIndex(lang: String): List<IndexBook>? = withContext(Dispatchers.IO) {
         synchronized(indexes) { indexes[lang] }?.let { return@withContext it }
         // Una sola carga a la vez: varias filas del Tansu piden el índice al mismo tiempo.
         indexLock.withLock {
@@ -146,11 +157,11 @@ object Catalogs {
         (0 until arr.length()).map { i ->
             val b = arr.getJSONArray(i)
             val t = b.optString(1); val a = b.optString(2)
-            IndexBook(b.optInt(0), t, a, b.optInt(3), b.optInt(4), b.optString(5), norm("$t $a"))
+            IndexBook(b.optInt(0), t, a, b.optInt(3), b.optInt(4), b.optString(5), norm("$t $a"), b.optInt(6), b.optInt(7))
         }
     }.getOrNull()
 
-    private fun IndexBook.toItem(lang: String) = CatalogItem(
+    fun IndexBook.toItem(lang: String) = CatalogItem(
         key = "pg:$id", source = "Project Gutenberg", title = title, author = author, lang = lang,
         cover = gutenbergCover(id.toString()), epubUrls = gutenbergUrls(id.toString(), null), summary = summary,
     )

@@ -26,20 +26,38 @@ OUT = Path(sys.argv[1] if len(sys.argv) > 1 else "catalogo")
 OUT.mkdir(parents=True, exist_ok=True)
 
 LANGS = ["es", "en", "fr", "pt", "de", "it", "ru", "ja", "la"]
-CAP = {"en": 5000}          # inglés tiene decenas de miles: los más leídos bastan
-DEFAULT_CAP = 4000
-# Mismo orden que Catalogs.TOPICS en la app (cada tema es un bit)
+CAP = {"en": 12000}         # inglés tiene decenas de miles: los más leídos bastan
+DEFAULT_CAP = 8000
+# Mismo orden que Catalogs.TOPICS en la app (cada tema es un bit). Se buscan palabras completas
+# en los temas (subjects) y estantes (bookshelves) de Gutenberg.
 TOPICS = [
-    ("fiction", ["fiction", "novel"]),
-    ("poetry", ["poetry", "poems", "poesía"]),
-    ("short stories", ["short stories", "cuentos"]),
-    ("drama", ["drama", "plays", "teatro"]),
-    ("philosophy", ["philosophy", "ethics"]),
-    ("history", ["history"]),
-    ("adventure", ["adventure"]),
-    ("science fiction", ["science fiction"]),
-    ("children", ["juvenile", "children"]),
+    ("fiction", ["fiction", "novel", "novels", "novela"]),
+    ("poetry", ["poetry", "poems", "poesía", "poesia", "poésie", "verse"]),
+    ("short stories", ["short stories", "cuentos", "contes", "nouvelles", "racconti"]),
+    ("drama", ["drama", "plays", "teatro", "théâtre", "tragedies", "comedies"]),
+    ("philosophy", ["philosophy", "ethics", "filosofía", "philosophie", "stoics"]),
+    ("history", ["history", "historia", "histoire"]),
+    ("adventure", ["adventure", "adventure stories", "sea stories", "pirates"]),
+    ("science fiction", ["science fiction", "fantasy", "fantastic fiction", "utopias", "dystopias"]),
+    ("children", ["juvenile fiction", "juvenile literature", "children", "children's literature", "infantil"]),
+    ("mystery", ["detective and mystery stories", "detective", "mystery", "crime", "policiaca", "policier"]),
+    ("horror", ["horror", "horror tales", "ghost stories", "gothic", "supernatural", "terror", "vampires"]),
+    ("romance", ["love stories", "romance", "amor", "courtship"]),
+    ("humor", ["humor", "humorous stories", "wit and humor", "satire", "parodies", "comedy"]),
+    ("myths", ["mythology", "legends", "folklore", "fairy tales", "mitología", "leyendas", "fables"]),
+    ("travel", ["travel", "voyages and travels", "description and travel", "viajes", "explorers"]),
+    ("biography", ["biography", "autobiography", "autobiographies", "memoirs", "biografía", "diaries", "correspondence", "letters"]),
+    ("essays", ["essays", "ensayos", "essais", "literary criticism"]),
+    ("science", ["science", "physics", "chemistry", "biology", "astronomy", "mathematics", "natural history", "evolution", "geology", "medicine"]),
+    ("religion", ["religion", "christianity", "bible", "spiritual life", "mysticism", "buddhism", "theology", "religión", "sermons"]),
+    ("politics", ["political science", "politics", "economics", "socialism", "sociology", "social conditions", "law", "government"]),
+    ("art", ["art", "arts", "music", "painting", "painters", "architecture", "sculpture", "música"]),
+    ("classics", ["classical literature", "greek literature", "latin literature", "epic poetry", "classical antiquity", "greece", "rome"]),
+    ("war", ["war", "world war", "military", "guerra", "battles", "soldiers"]),
+    ("nature", ["nature", "animals", "birds", "botany", "plants", "gardening", "outdoor life"]),
+    ("psychology", ["psychology", "psicología", "mind", "conduct of life", "self-help", "happiness"]),
 ]
+TOPIC_RE = [re.compile(r"\b(" + "|".join(re.escape(w) for w in words) + r")\b") for _, words in TOPICS]
 
 # Espejos oficiales primero: gutenberg.org suele responder "ocupado" (503) a los servidores de GitHub.
 # (aleph.gutenberg.org tiene el certificado vencido para su nombre, por eso no está.)
@@ -130,15 +148,37 @@ def parse(xml_bytes):
     downloads = int(book.findtext("pgterms:downloads", default="0", namespaces=NS) or 0)
     tags = " ".join(values(book, "dcterms:subject/rdf:Description/rdf:value")
                     + values(book, "pgterms:bookshelf/rdf:Description/rdf:value")).lower()
-    mask = 0
-    for i, (_, words) in enumerate(TOPICS):
-        if any(w in tags for w in words):
-            mask |= 1 << i
+    mask = topic_mask(tags)
+    # Año de nacimiento del autor (para "Por época")
+    birth = 0
+    b = book.findtext("dcterms:creator/pgterms:agent/pgterms:birthdate", default="", namespaces=NS)
+    if b and re.match(r"^-?\d+$", b.strip()):
+        birth = int(b.strip())
+    # Tamaño del EPUB sin imágenes, en KB (para "lecturas cortas")
+    kb = 0
+    for f in book.findall("dcterms:hasFormat/pgterms:file", NS):
+        about = f.get(RDF_ABOUT, "")
+        if ".epub" in about and "images" in about:
+            ext = f.findtext("dcterms:extent", default="0", namespaces=NS)
+            try:
+                v = int(ext) // 1024
+                if v > 0 and (kb == 0 or "noimages" in about):
+                    kb = v
+            except ValueError:
+                pass
     summary = (book.findtext("pgterms:marc520", default="", namespaces=NS) or "").strip()
     summary = re.sub(r"\s*\(This is an automatically generated summary\.\)\s*", "", summary)
     if len(summary) > 320:
         summary = summary[:317].rsplit(" ", 1)[0] + "…"
-    return int(m.group(1)), title, ", ".join(authors[:2]), langs, downloads, mask, summary
+    return int(m.group(1)), title, ", ".join(authors[:2]), langs, downloads, mask, summary, birth, kb
+
+
+def topic_mask(tags):
+    mask = 0
+    for i, rx in enumerate(TOPIC_RE):
+        if rx.search(tags):
+            mask |= 1 << i
+    return mask
 
 
 def from_csv(data, by_lang):
@@ -150,17 +190,16 @@ def from_csv(data, by_lang):
         if row.get("Type") != "Text":
             continue
         tags = (row.get("Subjects", "") + " " + row.get("Bookshelves", "")).lower()
-        mask = 0
-        for i, (_, words) in enumerate(TOPICS):
-            if any(w in tags for w in words):
-                mask |= 1 << i
+        mask = topic_mask(tags)
+        bm = re.search(r",\s*(-?\d{3,4})\??-", row.get("Authors", ""))
+        birth = int(bm.group(1)) if bm else 0
         authors = [nice_name(re.sub(r",\s*-?\d{3,4}\??-?\d{0,4}\??\s*$", "", a.strip())) for a in row.get("Authors", "").split(";") if a.strip()]
         title = re.sub(r"\s*[\r\n]+\s*", " — ", row.get("Title", "").strip())
         # Sin descargas: los que están en más estantes temáticos suelen ser los clásicos
         score = len([b for b in row.get("Bookshelves", "").split(";") if b.strip()])
         for lang in [l.strip() for l in row.get("Language", "").split(";")]:
             if lang in LANGS:
-                by_lang[lang].append([int(row["Text#"]), title, ", ".join(authors[:2]), score, mask, ""])
+                by_lang[lang].append([int(row["Text#"]), title, ", ".join(authors[:2]), score, mask, "", birth, 0])
         n += 1
     return n
 
@@ -197,10 +236,10 @@ def parse_tar(data, by_lang):
             if rec is None:
                 continue
             n += 1
-            pid, title, author, langs, downloads, mask, summary = rec
+            pid, title, author, langs, downloads, mask, summary, birth, kb = rec
             for lang in langs:
                 if lang in LANGS:
-                    by_lang[lang].append([pid, title, author, downloads, mask, summary])
+                    by_lang[lang].append([pid, title, author, downloads, mask, summary, birth, kb])
     return n
 
 
@@ -209,7 +248,7 @@ def write(by_lang):
     index = {"generated": stamp, "topics": [t for t, _ in TOPICS], "langs": {}}
     for lang in LANGS:
         books = sorted(by_lang.get(lang, []), key=lambda b: -b[3])[: CAP.get(lang, DEFAULT_CAP)]
-        doc = {"v": 1, "lang": lang, "generated": stamp, "topics": index["topics"], "books": books}
+        doc = {"v": 2, "lang": lang, "generated": stamp, "topics": index["topics"], "books": books}
         raw = json.dumps(doc, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         (OUT / f"gutenberg-{lang}.json.gz").write_bytes(gzip.compress(raw, 9))
         index["langs"][lang] = len(books)
