@@ -46,6 +46,13 @@ object Ic {
         "folder" to "M3.5 7.5a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z",
         "import" to "M12 15V4M7.5 8.5L12 4l4.5 4.5M5 14v4.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V14",
         "chevron" to "M9 5l7 7-7 7",
+        // Traducir: una A y un trazo de otro alfabeto
+        "translate" to "M3.5 5.5h9M8 3.5v2M5.5 5.5c.6 3.2 2.7 5.6 6 7M10.5 5.5c-.7 3.4-3 6.1-6.5 7.6M12.5 20.5l4-10 4 10M13.8 17.3h5.4",
+        // Dos páginas abiertas
+        "pair" to "M12 6.5v13M12 6.5C10 5 7 4.5 3.5 5v13c3.5-.5 6.5 0 8.5 1.5 2-1.5 5-2 8.5-1.5V5C17 4.5 14 5 12 6.5z",
+        "speaker" to "M4 9.5h3.5L12 5.5v13l-4.5-4H4zM15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11",
+        "swap" to "M7 4.5L4 7.5l3 3M4 7.5h12.5M17 13.5l3 3-3 3M20 16.5H7.5",
+        "notas" to rr(4.5f, 3.5f, 15f, 17f, 2f) + "M8.5 8.5h7M8.5 12h7M8.5 15.5h4",
     )
 
     private val cache = HashMap<String, ImageVector>()

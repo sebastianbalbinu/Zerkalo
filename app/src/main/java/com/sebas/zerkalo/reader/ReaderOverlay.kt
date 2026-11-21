@@ -32,6 +32,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -118,6 +121,17 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
             )
         }
 
+        // Aviso discreto del modo estudio
+        AnimatedVisibility(!ui.controls && ui.studyTap && ui.lookup == null, Modifier.align(Alignment.BottomStart), enter = fadeIn(tween(400)), exit = fadeOut(tween(150))) {
+            Row(
+                Modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(start = 14.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ZIcon("translate", p.accent.copy(alpha = 0.75f), 14.dp)
+                Text("Toca una palabra", style = Type.uiSmall.copy(fontSize = 11.sp), color = p.text2.copy(alpha = 0.6f), modifier = Modifier.padding(start = 5.dp))
+            }
+        }
+
         // Barra superior
         AnimatedVisibility(ui.controls, Modifier.align(Alignment.TopCenter), enter = fadeIn(tween(200)) + slideInVertically { -it / 3 }, exit = fadeOut(tween(180)) + slideOutVertically { -it / 3 }) {
             Box(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(p.bg, p.bg.copy(alpha = 0.92f), p.bg.copy(alpha = 0f))))) {
@@ -130,7 +144,9 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                         ui.chapter, style = Type.uiSmall.copy(fontSize = 14.sp), color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.Center, modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                     )
-                    Spacer(Modifier.width(46.dp))
+                    RoundPill("translate", act.toggleStudy, active = ui.studyTap)
+                    Spacer(Modifier.width(8.dp))
+                    RoundPill("pair", { ui.sheet = "pair" }, active = ui.pairOn)
                 }
             }
         }
@@ -175,12 +191,21 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
         }
 
         ReaderToast(ui, Modifier.align(Alignment.BottomCenter))
+
+        AnimatedVisibility(
+            ui.lookup != null, Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn(tween(160)) + slideInVertically { it / 2 }, exit = fadeOut(tween(140)) + slideOutVertically { it / 2 },
+        ) {
+            ui.lookup?.let { LookupCard(it, act) }
+        }
     }
 
     when (ui.sheet) {
         "toc" -> TocSheet(ui, act) { ui.sheet = null }
         "type" -> TypeSheet(ui, act) { ui.sheet = null }
         "luz" -> LightSheet(ui, act) { ui.sheet = null }
+        "fonts" -> FontSheet(ui, act) { ui.sheet = "type" }
+        "pair" -> PairSheet(ui, act) { ui.sheet = null }
     }
     ui.activeMark?.let { MarkSheet(it, act) { ui.activeMark = null } }
     ui.noteFor?.let { NoteSheet(it, act) { ui.noteFor = null } }
@@ -269,7 +294,162 @@ private fun TocSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
 
 private fun locatorOf(m: Mark): Locator? = runCatching { Locator.fromJSON(JSONObject(m.locator)) }.getOrNull()
 
-private val fontPreview: List<FontFamily> = listOf(Fonts.literata, Fonts.mincho, Fonts.garamond, Fonts.gothic, Fonts.gothic)
+@Composable
+private fun FontSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    val ctx = LocalContext.current
+    val s = ui.settings
+    val avail = remember { FontFiles.available(ctx) }
+    val groups = listOf(
+        "Sin serifa · las más cómodas en pantalla" to avail.filter { !ReaderFonts[it].serif },
+        "Con serifa · de libro" to avail.filter { ReaderFonts[it].serif && ReaderFonts[it].css != null },
+        "Del libro" to avail.filter { ReaderFonts[it].css == null },
+    )
+    Sheet(onClose) {
+        Text("Letra", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+        Text("Todas son libres y gratuitas. Las marcadas con ● se eligieron por estudios de legibilidad.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
+        LazyColumn(Modifier.heightIn(max = 560.dp).padding(top = 6.dp)) {
+            groups.forEach { (title, list) ->
+                if (list.isEmpty()) return@forEach
+                item(key = title) { Label(title) }
+                items(list, key = { it }) { i ->
+                    val f = ReaderFonts[i]
+                    val sel = i == s.font
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(16.dp))
+                            .background(if (sel) p.text else p.card.copy(alpha = 0.55f))
+                            .clickable { act.settings(ui.settings.copy(font = i)) }.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(f.name + if (i in setOf(5, 6, 10)) "  ●" else "", fontFamily = FontFiles.preview(ctx, i), fontSize = 18.sp, color = if (sel) p.bg else p.text)
+                            Text(
+                                "Así se ve un párrafo. " + f.note, fontFamily = FontFiles.preview(ctx, i), fontSize = 13.5.sp,
+                                color = if (sel) p.bg.copy(alpha = 0.75f) else p.text2, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        if (sel) ZIcon("check", p.bg, 18.dp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Tarjeta de traducción: aparece abajo sin tapar el texto que se está leyendo. */
+@Composable
+private fun LookupCard(l: Lookup, act: ReaderActions) {
+    val p = LocalPalette.current
+    var choose by remember { mutableStateOf(false) }
+    Column(
+        Modifier.fillMaxWidth().windowInsetsPadding(WindowInsets.navigationBars).padding(10.dp)
+            .shadow(18.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)).background(p.surface)
+            .clickable(enabled = false) {}.padding(start = 20.dp, end = 12.dp, top = 14.dp, bottom = 16.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                l.text, style = Type.title.copy(fontSize = if (l.text.length > 40) 17.sp else 22.sp, lineHeight = 26.sp), color = p.text,
+                maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f),
+            )
+            Box(Modifier.size(40.dp).clip(CircleShape).clickable { act.speak(l.text, l.from) }, contentAlignment = Alignment.Center) { ZIcon("speaker", p.text2, 20.dp) }
+            Box(Modifier.size(40.dp).clip(CircleShape).clickable(onClick = act.closeLookup), contentAlignment = Alignment.Center) { ZIcon("close", p.text2, 18.dp) }
+        }
+        Row(Modifier.padding(top = 2.dp).clip(RoundedCornerShape(10.dp)).clickable { choose = !choose }.padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("${Traductor.name(l.from.substringBefore('-'))}  →  ${Traductor.name(l.to)}", style = Type.uiSmall, color = p.accent)
+            Text(if (choose) "  ▴" else "  ▾", style = Type.uiSmall, color = p.accent)
+        }
+        if (choose) LazyRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            items(Traductor.TARGETS) { (code, name) ->
+                val on = code == l.to
+                Box(
+                    Modifier.clip(RoundedCornerShape(14.dp)).background(if (on) p.text else p.card.copy(alpha = 0.7f))
+                        .clickable { choose = false; act.retarget(code) }.padding(horizontal = 12.dp, vertical = 7.dp),
+                ) { Text(name, style = Type.uiSmall, color = if (on) p.bg else p.text) }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        when {
+            l.error != null -> Text(l.error, style = Type.ui, color = p.text2)
+            l.translation != null -> Text(l.translation, style = Type.body.copy(fontSize = 19.sp), color = p.text)
+            else -> Text(l.status ?: "Traduciendo…", style = Type.ui, color = p.text2)
+        }
+        if (l.sentence.isNotBlank() && l.sentence != l.text) {
+            if (l.sentenceTranslation == null) {
+                Text(
+                    "Traducir la frase", style = Type.uiSmall, color = p.accent,
+                    modifier = Modifier.padding(top = 10.dp).clip(RoundedCornerShape(10.dp)).clickable(onClick = act.translateSentence).padding(vertical = 4.dp),
+                )
+            } else {
+                Column(Modifier.padding(top = 10.dp).heightIn(max = 180.dp).verticalScroll(rememberScrollState())) {
+                    Text(l.sentence, style = Type.body.copy(fontSize = 14.sp, fontStyle = FontStyle.Italic), color = p.text2)
+                    Text(l.sentenceTranslation, style = Type.body.copy(fontSize = 15.sp), color = p.text, modifier = Modifier.padding(top = 6.dp))
+                }
+            }
+        }
+        if (l.translation != null) {
+            Row(Modifier.padding(top = 12.dp, end = 8.dp)) {
+                PillButton(
+                    if (l.saved) "Guardada en Notas" else "Guardar palabra", act.saveWord, Modifier.fillMaxWidth(),
+                    ghost = l.saved, icon = if (l.saved) "check" else "plus",
+                )
+            }
+        }
+    }
+}
+
+/** Elegir la versión en otro idioma del mismo libro. */
+@Composable
+private fun PairSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    val candidates = remember { act.pairCandidates() }
+    Sheet(onClose) {
+        Text("Dos idiomas", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+        Text(
+            "Lee el libro junto a su versión en otro idioma: debajo con el teléfono vertical, al lado si lo giras. Las dos avanzan juntas.",
+            style = Type.ui, color = p.text2, modifier = Modifier.padding(top = 6.dp),
+        )
+        if (ui.hasPair) {
+            Card2 {
+                Caption("Pareja")
+                Text(ui.pairTitle, style = Type.ui, color = p.text, modifier = Modifier.padding(top = 4.dp))
+            }
+            Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                PillButton(if (ui.pairOn) "Ocultar" else "Mostrar", { act.togglePair(); onClose() }, Modifier.weight(1f), icon = "pair")
+                if (ui.pairOn) PillButton("Alinear", { act.syncPair(); onClose() }, Modifier.weight(1f), ghost = true, icon = "swap")
+            }
+            Text(
+                "Quitar la pareja", style = Type.uiSmall, color = p.text2,
+                modifier = Modifier.padding(top = 12.dp).clip(RoundedCornerShape(10.dp)).clickable { act.setPair(null); onClose() }.padding(6.dp),
+            )
+        }
+        Label(if (ui.hasPair) "Cambiar por otro libro" else "Elige la otra versión")
+        if (candidates.isEmpty()) {
+            Text("Primero baja la otra versión desde el Tansu (por ejemplo, el mismo título en inglés) y vuelve aquí.", style = Type.ui, color = p.text2)
+        } else LazyColumn(Modifier.heightIn(max = 380.dp)) {
+            items(candidates, key = { it.id }) { b ->
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { act.setPair(b); onClose() }.padding(vertical = 10.dp, horizontal = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    com.sebas.zerkalo.ui.BookCover(b, 36.dp, 52.dp, elevation = 2.dp)
+                    Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                        Text(b.title, style = Type.ui, color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text(
+                            listOf(b.author, b.lang.takeIf { it.isNotBlank() }?.let { Traductor.name(it) }.orEmpty()).filter { it.isNotBlank() }.joinToString(" · "),
+                            style = Type.uiSmall, color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Card2(content: @Composable () -> Unit) {
+    val p = LocalPalette.current
+    Column(Modifier.padding(top = 14.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.card.copy(alpha = 0.6f)).padding(14.dp)) { content() }
+}
 
 @Composable
 private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
@@ -280,14 +460,19 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
         Label("Modo")
         Segmented(listOf("Páginas", "Desplazamiento continuo"), if (s.scroll) 1 else 0, { act.settings(s.copy(scroll = it == 1)) })
         Label("Letra")
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(ReaderFonts.size) { i ->
-                Box(
-                    Modifier.height(42.dp).clip(RoundedCornerShape(21.dp)).background(if (i == s.font) p.text else p.card.copy(alpha = 0.7f))
-                        .clickable { act.settings(s.copy(font = i)) }.padding(horizontal = 18.dp),
-                    contentAlignment = Alignment.Center,
-                ) { Text(ReaderFonts[i], fontFamily = fontPreview[i], fontSize = 16.sp, color = if (i == s.font) p.bg else p.text) }
+        val ctx = LocalContext.current
+        val font = ReaderFonts.getOrElse(s.font) { ReaderFonts[0] }
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(p.card.copy(alpha = 0.7f)).clickable { ui.sheet = "fonts" }
+                .padding(horizontal = 18.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(font.name, fontFamily = FontFiles.preview(ctx, s.font), fontSize = 19.sp, color = p.text)
+                Text(font.note, style = Type.uiSmall, color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
+            Text("Cambiar", style = Type.uiSmall, color = p.accent)
+            ZIcon("chevron", p.accent, 16.dp)
         }
         Label("Tamaño", "${s.size} %")
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -442,7 +627,7 @@ private fun FinishedSheet(onClose: () -> Unit) {
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             Seal("読了", 104.dp, -4f, fontSize = 22f)
             Text("Terminaste el libro", style = Type.title, color = p.text, modifier = Modifier.padding(top = 18.dp))
-            Text("Su sello quedó en tu Cuaderno.", style = Type.ui, color = p.text2, modifier = Modifier.padding(top = 6.dp, bottom = 18.dp))
+            Text("Su sello quedó en tus Notas.", style = Type.ui, color = p.text2, modifier = Modifier.padding(top = 6.dp, bottom = 18.dp))
             PillButton("Gracias", onClose, Modifier.fillMaxWidth())
         }
     }

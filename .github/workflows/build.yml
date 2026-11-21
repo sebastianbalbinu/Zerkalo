@@ -33,6 +33,9 @@ jobs:
           done
           ls -la app/src/main/assets/catalogo
 
+      - name: Incluir fuentes libres de lectura
+        run: bash .github/scripts/fuentes.sh
+
       - name: Preparar llave de firma
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}

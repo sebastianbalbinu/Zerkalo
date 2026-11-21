@@ -69,6 +69,19 @@ object Prefs {
         get() = sp.getFloat("spp", 45f)
         set(v) { sp.edit().putFloat("spp", v).apply() }
 
+    /** Idioma al que se traduce al tocar una palabra ("" = el del teléfono). */
+    var translateTo: String
+        get() = sp.getString("trTo", "") ?: ""
+        set(v) { sp.edit().putString("trTo", v).apply() }
+
+    /** Tocar una palabra la traduce. */
+    var studyTap: Boolean
+        get() = sp.getBoolean("studyTap", false)
+        set(v) { sp.edit().putBoolean("studyTap", v).apply() }
+
+    fun pairOn(bookId: String) = sp.getBoolean("pairOn_$bookId", false)
+    fun setPairOn(bookId: String, on: Boolean) { sp.edit().putBoolean("pairOn_$bookId", on).apply() }
+
     var welcomed: Boolean
         get() = sp.getBoolean("welcomed", false)
         set(v) { sp.edit().putBoolean("welcomed", v).apply() }

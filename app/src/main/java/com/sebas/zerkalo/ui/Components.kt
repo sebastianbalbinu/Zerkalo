@@ -65,22 +65,23 @@ fun glassStyle(p: Palette) = HazeStyle(
  * En Android 12 o más es desenfoque real; en teléfonos más viejos, un velo de color suave.
  */
 @Composable
-fun ProgressiveEdge(state: HazeState, top: Boolean, height: Dp, modifier: Modifier = Modifier) {
+fun ProgressiveEdge(@Suppress("UNUSED_PARAMETER") state: HazeState, top: Boolean, height: Dp, modifier: Modifier = Modifier) {
+    // Antes era un desenfoque progresivo que se recalculaba en cada cuadro al desplazar (caro en teléfonos medios).
+    // Un degradado del color del papel da casi el mismo efecto y no cuesta nada.
     val p = LocalPalette.current
-    Box(
-        modifier.fillMaxWidth().height(height).hazeEffect(
-            state,
-            HazeStyle(backgroundColor = p.bg, tints = listOf(HazeTint(p.bg.copy(alpha = 0.35f))), blurRadius = 18.dp, noiseFactor = 0f),
-        ) {
-            progressive = if (top) HazeProgressive.verticalGradient(startIntensity = 1f, endIntensity = 0f, preferPerformance = true)
-            else HazeProgressive.verticalGradient(startIntensity = 0f, endIntensity = 1f, preferPerformance = true)
-        }.background(
-            Brush.verticalGradient(
-                if (top) listOf(p.bg.copy(alpha = 0.55f), p.bg.copy(alpha = 0.18f), Color.Transparent)
-                else listOf(Color.Transparent, p.bg.copy(alpha = 0.22f), p.bg.copy(alpha = 0.6f)),
-            ),
-        ),
-    )
+    val brush = remember(p.bg, top) {
+        if (top) Brush.verticalGradient(listOf(p.bg.copy(alpha = 0.9f), p.bg.copy(alpha = 0.55f), Color.Transparent))
+        else Brush.verticalGradient(listOf(Color.Transparent, p.bg.copy(alpha = 0.35f), p.bg.copy(alpha = 0.8f)))
+    }
+    Box(modifier.fillMaxWidth().height(height).background(brush))
+}
+
+/** Texturas de madera: se decodifican una sola vez para toda la app. */
+object WoodBitmaps {
+    private val cache = HashMap<Int, ImageBitmap>()
+    fun get(res: android.content.res.Resources, id: Int): ImageBitmap = synchronized(cache) {
+        cache.getOrPut(id) { ImageBitmap.imageResource(res, id) }
+    }
 }
 
 /** Botón redondo, con un pequeño "hundimiento" al tocarlo. */
@@ -196,8 +197,9 @@ fun Shelf(modifier: Modifier = Modifier, content: @Composable BoxScope.() -> Uni
         Wood.NOGAL -> R.drawable.shelf_nogal_top to R.drawable.shelf_nogal_front
         else -> R.drawable.shelf_keyaki_top to R.drawable.shelf_keyaki_front
     }
-    val top = woodBrush(ImageBitmap.imageResource(topRes))
-    val front = woodBrush(ImageBitmap.imageResource(frontRes))
+    val res = androidx.compose.ui.platform.LocalContext.current.resources
+    val top = woodBrush(WoodBitmaps.get(res, topRes))
+    val front = woodBrush(WoodBitmaps.get(res, frontRes))
     Box(modifier.fillMaxWidth()) {
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth()) {
             Box(Modifier.fillMaxWidth().height(12.dp).background(top).background(Brush.verticalGradient(listOf(Color(0x22000000), Color(0x00000000)))))

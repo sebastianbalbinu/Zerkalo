@@ -133,9 +133,10 @@ fun ZerkaloTheme(content: @Composable () -> Unit) {
  */
 @Composable
 fun Modifier.paperBackground(p: Palette = LocalPalette.current): Modifier {
+    val res = androidx.compose.ui.platform.LocalContext.current.resources
     val bmp: ImageBitmap? = when (p.wood) {
-        Wood.NOGAL -> ImageBitmap.imageResource(R.drawable.wood_nogal_bg)
-        Wood.KEYAKI -> ImageBitmap.imageResource(R.drawable.washi_bg)
+        Wood.NOGAL -> WoodBitmaps.get(res, R.drawable.wood_nogal_bg)
+        Wood.KEYAKI -> WoodBitmaps.get(res, R.drawable.washi_bg)
         Wood.NONE -> null
     }
     val brush: Brush? = remember(bmp) { bmp?.let { ShaderBrush(ImageShader(it, TileMode.Repeated, TileMode.Repeated)) } }

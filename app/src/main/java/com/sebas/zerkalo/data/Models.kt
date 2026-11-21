@@ -39,6 +39,7 @@ data class Book(
     val finishedAt: Long = 0,
     val binding: Binding = Binding.forSeed(id),
     val useBinding: Boolean = false,
+    val pair: String? = null,   // la misma obra en otro idioma (para leer lado a lado)
 ) {
     val reading get() = progress > 0.0 && finishedAt == 0L
     val finished get() = finishedAt > 0L
@@ -48,7 +49,7 @@ data class Book(
         .put("source", source).put("summary", summary).put("file", file).put("cover", cover ?: JSONObject.NULL)
         .put("addedAt", addedAt).put("lastOpened", lastOpened).put("progress", progress)
         .put("locator", locator ?: JSONObject.NULL).put("finishedAt", finishedAt)
-        .put("binding", binding.toJson()).put("useBinding", useBinding)
+        .put("binding", binding.toJson()).put("useBinding", useBinding).put("pair", pair ?: JSONObject.NULL)
 
     companion object {
         fun fromJson(o: JSONObject): Book {
@@ -60,13 +61,13 @@ data class Book(
                 lastOpened = o.optLong("lastOpened"), progress = o.optDouble("progress", 0.0),
                 locator = o.optStringOrNull("locator"), finishedAt = o.optLong("finishedAt"),
                 binding = Binding.fromJson(o.optJSONObject("binding")) ?: Binding.forSeed(id),
-                useBinding = o.optBoolean("useBinding"),
+                useBinding = o.optBoolean("useBinding"), pair = o.optStringOrNull("pair"),
             )
         }
     }
 }
 
-/** Subrayado ("hl") o shiori ("shiori") dentro de un libro. */
+/** Subrayado ("hl"), shiori ("shiori") o palabra guardada ("word": text = palabra, note = traducción, context = la frase). */
 data class Mark(
     val id: String,
     val bookId: String,
@@ -78,16 +79,17 @@ data class Mark(
     val chapter: String = "",
     val progress: Double = 0.0,
     val at: Long = System.currentTimeMillis(),
+    val context: String = "",
 ) {
     fun toJson(): JSONObject = JSONObject().put("id", id).put("bookId", bookId).put("type", type)
         .put("locator", locator).put("text", text).put("note", note).put("color", color)
-        .put("chapter", chapter).put("progress", progress).put("at", at)
+        .put("chapter", chapter).put("progress", progress).put("at", at).put("context", context)
 
     companion object {
         fun fromJson(o: JSONObject) = Mark(
             o.getString("id"), o.getString("bookId"), o.optString("type"), o.optString("locator"),
             o.optString("text"), o.optString("note"), o.optInt("color"), o.optString("chapter"),
-            o.optDouble("progress", 0.0), o.optLong("at"),
+            o.optDouble("progress", 0.0), o.optLong("at"), o.optString("context"),
         )
     }
 }

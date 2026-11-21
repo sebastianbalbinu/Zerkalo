@@ -192,7 +192,7 @@ private fun ShelfRow(title: String, more: String, books: List<Book>, addSlot: Bo
                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                 verticalAlignment = Alignment.Bottom,
             ) {
-                items(books, key = { it.id }) { b ->
+                items(books, key = { it.id }, contentType = { "libro" }) { b ->
                     BookCover(b, 100.dp, 148.dp, Modifier.clickable { a.open(Screen.BookDetail(b.id)) }, ribbon = b.reading)
                 }
                 if (addSlot) item(key = "add") {
