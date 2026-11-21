@@ -89,6 +89,8 @@ dependencies {
     // Desenfoque progresivo (Haze, Apache 2.0) y portadas (Coil, Apache 2.0)
     implementation("dev.chrisbanes.haze:haze:1.7.1")
     implementation("io.coil-kt:coil-compose:2.7.0")
+    // Traducción dentro del teléfono (los idiomas se bajan una vez y funcionan sin internet)
+    implementation("com.google.mlkit:translate:17.0.3")
 
     // Instala los perfiles de arranque que traen Compose y las demás librerías: abre y desliza más rápido.
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
