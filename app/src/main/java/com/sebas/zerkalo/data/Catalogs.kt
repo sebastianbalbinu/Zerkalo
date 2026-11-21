@@ -83,10 +83,9 @@ object Catalogs {
     // ---------------- Project Gutenberg ----------------
     /** Espejos oficiales de Gutenberg: se reparte la carga y se evita el "ocupado" (503). */
     private val MIRRORS = listOf(
-        "https://aleph.gutenberg.org/cache/epub",
-        "https://www.gutenberg.org/cache/epub",
-        "https://mirror.cs.odu.edu/gutenberg-epub",
         "https://gutenberg.pglaf.org/cache/epub",
+        "https://mirror.cs.odu.edu/gutenberg-epub",
+        "https://www.gutenberg.org/cache/epub",
     )
 
     fun gutenbergUrls(id: String, fromFormats: String?): List<String> {
@@ -95,7 +94,7 @@ object Catalogs {
         return (order.map { "$it/$id/pg$id-images-3.epub" } + order.take(2).map { "$it/$id/pg$id-images.epub" } + listOfNotNull(fromFormats)).distinct()
     }
 
-    private fun gutenbergCover(id: String) = "https://aleph.gutenberg.org/cache/epub/$id/pg$id.cover.medium.jpg"
+    private fun gutenbergCover(id: String) = "https://gutenberg.pglaf.org/cache/epub/$id/pg$id.cover.medium.jpg"
 
     // ---------------- Índice propio de Gutenberg ----------------
     private class IndexBook(val id: Int, val title: String, val author: String, val downloads: Int, val mask: Int, val summary: String, val norm: String)
