@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent?) {
         intent ?: return
         intent.getStringExtra("zerkalo.abrir")?.let { AppEvents.openBook.value = it; intent.removeExtra("zerkalo.abrir") }
+        if (intent.hasExtra("zerkalo.tab")) { AppEvents.tab.value = intent.getIntExtra("zerkalo.tab", 0); intent.removeExtra("zerkalo.tab") }
         val uri: Uri? = when (intent.action) {
             Intent.ACTION_VIEW -> intent.data
             Intent.ACTION_SEND -> if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
