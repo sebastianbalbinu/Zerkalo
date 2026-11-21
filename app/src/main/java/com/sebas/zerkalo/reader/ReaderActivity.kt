@@ -304,6 +304,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                 }
             }
         }
+        followAudio()
         ui.loading = false
         Log.i("Zerkalo", "ZK_READER_OK ${book.title}")
         refreshPairInfo()
@@ -482,6 +483,36 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val n = norm(title)
         val hit = ui.toc.firstOrNull { t -> val c = norm(t.title); c.length > 3 && (n.contains(c) || c.contains(n)) }
         if (hit != null) { navigator?.go(hit.link, animated = false); setControls(false) } else ui.say("No encontré ese capítulo en el texto")
+    }
+
+    /**
+     * La página sigue al narrador: cuando el audiolibro unido a este libro pasa de capítulo,
+     * el texto salta a ese capítulo (por título; si no coincide, por proporción).
+     */
+    private fun followAudio() {
+        var last: Pair<String, Int>? = null
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                com.sebas.zerkalo.audio.Listen.state.collect { st ->
+                    val ab = st.book?.takeIf { it.linkedBook == book.id && !st.sample } ?: run { last = null; return@collect }
+                    val now = ab.id to st.index
+                    val prev = last
+                    last = now
+                    if (prev == null || prev == now || !st.playing) return@collect
+                    if (!com.sebas.zerkalo.data.Prefs.audioFollow || ui.sheet != null || ui.auto) return@collect
+                    val track = ab.tracks.getOrNull(st.index) ?: return@collect
+                    val n = norm(track.title)
+                    val hit = ui.toc.firstOrNull { t -> val c = norm(t.title); c.length > 3 && n.length > 3 && (n.contains(c) || c.contains(n)) }
+                    if (hit != null) { navigator?.go(hit.link, animated = false); return@collect }
+                    val pub = publication ?: return@collect
+                    val size = pub.readingOrder.size
+                    if (size == 0 || ab.tracks.isEmpty()) return@collect
+                    val r = ((st.index.toFloat() / ab.tracks.size) * size).toInt().coerceIn(0, size - 1)
+                    val cur = navigator?.currentLocator?.value?.let { resourceIndex(pub, it) } ?: -1
+                    if (r != cur) pub.locatorFromLink(pub.readingOrder[r])?.let { navigator?.go(it, animated = false) }
+                }
+            }
+        }
     }
 
     // ---------------- avance automático ----------------
@@ -852,9 +883,13 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         toggleAuto = { if (ui.auto) stopAuto() else startAuto() },
         findAudio = { com.sebas.zerkalo.data.AudioStore.findFor(book) },
         linkedAudio = { com.sebas.zerkalo.data.AudioStore.forBook(book.id) },
-        listen = { ab ->
-            val linked = ab.copy(linkedBook = book.id)
-            com.sebas.zerkalo.audio.Listen.play(this, linked, trackFor(linked), 0)
+        listen = { ab, here ->
+            // Si ya lo venías escuchando, conserva por dónde ibas en cada capítulo.
+            val base = com.sebas.zerkalo.data.AudioStore.get(ab.id)?.let { it.copy(tracks = it.tracks.ifEmpty { ab.tracks }) } ?: ab
+            val linked = base.copy(linkedBook = book.id)
+            val i = if (here) trackFor(linked) else linked.index
+            com.sebas.zerkalo.audio.Listen.play(this, linked, i, linked.spot(i))
+            com.sebas.zerkalo.data.AudioStore.link(linked.id, book.id)
             ui.sheet = null
         },
         goToTrack = { title -> goToChapterNamed(title) },
@@ -1082,7 +1117,7 @@ class ReaderActions(
     val toggleAuto: () -> Unit,
     val findAudio: suspend () -> List<com.sebas.zerkalo.data.AudioBook>,
     val linkedAudio: () -> com.sebas.zerkalo.data.AudioBook?,
-    val listen: (com.sebas.zerkalo.data.AudioBook) -> Unit,
+    val listen: (com.sebas.zerkalo.data.AudioBook, Boolean) -> Unit, // true = desde el capítulo donde vas leyendo
     val goToTrack: (String) -> Unit,
     val setInks: (List<com.sebas.zerkalo.data.InkColor>) -> Unit,
     val highlightWith: (Int) -> Unit,

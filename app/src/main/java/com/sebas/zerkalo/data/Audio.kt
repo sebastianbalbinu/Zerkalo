@@ -36,47 +36,86 @@ data class AudioBook(
     val position: Long = 0,
     val updatedAt: Long = 0,
     val linkedBook: String? = null, // el EPUB de la biblioteca con el que se lee a la vez
+    val spots: Map<Int, Long> = emptyMap(), // por dónde ibas en cada capítulo empezado
 ) {
     val cover get() = "https://archive.org/services/img/$id"
     val totalSeconds get() = tracks.sumOf { it.seconds }
 
+    /** Dónde retomar un capítulo: el último punto escuchado en él, o el inicio. */
+    fun spot(i: Int): Long = if (i == index && position > 0) position else spots[i] ?: 0L
+
     fun toJson(): JSONObject = JSONObject().put("id", id).put("title", title).put("author", author).put("lang", lang)
         .put("about", about).put("tracks", JSONArray(tracks.map { it.toJson() })).put("index", index).put("pos", position)
         .put("at", updatedAt).put("book", linkedBook ?: JSONObject.NULL)
+        .put("spots", JSONObject().apply { spots.forEach { (k, v) -> put(k.toString(), v) } })
 
     companion object {
         fun fromJson(o: JSONObject) = AudioBook(
             o.getString("id"), o.optString("title"), o.optString("author"), o.optString("lang"), o.optString("about"),
             o.optJSONArray("tracks")?.let { a -> (0 until a.length()).map { AudioTrack.fromJson(a.getJSONObject(it)) } } ?: emptyList(),
             o.optInt("index"), o.optLong("pos"), o.optLong("at"), o.optString("book").takeIf { it.isNotBlank() && it != "null" },
+            o.optJSONObject("spots")?.let { j -> j.keys().asSequence().mapNotNull { k -> k.toIntOrNull()?.let { it to j.optLong(k) } }.toMap() } ?: emptyMap(),
         )
     }
 }
 
+/** Un idioma de LibriVox: código de la app, nombre y cómo lo escribe el Internet Archive. */
+data class AudioLang(val id: String, val name: String, val archive: List<String>)
+
+/** Orden de los resultados del buscador de audiolibros. */
+enum class AudioSort(val label: String, val archive: String) {
+    POPULAR("Más escuchados", "downloads desc"),
+    RECENT("Recientes", "addeddate desc"),
+    TITLE("A–Z", "titleSorter asc"),
+}
+
 object LibriVox {
-    private val LANG = mapOf(
-        "es" to "(spa OR Spanish)", "en" to "(eng OR English)", "fr" to "(fre OR French)", "pt" to "(por OR Portuguese)",
-        "de" to "(ger OR German)", "it" to "(ita OR Italian)", "ru" to "(rus OR Russian)", "ja" to "(jpn OR Japanese)", "la" to "(lat OR Latin)",
+    /** "all" = todos los idiomas. */
+    val LANGS = listOf(
+        AudioLang("all", "Todos", emptyList()),
+        AudioLang("es", "Español", listOf("spa", "Spanish")), AudioLang("en", "English", listOf("eng", "English")),
+        AudioLang("fr", "Français", listOf("fre", "French")), AudioLang("pt", "Português", listOf("por", "Portuguese")),
+        AudioLang("de", "Deutsch", listOf("ger", "German")), AudioLang("it", "Italiano", listOf("ita", "Italian")),
+        AudioLang("ru", "Русский", listOf("rus", "Russian")), AudioLang("ja", "日本語", listOf("jpn", "Japanese")),
+        AudioLang("la", "Latina", listOf("lat", "Latin")), AudioLang("nl", "Nederlands", listOf("dut", "Dutch")),
+        AudioLang("pl", "Polski", listOf("pol", "Polish")), AudioLang("el", "Ελληνικά", listOf("gre", "Greek")),
+        AudioLang("zh", "中文", listOf("chi", "Chinese")), AudioLang("sv", "Svenska", listOf("swe", "Swedish")),
+        AudioLang("fi", "Suomi", listOf("fin", "Finnish")), AudioLang("da", "Dansk", listOf("dan", "Danish")),
     )
+
+    fun langName(id: String) = LANGS.firstOrNull { it.id == id && id != "all" }?.name.orEmpty()
+
+    /** El idioma de un resultado, a partir de lo que dice el Internet Archive ("Spanish", "spa"…). */
+    private fun langOf(raw: String): String {
+        val r = raw.lowercase()
+        return LANGS.firstOrNull { l -> l.archive.any { it.lowercase() == r } }?.id.orEmpty()
+    }
 
     private fun enc(s: String) = URLEncoder.encode(s, "UTF-8")
 
-    /** Audiolibros de LibriVox en un idioma; con [query], los que coinciden con el título o el autor. */
-    suspend fun search(lang: String, query: String? = null, rows: Int = 40, raw: Boolean = false): List<AudioBook> {
+    /**
+     * Audiolibros de LibriVox en un idioma ("all" = todos); con [query], los que coinciden con el título o el autor.
+     * [page] empieza en 1 (para "Cargar más").
+     */
+    suspend fun search(
+        lang: String, query: String? = null, rows: Int = 40, raw: Boolean = false,
+        sort: AudioSort = AudioSort.POPULAR, page: Int = 1,
+    ): List<AudioBook> {
         val q = buildString {
             append("collection:librivoxaudio AND mediatype:audio")
-            LANG[lang]?.let { append(" AND language:").append(it) }
+            LANGS.firstOrNull { it.id == lang }?.archive?.takeIf { it.isNotEmpty() }?.let { append(" AND language:(").append(it.joinToString(" OR ")).append(")") }
             if (!query.isNullOrBlank()) append(" AND (").append(if (raw) query else query.replace(Regex("[():\\\"]"), " ")).append(")")
         }
         val u = "https://archive.org/advancedsearch.php?q=" + enc(q) +
-            "&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=description&sort[]=downloads+desc&rows=$rows&page=1&output=json"
+            "&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=description&fl[]=language&sort[]=" + enc(sort.archive) +
+            "&rows=$rows&page=$page&output=json"
         val docs = JSONObject(Net.text(u, timeout = 20_000)).optJSONObject("response")?.optJSONArray("docs") ?: JSONArray()
         fun str(o: JSONObject, k: String): String = when (val v = o.opt(k)) { is JSONArray -> v.optString(0); null -> ""; else -> v.toString() }
         return (0 until docs.length()).map { i ->
             val d = docs.getJSONObject(i)
             AudioBook(
                 id = d.optString("identifier"), title = cleanTitle(str(d, "title")), author = Catalogs.niceName(str(d, "creator")),
-                lang = lang, about = Importer.cleanHtml(str(d, "description")).take(700),
+                lang = if (lang == "all") langOf(str(d, "language")) else lang, about = Importer.cleanHtml(str(d, "description")).take(700),
             )
         }
     }
@@ -138,8 +177,23 @@ object AudioStore {
     }
 
     fun progress(id: String, index: Int, position: Long) {
-        val b = get(id) ?: return
-        books.value = books.value.map { if (it.id == id) it.copy(index = index, position = position, updatedAt = System.currentTimeMillis()) else it }
+        get(id) ?: return
+        books.value = books.value.map {
+            if (it.id == id) it.copy(index = index, position = position, spots = it.spots + (index to position), updatedAt = System.currentTimeMillis()) else it
+        }
+        save()
+    }
+
+    /** Un capítulo escuchado hasta el final: la próxima vez empieza desde el inicio. */
+    fun finishTrack(id: String, i: Int) {
+        get(id)?.takeIf { i in it.spots } ?: return
+        books.value = books.value.map { if (it.id == id) it.copy(spots = it.spots - i) else it }
+        save()
+    }
+
+    /** Une el audiolibro con un EPUB de la biblioteca, para leer mientras se escucha. */
+    fun link(id: String, bookId: String) {
+        books.value = books.value.map { if (it.id == id) it.copy(linkedBook = bookId) else it }
         save()
     }
 
@@ -171,6 +225,17 @@ object AudioStore {
     fun deleteDownload(id: String) {
         File(dir, id).deleteRecursively()
         downloads.value = downloads.value - id
+    }
+
+    private fun norm(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}+"), "").replace(Regex("[^\\p{L}\\p{N} ]"), " ").replace(Regex("\\s+"), " ").trim()
+
+    /** El EPUB de tu biblioteca que es el mismo libro que este audiolibro (ya unido, o por título). */
+    fun bookFor(b: AudioBook): Book? {
+        b.linkedBook?.let { Library.book(it) }?.let { return it }
+        val t = norm(b.title)
+        if (t.length < 3) return null
+        return Library.books.value.firstOrNull { val n = norm(it.title); n.length >= 3 && (n == t || n.startsWith(t) || t.startsWith(n)) }
     }
 
     /** Busca en LibriVox la versión en audio de un libro de tu biblioteca. */
