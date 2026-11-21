@@ -118,6 +118,12 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
             return@Box
         }
 
+        // Capítulo nuevo: el papel cubre el texto un instante mientras se acomoda y luego se desvanece
+        val fade by androidx.compose.animation.core.animateFloatAsState(
+            if (ui.chapterFade) 1f else 0f, androidx.compose.animation.core.tween(if (ui.chapterFade) 0 else 240), label = "capitulo",
+        )
+        if (fade > 0.01f) Box(Modifier.fillMaxSize().background(p.bg.copy(alpha = fade)))
+
         // Regla de lectura: atenúa todo menos la franja que estás leyendo.
         if (ui.settings.ruler && !ui.controls) ReadingRuler(ui)
 
@@ -441,7 +447,7 @@ private fun FontSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                         Column(Modifier.weight(1f)) {
                             Text(f.name + if (i in setOf(5, 6, 10)) "  ●" else "", fontFamily = FontFiles.preview(ctx, i), fontSize = 18.sp, color = if (sel) p.bg else p.text)
                             Text(
-                                "Así se ve un párrafo. " + f.note, fontFamily = FontFiles.preview(ctx, i), fontSize = 13.5.sp,
+                                "Así se ve un párrafo. " + f.note + if (FontFiles.hasSmallCaps(ctx, i)) " · versalitas reales" else "", fontFamily = FontFiles.preview(ctx, i), fontSize = 13.5.sp,
                                 color = if (sel) p.bg.copy(alpha = 0.75f) else p.text2, maxLines = 2, overflow = TextOverflow.Ellipsis,
                             )
                         }
@@ -828,7 +834,7 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                 )
                 PillButton(if (ui.auto) "Detener avance automático" else "Empezar avance automático", { act.toggleAuto(); onClose() }, Modifier.fillMaxWidth().padding(top = 10.dp), icon = if (ui.auto) "pause" else "auto")
                 Text(
-                    "Toques: izquierda o arriba, página anterior · derecha o abajo, siguiente · centro, menú. Desliza por el borde izquierdo para el brillo. Atrás cierra lo que esté abierto antes de salir del libro.",
+                    "Toques: izquierda o arriba, página anterior · derecha o abajo, siguiente · centro, menú. Con dos idiomas, las páginas se pasan por los lados. En modo traducir, toca una palabra; arriba o abajo abre el menú. El borde izquierdo cambia el brillo y atrás cierra lo abierto antes de salir del libro.",
                     style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 14.dp),
                 )
             }

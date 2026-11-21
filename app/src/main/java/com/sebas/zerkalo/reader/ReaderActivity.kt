@@ -135,6 +135,7 @@ class ReaderUi {
     var camX by mutableFloatStateOf(0.5f)   // centro de la cámara (0 izquierda, 1 derecha)
     var camHalf by mutableFloatStateOf(0f)  // medio ancho de la cámara, en dp
     var typeTab by mutableIntStateOf(0)     // pestaña abierta en las opciones de lectura
+    var chapterFade by mutableStateOf(false) // papel encima mientras el capítulo nuevo se acomoda
     var pairSwap by mutableStateOf(false)       // la pareja va arriba (o a la izquierda)
     var pairRatio by mutableIntStateOf(50)      // % de la pantalla para el libro principal
     var lang by mutableStateOf("")
@@ -166,6 +167,9 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private var pairJob: Job? = null
     private var ignorePairUntil = 0L   // la pareja se está moviendo porque la movió el lector
     private var ignoreMainUntil = 0L   // el libro principal se está moviendo porque lo movió la pareja
+    private var alignJob: Job? = null  // ajuste fino de la pareja, párrafo por párrafo
+    private var lastTouch = 0L         // último toque o arrastre de la persona
+    private var lastPageCheck = 0L     // última vez que se revisó si el narrador ya pasó de página
 
     // La misma obra en otro idioma
     private var pairBook: Book? = null
@@ -411,7 +415,12 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         }
         val files = FontFiles.available(this@ReaderActivity).toSet()
         ReaderFonts.forEachIndexed { i, f ->
-            if (f.css != null && f.regular != null && i in files) declareFont(f.css, "fonts/${f.regular}", f.italic?.let { "fonts/$it" }, f.bold?.let { "fonts/$it" })
+            if (f.css != null && f.regular != null && i in files) {
+                val ctx = this@ReaderActivity
+                val italic = f.italic?.takeIf { FontFiles.has(ctx, it) }
+                val bold = f.bold?.takeIf { FontFiles.has(ctx, it) } ?: f.boldAlt?.takeIf { FontFiles.has(ctx, it) }
+                declareFont(f.css, "fonts/${f.regular}", italic?.let { "fonts/$it" }, bold?.let { "fonts/$it" })
+            }
         }
     }
 
@@ -434,6 +443,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
      */
     private fun tapListener(nav: EpubNavigatorFragment, pair: Boolean) = object : InputListener {
         override fun onTap(event: TapEvent): Boolean {
+            lastTouch = System.currentTimeMillis()
             val w = nav.publicationView.width.toFloat().coerceAtLeast(1f)
             val h = nav.publicationView.height.toFloat().coerceAtLeast(1f)
             val x = event.point.x / w
@@ -453,6 +463,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                 ui.studyTap -> if (x < 0.5f) -1 else 1
                 x < 0.33f -> -1
                 x > 0.67f -> 1
+                // Con dos idiomas cada mitad es baja: el centro abre el menú y las páginas se pasan por los lados
+                ui.pairOn -> 0
                 y < 0.22f -> -1
                 y > 0.78f -> 1
                 else -> 0
@@ -473,6 +485,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             val dy = event.offset.y
             when (event.type) {
                 DragEvent.Type.Start -> {
+                    lastTouch = System.currentTimeMillis()
                     dragEdge[nav] = ""
                     lifecycleScope.launch { dragEdge[nav] = runCatching { nav.evaluateJavascript(EDGE_STATE) }.getOrNull().orEmpty() }
                     if (ui.auto) stopAuto()
@@ -566,6 +579,33 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     }
 
     /**
+     * Dentro del capítulo: si el narrador ya va más allá de la página que se ve, se pasa una página.
+     * Solo hacia adelante, y nunca si la persona tocó la pantalla hace poco (quizá va adelantada).
+     */
+    private fun pageWithNarrator(ab: com.sebas.zerkalo.data.AudioBook, st: com.sebas.zerkalo.audio.Listen.State) {
+        if (!com.sebas.zerkalo.data.Prefs.audioFollow || ui.sheet != null || ui.auto || ui.lookup != null || st.duration <= 0) return
+        val t = System.currentTimeMillis()
+        if (t - lastPageCheck < 3_000 || t - lastTouch < 10_000) return
+        lastPageCheck = t
+        val nav = navigator ?: return
+        val pub = publication ?: return
+        val loc = nav.currentLocator.value
+        val track = ab.tracks.getOrNull(st.index) ?: return
+        // ¿El capítulo que se ve es el que suena? Por título; si no coincide, por proporción.
+        val n = norm(track.title)
+        val hit = ui.toc.firstOrNull { e -> val c = norm(e.title); c.length > 3 && n.length > 3 && (n.contains(c) || c.contains(n)) }
+        val want = hit?.let { h -> pub.readingOrder.indexOfFirst { it.url().toString().substringBefore('#') == h.link.url().toString().substringBefore('#') } }
+            ?.takeIf { it >= 0 } ?: ((st.index.toFloat() / ab.tracks.size.coerceAtLeast(1)) * pub.readingOrder.size).toInt()
+        if (resourceIndex(pub, loc) != want) return
+        val frac = (st.position.toDouble() / st.duration).coerceIn(0.0, 1.0)
+        val p = loc.locations.progression ?: 0.0
+        lifecycleScope.launch {
+            val page = runCatching { nav.evaluateJavascript(PAGE_SHARE) }.getOrNull()?.trim('"')?.toDoubleOrNull()?.takeIf { it in 0.0001..1.0 } ?: return@launch
+            if (frac > p + page * 1.05 && frac < p + page * 4) turn(nav, 1)
+        }
+    }
+
+    /**
      * La página sigue al narrador: cuando el audiolibro unido a este libro pasa de capítulo,
      * el texto salta a ese capítulo (por título; si no coincide, por proporción).
      */
@@ -578,6 +618,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                     val now = ab.id to st.index
                     val prev = last
                     last = now
+                    if (prev == now && st.playing) { pageWithNarrator(ab, st); return@collect }
                     if (prev == null || prev == now || !st.playing) return@collect
                     if (!com.sebas.zerkalo.data.Prefs.audioFollow || ui.sheet != null || ui.auto) return@collect
                     val track = ab.tracks.getOrNull(st.index) ?: return@collect
@@ -827,12 +868,28 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         if (!force && typesetHref[nav] == href) return
         typesetHref[nav] = href
         val lang = if (nav === pairNav) pairLang else ui.lang
+        val entry = nav.currentLocator.value
+        val fresh = !force && nav === navigator
         lifecycleScope.launch {
-            // Dos pasadas: al aparecer el capítulo y cuando ya cargaron las letras e imágenes
-            for (wait in listOf(60L, 700L)) {
-                delay(wait)
-                val r = runCatching { nav.evaluateJavascript(Typeset.script(ui.settings, lang)) }.getOrNull()
-                if (wait == 60L) Log.i("Zerkalo", "ZK_TYPESET $href $r")
+            // Capítulo nuevo: el papel lo cubre un instante mientras se acomoda, así el texto no "salta" a la vista
+            if (fresh) ui.chapterFade = true
+            try {
+                for ((i, wait) in listOf(0L, 240L, 700L).withIndex()) {
+                    delay(wait)
+                    val r = runCatching { nav.evaluateJavascript(Typeset.script(ui.settings, lang)) }.getOrNull()
+                    if (i == 0) Log.i("Zerkalo", "ZK_TYPESET $href $r")
+                    if (i == 1) {
+                        // Al entrar por el final (o a un punto guardado), volver a ese punto tras reacomodar
+                        val p = entry.locations.progression ?: 0.0
+                        val now = nav.currentLocator.value
+                        if (fresh && !ui.settings.scroll && p > 0.001 && now.href.toString() == href &&
+                            abs((now.locations.progression ?: 0.0) - p) > 0.0005
+                        ) nav.go(entry, animated = false)
+                        ui.chapterFade = false
+                    }
+                }
+            } finally {
+                ui.chapterFade = false
             }
         }
     }
@@ -1153,6 +1210,29 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         if (!force && cur.href.toString() == target.href.toString() && abs((cur.locations.progression ?: 0.0) - (target.locations.progression ?: 0.0)) < 0.01) return
         ignorePairUntil = System.currentTimeMillis() + 900
         pn.go(target, animated = false)
+        if (mp.readingOrder.size == pp.readingOrder.size) refineAlign(navigator ?: return, pn, toPair = true)
+    }
+
+    /**
+     * Ajuste fino de las ediciones casadas: el párrafo que se ve arriba en una queda arriba en la otra
+     * (si tienen distinta cantidad de párrafos, en la misma proporción). Así una traducción más larga
+     * no queda unos párrafos adelante o atrás.
+     */
+    private fun refineAlign(from: EpubNavigatorFragment, to: EpubNavigatorFragment, toPair: Boolean) {
+        alignJob?.cancel()
+        alignJob = lifecycleScope.launch {
+            delay(380)
+            val at = runCatching { from.evaluateJavascript(PARA_AT) }.getOrNull().orEmpty().trim('"')
+            val i = at.substringBefore('/').toIntOrNull() ?: return@launch
+            val n = at.substringAfter('/').toIntOrNull() ?: return@launch
+            val prog = runCatching { to.evaluateJavascript(PARA_PROG.replace("__I__", "$i").replace("__N__", "$n")) }
+                .getOrNull()?.trim('"')?.toDoubleOrNull() ?: return@launch
+            val cur = to.currentLocator.value
+            if (abs((cur.locations.progression ?: 0.0) - prog) < 0.002) return@launch
+            val until = System.currentTimeMillis() + 900
+            if (toPair) ignorePairUntil = until else ignoreMainUntil = until
+            to.go(cur.copyWithLocations(progression = prog), animated = false)
+        }
     }
 
     /** Al pasar página en la pareja, el libro principal la sigue (si están casadas). */
@@ -1166,6 +1246,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         if (cur.href.toString() == target.href.toString() && abs((cur.locations.progression ?: 0.0) - (target.locations.progression ?: 0.0)) < 0.01) return
         ignoreMainUntil = System.currentTimeMillis() + 900
         nav.go(target, animated = false)
+        if (mp.readingOrder.size == pp.readingOrder.size) pairNav?.let { refineAlign(it, nav, toPair = false) }
     }
 
     private fun mapLocator(loc: Locator, from: Publication, to: Publication): Locator? {
@@ -1329,6 +1410,32 @@ private const val SCROLL_BY = """(function(){
   };
   if ('onscrollend' in window && '__S__' === 'smooth') window.addEventListener('scrollend', fix); else setTimeout(fix, 60);
   return 'ok';
+})()"""
+
+/** Párrafos del capítulo que cuentan para alinear dos ediciones. */
+private const val PARA_LIST = """var bs = [].filter.call(document.body.querySelectorAll('p,li,h1,h2,h3,h4,h5,h6,blockquote,pre,dt,dd'), function(e){ return (e.textContent || '').trim().length > 0 && !e.querySelector('p,li,blockquote'); });"""
+
+/** Cuál párrafo se ve arriba: "i/n". */
+private const val PARA_AT = """(function(){ $PARA_LIST
+  var w = window.innerWidth, h = window.innerHeight;
+  for (var i = 0; i < bs.length; i++) { var r = bs[i].getBoundingClientRect(); if (r.right > 2 && r.left < w - 2 && r.bottom > 2 && r.top < h - 2) return i + '/' + bs.length; }
+  return '0/' + bs.length;
+})()"""
+
+/** Dónde queda (de 0 a 1 en el capítulo) el párrafo __I__ de __N__ de la otra edición. */
+private const val PARA_PROG = """(function(){ $PARA_LIST
+  if (!bs.length) return '';
+  var i = __I__, n = __N__, j = n === bs.length ? i : Math.round(i * bs.length / Math.max(1, n));
+  var e = bs[Math.max(0, Math.min(bs.length - 1, j))], se = document.scrollingElement || document.documentElement, r = e.getBoundingClientRect();
+  var horiz = se.scrollWidth > window.innerWidth + 4;
+  var v = horiz ? (r.left + se.scrollLeft + 2) / se.scrollWidth : (r.top + se.scrollTop + 2) / se.scrollHeight;
+  return String(Math.max(0, Math.min(0.999, v)));
+})()"""
+
+/** Qué parte del capítulo ocupa una pantalla (para saber si el narrador ya pasó de página). */
+private const val PAGE_SHARE = """(function(){ var se = document.scrollingElement || document.documentElement;
+  var horiz = se.scrollWidth > window.innerWidth + 4;
+  return String(horiz ? window.innerWidth / se.scrollWidth : window.innerHeight / Math.max(1, se.scrollHeight));
 })()"""
 
 /** Formas de los subrayados: marcador, lápiz y ondulado. */
