@@ -4,7 +4,7 @@ set -x
 T="timeout 90"
 $T adb shell getprop ro.build.version.release
 $T adb shell dumpsys package com.google.android.webview | grep versionName | head -2
-$T adb install -r Zerkalo.apk
+$T adb install -r $( [ -f Zerkalo-x86_64.apk ] && echo Zerkalo-x86_64.apk || echo Zerkalo.apk )
 $T adb logcat -c
 $T adb shell am start -W -n com.sebas.zerkalo/.MainActivity
 sleep 20
