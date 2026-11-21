@@ -100,6 +100,11 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.7.0")
     // Traducción dentro del teléfono (los idiomas se bajan una vez y funcionan sin internet)
     implementation("com.google.mlkit:translate:17.0.3")
+    // Audiolibros (LibriVox): reproductor con controles en la pantalla de bloqueo
+    implementation("androidx.media3:media3-exoplayer:1.8.0")
+    implementation("androidx.media3:media3-session:1.8.0")
+    // Para convertir las obras de Wikisource en EPUB
+    implementation("org.jsoup:jsoup:1.18.3")
 
     // Instala los perfiles de arranque que traen Compose y las demás librerías: abre y desliza más rápido.
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")

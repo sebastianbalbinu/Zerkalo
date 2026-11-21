@@ -14,3 +14,7 @@
 -ignorewarnings
 # Errores legibles en el registro
 -keepattributes SourceFile,LineNumberTable
+
+# jsoup (Wikisource) y Media3 (audiolibros)
+-dontwarn org.jspecify.**
+-dontwarn com.google.re2j.**
