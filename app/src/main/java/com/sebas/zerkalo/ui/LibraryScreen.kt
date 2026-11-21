@@ -128,7 +128,7 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
             } else {
                 val onLong: (Book) -> Unit = { quick = it }
                 current?.let { b -> item(key = "cont") { ContinueCard(b) } }
-                if (favorites.isNotEmpty()) item(key = "s-fav") { ShelfRow("♥ Favoritos", count(favorites.size), favorites, onLong = onLong) }
+                if (favorites.isNotEmpty()) item(key = "s-fav") { ShelfRow("Favoritos", count(favorites.size), favorites, onLong = onLong) }
                 when (mode) {
                     1, 2, 3 -> {
                         val shelves = shelvesFor(mode, list)
@@ -279,10 +279,6 @@ private fun ShelfRow(
                                 )
                             },
                             ribbon = b.reading,
-                        )
-                        if (b.favorite) Text(
-                            "♥", color = p.accent, style = Type.uiSmall.copy(fontSize = 14.sp),
-                            modifier = Modifier.align(Alignment.TopStart).padding(5.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xE6F7F2E8)).padding(horizontal = 4.dp),
                         )
                     }
                 }
