@@ -40,10 +40,19 @@ object Catalogs {
         FreeLibrary("Wikisource", "Textos libres en decenas de idiomas, hechos por voluntarios", "https://donate.wikimedia.org"),
         FreeLibrary("OAPEN", "Libros académicos de acceso abierto", "https://www.oapen.org"),
         FreeLibrary("Standard Ebooks", "Clásicos en inglés con ediciones cuidadas", "https://standardebooks.org/donate"),
+        FreeLibrary("Unglue.it", "Libros con licencias abiertas (Creative Commons)", "https://unglue.it/about/"),
+        FreeLibrary("textos.info", "Biblioteca digital gratuita en español", "https://www.textos.info/"),
+        FreeLibrary("Internet Archive", "Libros de dominio público escaneados", "https://archive.org/donate"),
     )
 
     private lateinit var cacheDir: File
-    fun init(ctx: Context) { cacheDir = File(ctx.cacheDir, "catalogos").apply { mkdirs() } }
+    private lateinit var indexDir: File
+    private lateinit var appContext: Context
+    fun init(ctx: Context) {
+        appContext = ctx.applicationContext
+        cacheDir = File(ctx.cacheDir, "catalogos").apply { mkdirs() }
+        indexDir = File(ctx.filesDir, "catalogo").apply { mkdirs() }
+    }
 
     // ---------------- caché ----------------
     private fun cacheFile(key: String) = File(cacheDir, key.hashCode().toUInt().toString(16) + ".json")
@@ -72,21 +81,83 @@ object Catalogs {
     }
 
     // ---------------- Project Gutenberg ----------------
-    fun gutenbergUrls(id: String, fromFormats: String?): List<String> = listOfNotNull(
-        // La carpeta "cache" es la que Gutenberg recomienda para descargas automáticas.
-        "https://www.gutenberg.org/cache/epub/$id/pg$id-images-3.epub",
-        "https://www.gutenberg.org/cache/epub/$id/pg$id-images.epub",
-        "https://www.gutenberg.org/cache/epub/$id/pg$id.epub",
-        fromFormats,
-    ).distinct()
+    /** Espejos oficiales de Gutenberg: se reparte la carga y se evita el "ocupado" (503). */
+    private val MIRRORS = listOf(
+        "https://aleph.gutenberg.org/cache/epub",
+        "https://www.gutenberg.org/cache/epub",
+        "https://mirror.cs.odu.edu/gutenberg-epub",
+        "https://gutenberg.pglaf.org/cache/epub",
+    )
 
-    private fun gutenbergCover(id: String) = "https://www.gutenberg.org/cache/epub/$id/pg$id.cover.medium.jpg"
+    fun gutenbergUrls(id: String, fromFormats: String?): List<String> {
+        val start = (id.toIntOrNull() ?: 0) % 2 // alterna el primer espejo entre libros
+        val order = MIRRORS.drop(start) + MIRRORS.take(start)
+        return (order.map { "$it/$id/pg$id-images-3.epub" } + order.take(2).map { "$it/$id/pg$id-images.epub" } + listOfNotNull(fromFormats)).distinct()
+    }
+
+    private fun gutenbergCover(id: String) = "https://aleph.gutenberg.org/cache/epub/$id/pg$id.cover.medium.jpg"
+
+    // ---------------- Índice propio de Gutenberg ----------------
+    private class IndexBook(val id: Int, val title: String, val author: String, val downloads: Int, val mask: Int, val summary: String, val norm: String)
+
+    private val indexes = HashMap<String, List<IndexBook>>()
+    private const val INDEX_URL = "https://github.com/sebastianbalbinu/Zerkalo/releases/download/catalogo/gutenberg-%s.json.gz"
+    private const val WEEK = 7L * 24 * 3600 * 1000
+
+    private fun norm(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD).replace(Regex("\\p{M}+"), "")
+
+    /**
+     * El índice semanal de libros de Gutenberg para un idioma. Viene dentro de la app y se
+     * renueva solo desde GitHub una vez por semana. Si no hay, devuelve null.
+     */
+    private suspend fun gutenbergIndex(lang: String): List<IndexBook>? = withContext(Dispatchers.IO) {
+        synchronized(indexes) { indexes[lang] }?.let { return@withContext it }
+        val file = File(indexDir, "gutenberg-$lang.json.gz")
+        if (!file.exists() || System.currentTimeMillis() - file.lastModified() > WEEK) {
+            runCatching { Net.download(listOf(INDEX_URL.format(lang)), file, zip = false) { } }
+                .onFailure { android.util.Log.w("Zerkalo", "ZK_INDICE $lang no se pudo renovar: ${it.message}") }
+        }
+        val bytes = when {
+            file.exists() -> file.readBytes()
+            else -> runCatching { appContext.assets.open("catalogo/gutenberg-$lang.json.gz").use { it.readBytes() } }.getOrNull()
+        } ?: return@withContext null
+        val list = runCatching {
+            val o = JSONObject(java.util.zip.GZIPInputStream(bytes.inputStream()).bufferedReader().use { it.readText() })
+            val arr = o.getJSONArray("books")
+            (0 until arr.length()).map { i ->
+                val b = arr.getJSONArray(i)
+                val t = b.optString(1); val a = b.optString(2)
+                IndexBook(b.optInt(0), t, a, b.optInt(3), b.optInt(4), b.optString(5), norm("$t $a"))
+            }
+        }.getOrNull() ?: return@withContext null
+        android.util.Log.i("Zerkalo", "ZK_INDICE $lang ${list.size} libros")
+        synchronized(indexes) { indexes[lang] = list }
+        list
+    }
+
+    private fun IndexBook.toItem(lang: String) = CatalogItem(
+        key = "pg:$id", source = "Project Gutenberg", title = title, author = author, lang = lang,
+        cover = gutenbergCover(id.toString()), epubUrls = gutenbergUrls(id.toString(), null), summary = summary,
+    )
 
     /**
      * Gutendex y el catálogo OPDS oficial de Gutenberg compiten: gana el primero que responda con libros.
      * Gutendex sale con ventaja (trae resúmenes); si tarda o se cae, el OPDS entra a los 3 segundos.
      */
-    suspend fun gutenberg(lang: String, topic: String? = null, search: String? = null): Page = coroutineScope {
+    suspend fun gutenberg(lang: String, topic: String? = null, search: String? = null): Page {
+        gutenbergIndex(lang)?.let { idx ->
+            val bit = topic?.let { t -> TOPICS.indexOfFirst { it.id == t } } ?: -1
+            val words = search?.let { norm(it).split(Regex("\\s+")).filter { w -> w.length > 1 } } ?: emptyList()
+            val found = idx.asSequence()
+                .filter { bit < 0 || (it.mask and (1 shl bit)) != 0 }
+                .filter { b -> words.all { b.norm.contains(it) } }
+                .take(if (search != null) 40 else 60).map { it.toItem(lang) }.toList()
+            if (found.isNotEmpty() || search == null) return Page(found)
+        }
+        return gutenbergOnline(lang, topic, search)
+    }
+
+    private suspend fun gutenbergOnline(lang: String, topic: String?, search: String?): Page = coroutineScope {
         val q = buildString {
             append("https://gutendex.com/books/?mime_type=application%2Fepub")
             if (lang.isNotEmpty()) append("&languages=").append(lang)
@@ -169,7 +240,14 @@ object Catalogs {
     }
 
     // ---------------- OAPEN (libros académicos de acceso abierto) ----------------
-    suspend fun oapen(q: String): Page {
+    suspend fun oapen(q: String): Page = try {
+        oapenRest(q)
+    } catch (e: Exception) {
+        // Si la API de OAPEN nos rechaza, se usa su catálogo OPDS.
+        opdsBooks("https://library.oapen.org/opds/search?query=" + enc(q), "OAPEN", depth = 0)
+    }
+
+    private suspend fun oapenRest(q: String): Page {
         val u = "https://library.oapen.org/rest/search?query=" + enc(q) + "&expand=metadata,bitstreams&limit=40"
         val arr = JSONArray(Net.text(u, timeout = 20_000))
         val items = mutableListOf<CatalogItem>()
@@ -195,6 +273,60 @@ object Catalogs {
             if (items.size >= 15) break
         }
         return Page(items)
+    }
+
+    // ---------------- Unglue.it y textos.info (OPDS) ----------------
+    const val UNGLUE = "https://unglue.it/api/opds/"
+    const val TEXTOS = "https://www.textos.info/catalogo.atom"
+
+    /** Libros de un catálogo OPDS: si la portada solo tiene secciones, entra a la primera que tenga libros. */
+    suspend fun opdsBooks(url: String, source: String, depth: Int = 2): Page {
+        val p = opds(url, source)
+        val books = p.items.filter { !it.isNav && it.epubUrls.isNotEmpty() }
+        if (books.isNotEmpty() || depth == 0) return p.copy(items = books)
+        for (nav in p.items.filter { it.isNav }.take(3)) {
+            val sub = runCatching { opdsBooks(nav.navUrl!!, source, depth - 1) }.getOrNull()
+            if (sub != null && sub.items.isNotEmpty()) return sub
+        }
+        return Page(emptyList())
+    }
+
+    // ---------------- Internet Archive (solo dominio público) ----------------
+    private val IA_LANG = mapOf(
+        "es" to "(spa OR Spanish)", "en" to "(eng OR English)", "fr" to "(fre OR French)", "pt" to "(por OR Portuguese)",
+        "de" to "(ger OR German)", "it" to "(ita OR Italian)", "ru" to "(rus OR Russian)", "ja" to "(jpn OR Japanese)", "la" to "(lat OR Latin)",
+    )
+
+    suspend fun internetArchive(lang: String, query: String? = null): Page {
+        val q = buildString {
+            append("mediatype:texts AND format:EPUB AND possible-copyright-status:NOT_IN_COPYRIGHT")
+            append(" AND -collection:inlibrary AND -collection:printdisabled")
+            IA_LANG[lang]?.let { append(" AND language:").append(it) }
+            if (!query.isNullOrBlank()) append(" AND (").append(query.replace(Regex("[():\\\"]"), " ")).append(")")
+        }
+        val u = "https://archive.org/advancedsearch.php?q=" + enc(q) +
+            "&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=description&sort[]=downloads+desc&rows=30&page=1&output=json"
+        val docs = JSONObject(Net.text(u, timeout = 20_000)).optJSONObject("response")?.optJSONArray("docs") ?: JSONArray()
+        fun str(o: JSONObject, k: String): String = when (val v = o.opt(k)) { is JSONArray -> v.optString(0); null -> ""; else -> v.toString() }
+        val items = (0 until docs.length()).map { i ->
+            val d = docs.getJSONObject(i)
+            val id = d.optString("identifier")
+            CatalogItem(
+                key = "ia:$id", source = "Internet Archive", title = str(d, "title"), author = niceName(str(d, "creator")),
+                lang = lang, cover = "https://archive.org/services/img/$id", epubUrls = listOf("ia:$id"),
+                summary = Importer.cleanHtml(str(d, "description")).take(600),
+            )
+        }
+        return Page(items)
+    }
+
+    /** Encuentra el EPUB libre de un libro del Internet Archive (nunca el cifrado de préstamo). */
+    suspend fun resolveIa(id: String): List<String> {
+        val o = JSONObject(Net.text("https://archive.org/metadata/$id/files", timeout = 20_000))
+        val files = o.optJSONArray("result") ?: JSONArray()
+        return (0 until files.length()).map { files.getJSONObject(it).optString("name") }
+            .filter { it.endsWith(".epub", true) && !it.contains("encrypted", true) && !it.contains("_lcp", true) }
+            .map { "https://archive.org/download/$id/" + java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
     }
 
     // ---------------- OPDS (Standard Ebooks y los catálogos que agregue la persona) ----------------
