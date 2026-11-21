@@ -105,7 +105,7 @@ fun openReader(ctx: Context, book: Book) {
     ctx.startActivity(Intent(ctx, ReaderActivity::class.java).putExtra("id", book.id))
 }
 
-private val TABS = listOf("home" to "Biblioteca", "tansu" to "Tansu", "taller" to "Taller", "cuaderno" to "Cuaderno")
+private val TABS = listOf("home" to "Biblioteca", "tansu" to "Tansu", "taller" to "Taller", "notas" to "Notas")
 
 @Composable
 fun ZerkaloRoot(onReady: () -> Unit) {
@@ -179,7 +179,7 @@ fun ZerkaloRoot(onReady: () -> Unit) {
                     0 -> LibraryScreen(haze, onReady)
                     1 -> TansuScreen(haze)
                     2 -> TallerTab(haze, books)
-                    else -> CuadernoScreen(haze)
+                    else -> NotasScreen(haze)
                 }
             }
             TabBar(tab, haze, Modifier.align(Alignment.BottomCenter)) { i ->
