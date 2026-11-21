@@ -34,6 +34,7 @@ object Listen {
         val sleepAt: Long = 0,          // hora en que se detiene (0 = sin temporizador)
         val sleepEndOfTrack: Boolean = false,
         val error: String? = null,
+        val sample: Boolean = false,    // muestra de 30 s: no cambia por dónde vas
     )
 
     val state = MutableStateFlow(State())
@@ -44,9 +45,14 @@ object Listen {
     private var sampleJob: Job? = null
 
     private val listener = object : Player.Listener {
-        override fun onEvents(player: Player, events: Player.Events) = refresh()
+        override fun onEvents(player: Player, events: Player.Events) {
+            refresh()
+            if (events.contains(Player.EVENT_POSITION_DISCONTINUITY)) persist()
+        }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            // Capítulo terminado: la próxima vez empieza desde el inicio.
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) state.value.book?.let { b -> if (!state.value.sample) AudioStore.finishTrack(b.id, state.value.index) }
             // "Hasta el fin del capítulo": se detiene al pasar al siguiente.
             if (state.value.sleepEndOfTrack && reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) {
                 controller?.pause()
@@ -94,7 +100,7 @@ object Listen {
                 delay(1000)
                 val c = controller ?: break
                 state.value = state.value.copy(position = c.currentPosition.coerceAtLeast(0), duration = c.duration.takeIf { it > 0 } ?: 0)
-                if (++n % 10 == 0) persist()
+                if (++n % 5 == 0) persist()
                 if (!c.isPlaying) { persist(); break }
             }
         }
@@ -102,14 +108,22 @@ object Listen {
 
     private fun persist() {
         val b = state.value.book ?: return
+        if (state.value.sample) return
         val c = controller ?: return
+        if (c.mediaItemCount == 0) return
         AudioStore.progress(b.id, c.currentMediaItemIndex.coerceAtLeast(0), c.currentPosition.coerceAtLeast(0))
     }
 
-    /** Empieza (o retoma) un audiolibro. Usa los capítulos descargados si existen. */
-    fun play(ctx: Context, book: AudioBook, index: Int = book.index, position: Long = book.position, sample: Boolean = false) {
-        AudioStore.put(book.copy(index = index, position = position, updatedAt = System.currentTimeMillis()))
-        state.value = state.value.copy(book = book, index = index, error = null)
+    /**
+     * Empieza (o retoma) un audiolibro. Usa los capítulos descargados si existen.
+     * Al retomar, vuelve 3 segundos atrás para recordar dónde ibas.
+     */
+    fun play(ctx: Context, book: AudioBook, index: Int = book.index, position: Long = book.spot(index), sample: Boolean = false) {
+        persist() // guarda el que sonaba antes de cambiar
+        val start = if (position > 5_000) position - 3_000 else position
+        val spots = AudioStore.get(book.id)?.spots ?: book.spots
+        if (!sample) AudioStore.put(book.copy(index = index, position = start, spots = spots, updatedAt = System.currentTimeMillis()))
+        state.value = state.value.copy(book = book, index = index, error = null, sample = sample)
         connect(ctx) { c ->
             val items = book.tracks.mapIndexed { i, t ->
                 val local = AudioStore.localFile(book.id, i)
@@ -122,7 +136,7 @@ object Listen {
                     )
                     .build()
             }
-            c.setMediaItems(items, index.coerceIn(0, (items.size - 1).coerceAtLeast(0)), position)
+            c.setMediaItems(items, index.coerceIn(0, (items.size - 1).coerceAtLeast(0)), start)
             c.prepare()
             c.play()
             sampleJob?.cancel()
@@ -131,11 +145,35 @@ object Listen {
         }
     }
 
-    fun toggle() { controller?.let { if (it.isPlaying) it.pause() else it.play() } }
+    fun toggle() {
+        val c = controller ?: return
+        if (c.isPlaying) { c.pause(); return }
+        // Si sigues después de la muestra, ya cuenta como escuchar: desde aquí se guarda por dónde vas.
+        if (state.value.sample) {
+            sampleJob?.cancel()
+            state.value.book?.let { AudioStore.put(it.copy(index = c.currentMediaItemIndex.coerceAtLeast(0), position = c.currentPosition.coerceAtLeast(0), updatedAt = System.currentTimeMillis())) }
+            state.value = state.value.copy(sample = false)
+        }
+        c.play()
+    }
+    /** Seguir después de la muestra: desde aquí cuenta como escuchar y se guarda por dónde vas. */
+    fun keepListening() {
+        val c = controller ?: return
+        if (c.isPlaying && state.value.sample) c.pause()
+        toggle()
+    }
+
     fun pause() { controller?.pause() }
     fun seekBy(ms: Long) { controller?.let { it.seekTo((it.currentPosition + ms).coerceAtLeast(0)) } }
     fun seekTo(ms: Long) { controller?.seekTo(ms) }
-    fun track(i: Int) { controller?.let { if (i in 0 until it.mediaItemCount) it.seekTo(i, 0) } }
+    /** Salta a un capítulo y lo retoma donde lo dejaste. */
+    fun track(i: Int) {
+        val c = controller ?: return
+        if (i !in 0 until c.mediaItemCount) return
+        persist()
+        val at = state.value.book?.let { AudioStore.get(it.id)?.spot(i) } ?: 0L
+        c.seekTo(i, at)
+    }
     fun speed(v: Float) { controller?.playbackParameters = PlaybackParameters(v); state.value = state.value.copy(speed = v) }
 
     /** Temporizador para dormir: minutos, o -1 = al terminar el capítulo, 0 = apagado. */

@@ -57,13 +57,15 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.sebas.zerkalo.audio.Listen
 import com.sebas.zerkalo.data.AudioBook
+import com.sebas.zerkalo.data.AudioSort
 import com.sebas.zerkalo.data.AudioStore
-import com.sebas.zerkalo.data.Catalogs
 import com.sebas.zerkalo.data.LibriVox
 import com.sebas.zerkalo.data.Prefs
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import kotlinx.coroutines.launch
+
+private const val PAGE = 40
 
 /** Resultados de LibriVox por idioma y búsqueda, guardados mientras la app está abierta. */
 private object AudioCache {
@@ -78,18 +80,37 @@ fun EscucharScreen(haze: HazeState) {
     var lang by rememberSaveable { mutableStateOf(Prefs.tansuLang) }
     var input by rememberSaveable { mutableStateOf("") }
     var query by rememberSaveable { mutableStateOf("") }
+    var sort by rememberSaveable { mutableStateOf(AudioSort.POPULAR) }
     var open by remember { mutableStateOf<AudioBook?>(null) }
     var list by remember { mutableStateOf<List<AudioBook>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+    var more by remember { mutableStateOf(false) }      // hay más resultados por cargar
+    var loadingMore by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val key = "$lang|$query|$sort"
 
-    LaunchedEffect(lang, query) {
-        val key = "$lang|$query"
-        AudioCache.pages[key]?.let { list = it; error = null; return@LaunchedEffect }
-        list = null; error = null
-        runCatching { LibriVox.search(lang, query.ifBlank { null }) }
-            .onSuccess { AudioCache.pages[key] = it; list = it }
+    LaunchedEffect(key) {
+        AudioCache.pages[key]?.let { list = it; error = null; more = it.size % PAGE == 0 && it.isNotEmpty(); return@LaunchedEffect }
+        list = null; error = null; more = false
+        runCatching { LibriVox.search(lang, query.ifBlank { null }, rows = PAGE, sort = sort) }
+            .onSuccess { AudioCache.pages[key] = it; list = it; more = it.size == PAGE }
             .onFailure { error = it.message ?: "LibriVox no respondió" }
+    }
+
+    fun loadMore() {
+        val now = list ?: return
+        if (loadingMore) return
+        loadingMore = true
+        scope.launch {
+            runCatching { LibriVox.search(lang, query.ifBlank { null }, rows = PAGE, sort = sort, page = now.size / PAGE + 1) }
+                .onSuccess { next ->
+                    val all = (now + next).distinctBy { it.id }
+                    AudioCache.pages[key] = all; list = all; more = next.size == PAGE
+                }
+                .onFailure { AppEvents.toast("No se pudieron cargar más") }
+            loadingMore = false
+        }
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -103,7 +124,10 @@ fun EscucharScreen(haze: HazeState) {
                     query = input.trim()
                 }
                 LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 14.dp)) {
-                    items(Catalogs.LANGS, key = { it.id }) { l -> SmallPill(l.name, l.id == lang) { lang = l.id } }
+                    items(LibriVox.LANGS, key = { it.id }) { l -> SmallPill(l.name, l.id == lang) { lang = l.id } }
+                }
+                LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
+                    items(AudioSort.values().toList(), key = { it.name }) { o -> SmallPill(o.label, o == sort) { sort = o } }
                 }
             }
             if (mine.isNotEmpty() && query.isBlank()) {
@@ -114,7 +138,9 @@ fun EscucharScreen(haze: HazeState) {
                     }
                 }
             }
-            item(key = "all-t") { SectionTitle(if (query.isBlank()) "Los más escuchados" else "Resultados", kicker = "LibriVox", modifier = Modifier.padding(top = 26.dp)) }
+            item(key = "all-t") {
+                SectionTitle(if (query.isNotBlank()) "Resultados" else sort.label, kicker = LibriVox.langName(lang).ifBlank { "Todos los idiomas" }, modifier = Modifier.padding(top = 26.dp))
+            }
             when {
                 error != null -> item(key = "err") {
                     Text(error ?: "", style = Type.ui, color = p.text2, modifier = Modifier.padding(20.dp))
@@ -123,9 +149,17 @@ fun EscucharScreen(haze: HazeState) {
                     Text("Buscando audiolibros…", style = Type.ui, color = p.text2, modifier = Modifier.padding(20.dp))
                 }
                 list!!.isEmpty() -> item(key = "none") {
-                    Text("No hay audiolibros con eso en este idioma.", style = Type.ui, color = p.text2, modifier = Modifier.padding(20.dp))
+                    Column(Modifier.padding(20.dp)) {
+                        Text(if (lang == "all") "No hay audiolibros con eso." else "No hay audiolibros con eso en este idioma.", style = Type.ui, color = p.text2)
+                        if (lang != "all" && query.isNotBlank()) PillButton("Buscar en todos los idiomas", { lang = "all" }, Modifier.padding(top = 12.dp), ghost = true, icon = "search")
+                    }
                 }
-                else -> items(list!!, key = { "r" + it.id }) { b -> AudioRow(b) { open = b } }
+                else -> {
+                    items(list!!, key = { "r" + it.id }) { b -> AudioRow(b, showLang = lang == "all") { open = b } }
+                    if (more) item(key = "more") {
+                        PillButton(if (loadingMore) "Cargando…" else "Cargar más", { loadMore() }, Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), ghost = true, enabled = !loadingMore)
+                    }
+                }
             }
             item(key = "note") {
                 Text(
@@ -159,13 +193,14 @@ private fun AudioCard(b: AudioBook, onClick: () -> Unit) {
 }
 
 @Composable
-private fun AudioRow(b: AudioBook, onClick: () -> Unit) {
+private fun AudioRow(b: AudioBook, showLang: Boolean = false, onClick: () -> Unit) {
     val p = LocalPalette.current
     Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         AudioCover(b, 64.dp)
         Column(Modifier.weight(1f).padding(start = 14.dp)) {
             Text(b.title, style = Type.ui.copy(fontSize = 16.sp), color = p.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (b.author.isNotBlank()) Text(b.author, style = Type.uiSmall, color = p.text2, maxLines = 1)
+            val sub = listOfNotNull(b.author.ifBlank { null }, if (showLang) LibriVox.langName(b.lang).ifBlank { null } else null).joinToString(" · ")
+            if (sub.isNotBlank()) Text(sub, style = Type.uiSmall, color = p.text2, maxLines = 1)
         }
         ZIcon("chevron", p.text2, 16.dp)
     }
@@ -193,6 +228,9 @@ fun AudioSheet(start: AudioBook, onClose: () -> Unit) {
             .onFailure { err = "No se pudieron cargar los capítulos" }
     }
     val playingThis = now.book?.id == b.id
+    val started = b.position > 0 || b.index > 0
+    val books by com.sebas.zerkalo.data.Library.books.collectAsState()
+    val readable = remember(b.linkedBook, b.title, books) { AudioStore.bookFor(b) }
     ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface) {
         Column(Modifier.padding(horizontal = 22.dp).padding(bottom = 30.dp)) {
             Row {
@@ -207,13 +245,39 @@ fun AudioSheet(start: AudioBook, onClose: () -> Unit) {
             if (b.about.isNotBlank()) Text(b.about, style = Type.uiSmall, color = p.text2, maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 14.dp))
             err?.let { Text(it, style = Type.ui, color = p.accent, modifier = Modifier.padding(top = 12.dp)) }
             if (b.tracks.isNotEmpty()) {
-                Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                if (started && !playingThis) Text(
+                    "Vas en el capítulo ${b.index + 1} de ${b.tracks.size} · ${hms(b.position)}",
+                    style = Type.uiSmall, color = p.accent, modifier = Modifier.padding(top = 14.dp),
+                )
+                Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     PillButton(
-                        if (playingThis && now.playing) "Pausar" else if (b.position > 0 || b.index > 0) "Seguir escuchando" else "Escuchar",
-                        { if (playingThis) Listen.toggle() else Listen.play(ctx, b) }, Modifier.weight(1f),
-                        icon = if (playingThis && now.playing) "pause" else "play",
+                        if (playingThis && now.playing && !now.sample) "Pausar" else if (started) "Seguir escuchando" else "Escuchar",
+                        {
+                            when {
+                                playingThis && now.sample -> Listen.keepListening()
+                                playingThis -> Listen.toggle()
+                                else -> Listen.play(ctx, b)
+                            }
+                        },
+                        Modifier.weight(1f),
+                        icon = if (playingThis && now.playing && !now.sample) "pause" else "play",
                     )
-                    if (!playingThis) PillButton("Muestra", { Listen.play(ctx, b, 0, 0, sample = true) }, ghost = true, icon = "speaker")
+                    if (!playingThis && !started) PillButton("Muestra", { Listen.play(ctx, b, 0, 0, sample = true) }, ghost = true, icon = "speaker")
+                }
+                // Leer el mismo libro mientras suena: abre el EPUB de tu biblioteca y queda unido al audio.
+                readable?.let { book ->
+                    PillButton("Leer mientras escuchas", {
+                        AudioStore.put(stored.firstOrNull { it.id == b.id } ?: b)
+                        AudioStore.link(b.id, book.id)
+                        val linked = (AudioStore.get(b.id) ?: b).copy(tracks = b.tracks)
+                        if (!playingThis || now.sample) {
+                            Listen.play(ctx, linked)
+                        } else {
+                            Listen.state.value = now.copy(book = linked)
+                        }
+                        onClose()
+                        openReader(ctx, book)
+                    }, Modifier.fillMaxWidth().padding(top = 10.dp), ghost = true, icon = "home")
                 }
                 val d = dl[b.id]
                 Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -238,12 +302,14 @@ fun AudioSheet(start: AudioBook, onClose: () -> Unit) {
                         val cur = (playingThis && now.index == i) || (!playingThis && b.index == i && b.position > 0)
                         Row(
                             Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
-                                if (playingThis) Listen.track(i) else Listen.play(ctx, b, i, 0)
+                                if (playingThis && !now.sample) Listen.track(i) else Listen.play(ctx, b, i, b.spot(i))
                             }.padding(vertical = 10.dp, horizontal = 6.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text("${i + 1}", style = Type.uiSmall, color = if (cur) p.accent else p.text2, modifier = Modifier.width(30.dp))
                             Text(t.title, style = Type.ui, color = if (cur) p.accent else p.text, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            val at = if (playingThis) 0L else b.spot(i)
+                            if (at > 0) Text("vas en ${hms(at)} · ", style = Type.uiSmall, color = p.accent)
                             if (t.seconds > 0) Text(hms(t.seconds * 1000L), style = Type.uiSmall, color = p.text2)
                         }
                     }

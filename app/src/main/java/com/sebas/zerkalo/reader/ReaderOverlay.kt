@@ -71,6 +71,7 @@ import com.sebas.zerkalo.ui.EnsoImage
 import com.sebas.zerkalo.ui.Fonts
 import com.sebas.zerkalo.ui.LocalPalette
 import com.sebas.zerkalo.ui.PillButton
+import com.sebas.zerkalo.ui.SmallPill
 import com.sebas.zerkalo.ui.Seal
 import com.sebas.zerkalo.ui.Segmented
 import com.sebas.zerkalo.ui.Type
@@ -562,13 +563,14 @@ private fun ListenSheet(act: ReaderActions, onClose: () -> Unit) {
     var found by remember { mutableStateOf<List<com.sebas.zerkalo.data.AudioBook>?>(null) }
     var busy by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { if (linked == null) found = act.findAudio() }
-    fun start(ab: com.sebas.zerkalo.data.AudioBook) {
-        if (ab.tracks.isNotEmpty()) { act.listen(ab); return }
+    var follow by remember { mutableStateOf(com.sebas.zerkalo.data.Prefs.audioFollow) }
+    fun start(ab: com.sebas.zerkalo.data.AudioBook, here: Boolean = true) {
+        if (ab.tracks.isNotEmpty()) { act.listen(ab, here); return }
         busy = ab.id
         scope.launch {
             val t = runCatching { com.sebas.zerkalo.data.LibriVox.tracks(ab.id) }.getOrDefault(emptyList())
             busy = null
-            if (t.isNotEmpty()) act.listen(ab.copy(tracks = t))
+            if (t.isNotEmpty()) act.listen(ab.copy(tracks = t), here)
         }
     }
     Sheet(onClose) {
@@ -582,7 +584,23 @@ private fun ListenSheet(act: ReaderActions, onClose: () -> Unit) {
                     Text(linked.title, style = Type.ui, color = p.text, modifier = Modifier.padding(top = 4.dp))
                     if (linked.author.isNotBlank()) Text(linked.author, style = Type.uiSmall, color = p.text2)
                 }
-                PillButton("Escuchar desde aquí", { start(linked) }, Modifier.fillMaxWidth().padding(top = 12.dp), icon = "play")
+                val started = linked.tracks.isNotEmpty() && (linked.position > 0 || linked.index > 0)
+                if (started) PillButton(
+                    "Seguir donde lo dejé · cap. ${linked.index + 1}", { start(linked, here = false) },
+                    Modifier.fillMaxWidth().padding(top = 12.dp), icon = "play",
+                )
+                PillButton(
+                    "Escuchar desde aquí", { start(linked) },
+                    Modifier.fillMaxWidth().padding(top = if (started) 8.dp else 12.dp), icon = if (started) null else "play", ghost = started,
+                )
+                Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("La página sigue al narrador", style = Type.ui, color = p.text, modifier = Modifier.weight(1f))
+                    SmallPill(if (follow) "Sí" else "No", follow) {
+                        follow = !follow
+                        com.sebas.zerkalo.data.Prefs.audioFollow = follow
+                    }
+                }
+                Text("Cuando el audio pasa de capítulo, el texto salta a ese capítulo.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
             }
             found == null -> Text("Buscando en LibriVox…", style = Type.ui, color = p.text2)
             found!!.isEmpty() -> Text(

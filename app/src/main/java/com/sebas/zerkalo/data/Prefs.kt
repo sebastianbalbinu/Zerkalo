@@ -119,6 +119,11 @@ object Prefs {
         get() = sp.getBoolean("studyTap", false)
         set(v) { sp.edit().putBoolean("studyTap", v).apply() }
 
+    /** Con un audiolibro sonando, la página del lector sigue al capítulo que se escucha. */
+    var audioFollow: Boolean
+        get() = sp.getBoolean("audioFollow", true)
+        set(v) { sp.edit().putBoolean("audioFollow", v).apply() }
+
     fun pairOn(bookId: String) = sp.getBoolean("pairOn_$bookId", false)
     fun setPairOn(bookId: String, on: Boolean) { sp.edit().putBoolean("pairOn_$bookId", on).apply() }
 
