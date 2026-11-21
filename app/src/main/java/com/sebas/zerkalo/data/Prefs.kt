@@ -29,9 +29,23 @@ data class ReaderSettings(
     val ruler: Boolean = false, // regla de lectura
     val breaks: Boolean = false, // recordar pausas para los ojos
     val dyslexia: Boolean = false, // modo dislexia: letra clara, más espacio, sin justificar
+    val fullscreen: Boolean = false, // usar toda la pantalla, hasta la cámara
+    val vMargin: Int = 1,        // margen arriba y abajo: 0 compacto, 1 normal, 2 amplio
+    val autoSpeed: Float = 30f,  // avance automático en desplazamiento: píxeles por segundo
+    val autoPage: Float = 40f,   // avance automático en páginas: segundos por página
 )
 
 data class OpdsCatalog(val name: String, val url: String)
+
+/** Un color de subrayado con nombre (por ejemplo "Cita" o "Duda"). */
+data class InkColor(val name: String, val argb: Int) {
+    companion object {
+        val DEFAULTS = listOf(
+            InkColor("Importante", 0xFFE2BE52.toInt()), InkColor("Idea", 0xFF8CA05A.toInt()),
+            InkColor("Cita", 0xFFD9694F.toInt()), InkColor("Duda", 0xFF6F8DBF.toInt()),
+        )
+    }
+}
 
 object Prefs {
     private lateinit var sp: SharedPreferences
@@ -50,7 +64,13 @@ object Prefs {
             paragraph = sp.getInt("rPara", 0), spacing = sp.getInt("rSpacing", 0), animate = sp.getBoolean("rAnim", true),
             haptic = sp.getBoolean("rHaptic", false), volumeKeys = sp.getBoolean("rVol", true), ruler = sp.getBoolean("rRuler", false),
             breaks = sp.getBoolean("rBreaks", false), dyslexia = sp.getBoolean("rDys", false),
+            fullscreen = sp.getBoolean("rFull", false), vMargin = sp.getInt("rVMargin", 1),
+            autoSpeed = sp.getFloat("rAutoSpeed", 30f), autoPage = sp.getFloat("rAutoPage", 40f),
         )
+        inks.value = runCatching {
+            val a = JSONArray(sp.getString("inks", null) ?: "")
+            (0 until a.length()).map { a.getJSONObject(it).let { o -> InkColor(o.optString("n"), o.optInt("c")) } }
+        }.getOrNull()?.takeIf { it.isNotEmpty() } ?: InkColor.DEFAULTS
         catalogs.value = runCatching {
             val a = JSONArray(sp.getString("opds", "[]"))
             (0 until a.length()).map { a.getJSONObject(it).let { o -> OpdsCatalog(o.getString("name"), o.getString("url")) } }
@@ -67,7 +87,9 @@ object Prefs {
             .putFloat("rBright", r.brightness).putFloat("rWarm", r.warmth)
             .putInt("rPara", r.paragraph).putInt("rSpacing", r.spacing).putBoolean("rAnim", r.animate)
             .putBoolean("rHaptic", r.haptic).putBoolean("rVol", r.volumeKeys).putBoolean("rRuler", r.ruler)
-            .putBoolean("rBreaks", r.breaks).putBoolean("rDys", r.dyslexia).apply()
+            .putBoolean("rBreaks", r.breaks).putBoolean("rDys", r.dyslexia)
+            .putBoolean("rFull", r.fullscreen).putInt("rVMargin", r.vMargin)
+            .putFloat("rAutoSpeed", r.autoSpeed).putFloat("rAutoPage", r.autoPage).apply()
     }
 
     fun setCatalogs(list: List<OpdsCatalog>) {
@@ -95,6 +117,18 @@ object Prefs {
 
     fun pairOn(bookId: String) = sp.getBoolean("pairOn_$bookId", false)
     fun setPairOn(bookId: String, on: Boolean) { sp.edit().putBoolean("pairOn_$bookId", on).apply() }
+
+    /** Colores de subrayado propios, con nombre. */
+    val inks = MutableStateFlow<List<InkColor>>(emptyList())
+
+    fun setInks(list: List<InkColor>) {
+        inks.value = list
+        sp.edit().putString("inks", JSONArray(list.map { JSONObject().put("n", it.name).put("c", it.argb) }).toString()).apply()
+    }
+
+    var lastInk: Int
+        get() = sp.getInt("lastInk", InkColor.DEFAULTS[0].argb)
+        set(v) { sp.edit().putInt("lastInk", v).apply() }
 
     var welcomed: Boolean
         get() = sp.getBoolean("welcomed", false)

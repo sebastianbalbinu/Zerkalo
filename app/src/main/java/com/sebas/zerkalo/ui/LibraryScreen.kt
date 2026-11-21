@@ -57,22 +57,26 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
     var searching by rememberSaveable { mutableStateOf(false) }
     var query by rememberSaveable { mutableStateOf("") }
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     val sorted = remember(books) { books.sortedByDescending { maxOf(it.lastOpened, it.addedAt) } }
-    val list = remember(sorted, query) {
+    var tagSel by rememberSaveable { mutableStateOf<String?>(null) }
+    val allTags = remember(books) { books.flatMap { it.tags }.distinct().sortedBy { it.lowercase() } }
+    if (tagSel != null && tagSel !in allTags) tagSel = null
+    val list = remember(sorted, query, tagSel) {
         val q = query.trim().lowercase()
-        if (q.isEmpty()) sorted else sorted.filter { (it.title + " " + it.author).lowercase().contains(q) }
+        sorted.filter { (q.isEmpty() || (it.title + " " + it.author + " " + it.tags.joinToString(" ")).lowercase().contains(q)) && (tagSel == null || tagSel in it.tags) }
     }
     val reading = list.filter { it.reading }
     val unread = list.filter { !it.reading && !it.finished }
     val done = list.filter { it.finished }
-    val current = if (query.isBlank()) reading.firstOrNull() else null
+    val current = if (query.isBlank() && tagSel == null) reading.firstOrNull() else null
 
     LaunchedEffect(Unit) { onReady() }
 
     Box(Modifier.fillMaxSize()) {
         LazyColumn(
-            Modifier.fillMaxSize().hazeSource(haze),
+            Modifier.fillMaxSize().hazeSource(haze), state = listState,
             contentPadding = PaddingValues(top = top + 18.dp, bottom = 150.dp),
         ) {
             item(key = "head") {
@@ -84,6 +88,15 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
                     CircleButton("search", { searching = !searching; if (!searching) query = "" })
                     Spacer(Modifier.width(10.dp))
                     CircleButton("gear", { a.open(Screen.Settings) })
+                }
+            }
+            if (allTags.isNotEmpty()) item(key = "tags") {
+                androidx.compose.foundation.lazy.LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 16.dp),
+                ) {
+                    item { SmallPill("Todos", tagSel == null) { tagSel = null } }
+                    items(allTags.size) { i -> val t = allTags[i]; SmallPill("#$t", tagSel == t) { tagSel = if (tagSel == t) null else t } }
                 }
             }
             if (searching) item(key = "search") { SearchField(query, { query = it }, "Título o autor", Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp)) }
@@ -101,7 +114,7 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
                 }
             }
         }
-        ProgressiveEdge(haze, top = true, height = top + 26.dp, modifier = Modifier.align(Alignment.TopCenter))
+        CollapsingTop("Biblioteca", listState, Modifier.align(Alignment.TopCenter))
         ProgressiveEdge(haze, top = false, height = 150.dp, modifier = Modifier.align(Alignment.BottomCenter))
     }
 }

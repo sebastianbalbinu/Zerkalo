@@ -1,0 +1,357 @@
+package com.sebas.zerkalo.ui
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
+import com.sebas.zerkalo.audio.Listen
+import com.sebas.zerkalo.data.AudioBook
+import com.sebas.zerkalo.data.AudioStore
+import com.sebas.zerkalo.data.Catalogs
+import com.sebas.zerkalo.data.LibriVox
+import com.sebas.zerkalo.data.Prefs
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
+import kotlinx.coroutines.launch
+
+/** Resultados de LibriVox por idioma y búsqueda, guardados mientras la app está abierta. */
+private object AudioCache {
+    val pages = HashMap<String, List<AudioBook>>()
+}
+
+/** Escuchar: audiolibros de LibriVox, leídos por personas (nunca voces sintéticas). */
+@Composable
+fun EscucharScreen(haze: HazeState) {
+    val p = LocalPalette.current
+    val mine by AudioStore.books.collectAsState()
+    var lang by rememberSaveable { mutableStateOf(Prefs.tansuLang) }
+    var input by rememberSaveable { mutableStateOf("") }
+    var query by rememberSaveable { mutableStateOf("") }
+    var open by remember { mutableStateOf<AudioBook?>(null) }
+    var list by remember { mutableStateOf<List<AudioBook>?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+
+    LaunchedEffect(lang, query) {
+        val key = "$lang|$query"
+        AudioCache.pages[key]?.let { list = it; error = null; return@LaunchedEffect }
+        list = null; error = null
+        runCatching { LibriVox.search(lang, query.ifBlank { null }) }
+            .onSuccess { AudioCache.pages[key] = it; list = it }
+            .onFailure { error = it.message ?: "LibriVox no respondió" }
+    }
+
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(Modifier.fillMaxSize().hazeSource(haze), state = ScrollMemory.escuchar, contentPadding = PaddingValues(top = top + 18.dp, bottom = 230.dp)) {
+            item(key = "head") {
+                Column(Modifier.padding(horizontal = 20.dp)) {
+                    Caption("Audiolibros leídos por personas")
+                    Text("Escuchar", style = Type.display, color = p.text, modifier = Modifier.padding(top = 4.dp))
+                }
+                SearchField(input, { input = it; if (it.isBlank()) query = "" }, "Título o autor", Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp)) {
+                    query = input.trim()
+                }
+                LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 14.dp)) {
+                    items(Catalogs.LANGS, key = { it.id }) { l -> SmallPill(l.name, l.id == lang) { lang = l.id } }
+                }
+            }
+            if (mine.isNotEmpty() && query.isBlank()) {
+                item(key = "mine-t") { SectionTitle("Escuchando", modifier = Modifier.padding(top = 26.dp)) }
+                item(key = "mine") {
+                    LazyRow(contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                        items(mine, key = { it.id }) { b -> AudioCard(b) { open = b } }
+                    }
+                }
+            }
+            item(key = "all-t") { SectionTitle(if (query.isBlank()) "Los más escuchados" else "Resultados", kicker = "LibriVox", modifier = Modifier.padding(top = 26.dp)) }
+            when {
+                error != null -> item(key = "err") {
+                    Text(error ?: "", style = Type.ui, color = p.text2, modifier = Modifier.padding(20.dp))
+                }
+                list == null -> item(key = "load") {
+                    Text("Buscando audiolibros…", style = Type.ui, color = p.text2, modifier = Modifier.padding(20.dp))
+                }
+                list!!.isEmpty() -> item(key = "none") {
+                    Text("No hay audiolibros con eso en este idioma.", style = Type.ui, color = p.text2, modifier = Modifier.padding(20.dp))
+                }
+                else -> items(list!!, key = { "r" + it.id }) { b -> AudioRow(b) { open = b } }
+            }
+            item(key = "note") {
+                Text(
+                    "Los audiolibros vienen de LibriVox: voluntarios que graban con su propia voz libros de dominio público. Zerkalo no usa voces de IA.",
+                    style = Type.uiSmall, color = p.text2, textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 30.dp),
+                )
+            }
+        }
+        CollapsingTop("Escuchar", ScrollMemory.escuchar, Modifier.align(Alignment.TopCenter))
+    }
+    open?.let { AudioSheet(it) { open = null } }
+}
+
+@Composable
+private fun AudioCover(b: AudioBook, size: Dp, modifier: Modifier = Modifier) {
+    val p = LocalPalette.current
+    Box(modifier.size(size).shadow(4.dp, RoundedCornerShape(8.dp)).clip(RoundedCornerShape(8.dp)).background(p.surface)) {
+        AsyncImage(model = b.cover, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+    }
+}
+
+@Composable
+private fun AudioCard(b: AudioBook, onClick: () -> Unit) {
+    val p = LocalPalette.current
+    Column(Modifier.width(120.dp).clickable(onClick = onClick)) {
+        AudioCover(b, 120.dp)
+        Text(b.title, style = Type.uiSmall.copy(fontSize = 13.sp), color = p.text, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+        if (b.tracks.isNotEmpty()) Text("Capítulo ${b.index + 1} de ${b.tracks.size}", style = Type.uiSmall.copy(fontSize = 11.sp), color = p.text2)
+    }
+}
+
+@Composable
+private fun AudioRow(b: AudioBook, onClick: () -> Unit) {
+    val p = LocalPalette.current
+    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 20.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        AudioCover(b, 64.dp)
+        Column(Modifier.weight(1f).padding(start = 14.dp)) {
+            Text(b.title, style = Type.ui.copy(fontSize = 16.sp), color = p.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (b.author.isNotBlank()) Text(b.author, style = Type.uiSmall, color = p.text2, maxLines = 1)
+        }
+        ZIcon("chevron", p.text2, 16.dp)
+    }
+}
+
+private fun hms(ms: Long): String {
+    val s = ms / 1000
+    return if (s >= 3600) String.format("%d:%02d:%02d", s / 3600, (s / 60) % 60, s % 60) else String.format("%d:%02d", s / 60, s % 60)
+}
+
+/** Ficha de un audiolibro: muestra de 30 s, capítulos, descargar y escuchar. */
+@Composable
+fun AudioSheet(start: AudioBook, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val stored by AudioStore.books.collectAsState()
+    val dl by AudioStore.downloads.collectAsState()
+    val now by Listen.state.collectAsState()
+    var b by remember { mutableStateOf(stored.firstOrNull { it.id == start.id } ?: start) }
+    var err by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(start.id) {
+        if (b.tracks.isEmpty()) runCatching { LibriVox.tracks(b.id) }
+            .onSuccess { t -> b = b.copy(tracks = t); if (t.isEmpty()) err = "Este audiolibro no tiene capítulos disponibles" }
+            .onFailure { err = "No se pudieron cargar los capítulos" }
+    }
+    val playingThis = now.book?.id == b.id
+    ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface) {
+        Column(Modifier.padding(horizontal = 22.dp).padding(bottom = 30.dp)) {
+            Row {
+                AudioCover(b, 110.dp)
+                Column(Modifier.weight(1f).padding(start = 16.dp)) {
+                    Caption("LibriVox · voz humana", accent = true)
+                    Text(b.title, style = Type.title.copy(fontSize = 20.sp, lineHeight = 25.sp), color = p.text, modifier = Modifier.padding(top = 4.dp), maxLines = 4, overflow = TextOverflow.Ellipsis)
+                    if (b.author.isNotBlank()) Text(b.author, style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp))
+                    if (b.totalSeconds > 0) Text("${b.tracks.size} capítulos · ${hms(b.totalSeconds * 1000L)}", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
+                }
+            }
+            if (b.about.isNotBlank()) Text(b.about, style = Type.uiSmall, color = p.text2, maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 14.dp))
+            err?.let { Text(it, style = Type.ui, color = p.accent, modifier = Modifier.padding(top = 12.dp)) }
+            if (b.tracks.isNotEmpty()) {
+                Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PillButton(
+                        if (playingThis && now.playing) "Pausar" else if (b.position > 0 || b.index > 0) "Seguir escuchando" else "Escuchar",
+                        { if (playingThis) Listen.toggle() else Listen.play(ctx, b) }, Modifier.weight(1f),
+                        icon = if (playingThis && now.playing) "pause" else "play",
+                    )
+                    if (!playingThis) PillButton("Muestra", { Listen.play(ctx, b, 0, 0, sample = true) }, ghost = true, icon = "speaker")
+                }
+                val d = dl[b.id]
+                Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    when {
+                        d == null -> PillButton("Descargar para oír sin internet", { AudioStore.put(b); AudioStore.download(b) }, Modifier.fillMaxWidth(), ghost = true, icon = "download")
+                        d < 1f -> Text("Descargando… ${(d * 100).toInt()} %", style = Type.ui, color = p.text2)
+                        else -> {
+                            Text("Descargado en el teléfono", style = Type.ui, color = p.text2, modifier = Modifier.weight(1f))
+                            Text("Borrar", style = Type.uiSmall, color = p.accent, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable { AudioStore.deleteDownload(b.id) }.padding(6.dp))
+                        }
+                    }
+                }
+                if (stored.any { it.id == b.id }) Text(
+                    "Quitar de Escuchando", style = Type.uiSmall, color = p.text2,
+                    modifier = Modifier.padding(top = 6.dp).clip(RoundedCornerShape(8.dp)).clickable {
+                        if (playingThis) Listen.stop(); AudioStore.remove(b.id); onClose()
+                    }.padding(6.dp),
+                )
+                Label("Capítulos")
+                LazyColumn(Modifier.heightIn(max = 340.dp)) {
+                    itemsIndexed(b.tracks) { i, t ->
+                        val cur = (playingThis && now.index == i) || (!playingThis && b.index == i && b.position > 0)
+                        Row(
+                            Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
+                                if (playingThis) Listen.track(i) else Listen.play(ctx, b, i, 0)
+                            }.padding(vertical = 10.dp, horizontal = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text("${i + 1}", style = Type.uiSmall, color = if (cur) p.accent else p.text2, modifier = Modifier.width(30.dp))
+                            Text(t.title, style = Type.ui, color = if (cur) p.accent else p.text, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            if (t.seconds > 0) Text(hms(t.seconds * 1000L), style = Type.uiSmall, color = p.text2)
+                        }
+                    }
+                }
+            } else if (err == null) {
+                Text("Cargando capítulos…", style = Type.ui, color = p.text2, modifier = Modifier.padding(top = 16.dp))
+            }
+        }
+    }
+}
+
+/** Reproductor pequeño, flotando sobre la barra de pestañas mientras suena un audiolibro. */
+@Composable
+fun MiniPlayer(modifier: Modifier = Modifier) {
+    val p = LocalPalette.current
+    val st by Listen.state.collectAsState()
+    var full by remember { mutableStateOf(false) }
+    val b = st.book
+    AnimatedVisibility(b != null, modifier, enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut()) {
+        if (b == null) return@AnimatedVisibility
+        Row(
+            Modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(start = 16.dp, end = 16.dp, bottom = 86.dp).fillMaxWidth()
+                .shadow(14.dp, RoundedCornerShape(22.dp)).clip(RoundedCornerShape(22.dp)).background(p.surface)
+                .clickable { full = true }.padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AudioCover(b, 44.dp)
+            Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+                Text(b.tracks.getOrNull(st.index)?.title ?: b.title, style = Type.ui, color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(b.title, style = Type.uiSmall.copy(fontSize = 11.5.sp), color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+            Box(Modifier.size(44.dp).clip(CircleShape).clickable { Listen.toggle() }, contentAlignment = Alignment.Center) {
+                ZIcon(if (st.playing) "pause" else "play", p.text, 22.dp)
+            }
+            Box(Modifier.size(40.dp).clip(CircleShape).clickable { Listen.stop() }, contentAlignment = Alignment.Center) {
+                ZIcon("close", p.text2, 16.dp)
+            }
+        }
+    }
+    if (full) PlayerSheet { full = false }
+}
+
+/** Reproductor completo: avance, saltos de 30 s, velocidad y temporizador para dormir. */
+@Composable
+fun PlayerSheet(onClose: () -> Unit) {
+    val p = LocalPalette.current
+    val st by Listen.state.collectAsState()
+    val b = st.book ?: run { onClose(); return }
+    var drag by remember { mutableStateOf<Float?>(null) }
+    ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface) {
+        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 30.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            AudioCover(b, 200.dp)
+            Text(b.tracks.getOrNull(st.index)?.title ?: "", style = Type.title.copy(fontSize = 19.sp), color = p.text, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 18.dp))
+            Text("${b.title} · ${b.author}", style = Type.uiSmall, color = p.text2, textAlign = TextAlign.Center, maxLines = 2, modifier = Modifier.padding(top = 4.dp))
+            Text("Capítulo ${st.index + 1} de ${b.tracks.size}", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 2.dp))
+            val dur = st.duration.coerceAtLeast(1)
+            ZSlider(
+                value = drag ?: (st.position / dur.toFloat()), onChange = { drag = it },
+                onFinished = { drag?.let { Listen.seekTo((it * dur).toLong()) }; drag = null },
+                modifier = Modifier.padding(top = 14.dp),
+            )
+            Row(Modifier.fillMaxWidth()) {
+                Text(hms(drag?.let { (it * dur).toLong() } ?: st.position), style = Type.uiSmall, color = p.text2, modifier = Modifier.weight(1f))
+                Text(hms(st.duration), style = Type.uiSmall, color = p.text2)
+            }
+            Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+                RoundText("−30") { Listen.seekBy(-30_000) }
+                Box(Modifier.size(72.dp).clip(CircleShape).background(p.text).clickable { Listen.toggle() }, contentAlignment = Alignment.Center) {
+                    ZIcon(if (st.playing) "pause" else "play", p.bg, 30.dp)
+                }
+                RoundText("+30") { Listen.seekBy(30_000) }
+            }
+            if (st.buffering) Text("Cargando…", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp))
+            st.error?.let { Text(it, style = Type.uiSmall, color = p.accent, modifier = Modifier.padding(top = 6.dp)) }
+            Label("Velocidad")
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(listOf(0.8f, 1f, 1.15f, 1.25f, 1.5f, 1.75f, 2f)) { v ->
+                    SmallPill(if (v == 1f) "1×" else "${v}×".replace(".0×", "×"), kotlin.math.abs(st.speed - v) < 0.01f) { Listen.speed(v) }
+                }
+            }
+            Label("Dormir", when {
+                st.sleepEndOfTrack -> "al terminar el capítulo"
+                st.sleepAt > 0 -> "en ${((st.sleepAt - System.currentTimeMillis()) / 60_000 + 1)} min"
+                else -> "apagado"
+            })
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(listOf(0 to "No", 15 to "15 min", 30 to "30 min", 45 to "45 min", 60 to "1 hora", -1 to "Fin del capítulo")) { (m, name) ->
+                    val on = (m == 0 && st.sleepAt == 0L && !st.sleepEndOfTrack) || (m == -1 && st.sleepEndOfTrack)
+                    SmallPill(name, on) { Listen.sleep(m) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoundText(text: String, onClick: () -> Unit) {
+    val p = LocalPalette.current
+    Box(Modifier.size(52.dp).clip(CircleShape).background(p.card.copy(alpha = 0.7f)).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        Text(text, style = Type.ui, color = p.text)
+    }
+}
+
+@Composable
+private fun Label(text: String, right: String = "") {
+    val p = LocalPalette.current
+    Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 8.dp)) {
+        Text(text, style = Type.ui.copy(fontSize = 15.sp), color = p.text, modifier = Modifier.weight(1f))
+        if (right.isNotBlank()) Text(right, style = Type.uiSmall, color = p.text2)
+    }
+}

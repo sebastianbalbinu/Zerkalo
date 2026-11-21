@@ -43,6 +43,9 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -95,6 +98,9 @@ fun ReaderOverlay(ui: ReaderUi, act: ReaderActions) {
 @Composable
 private fun Overlay(ui: ReaderUi, act: ReaderActions) {
     val p = LocalPalette.current
+    val listenState by com.sebas.zerkalo.audio.Listen.state.collectAsState()
+    val linkedAudio = remember(listenState.book?.id) { act.linkedAudio() }
+    val listening = linkedAudio != null && listenState.book?.id == linkedAudio.id && listenState.playing
     Box(Modifier.fillMaxSize()) {
         if (ui.loading || ui.error != null) {
             Column(Modifier.fillMaxSize().background(p.bg).padding(40.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
@@ -159,6 +165,8 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                     )
                     RoundPill("translate", act.toggleStudy, active = ui.studyTap)
                     Spacer(Modifier.width(8.dp))
+                    RoundPill("escuchar", { ui.sheet = "listen" }, active = listening)
+                    Spacer(Modifier.width(8.dp))
                     RoundPill("pair", { ui.sheet = "pair" }, active = ui.pairOn)
                 }
             }
@@ -170,6 +178,30 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                 Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(p.bg.copy(alpha = 0f), p.bg.copy(alpha = 0.94f), p.bg)))
                     .windowInsetsPadding(WindowInsets.navigationBars).padding(start = 16.dp, end = 16.dp, top = 40.dp, bottom = 10.dp),
             ) {
+                // Audiolibro sonando: controles a mano y "ir al capítulo que suena"
+                listenState.book?.let { ab ->
+                    val track = ab.tracks.getOrNull(listenState.index)
+                    Row(
+                        Modifier.fillMaxWidth().padding(bottom = 14.dp).shadow(6.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp))
+                            .background(p.surface).padding(start = 14.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        ZIcon("escuchar", p.accent, 18.dp)
+                        Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
+                            Text(track?.title ?: ab.title, style = Type.uiSmall, color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            if (ab.linkedBook != null && track != null) Text(
+                                "Ir a este capítulo en el texto", style = Type.uiSmall.copy(fontSize = 11.sp), color = p.accent,
+                                modifier = Modifier.clickable { act.goToTrack(track.title) },
+                            )
+                        }
+                        Box(Modifier.size(40.dp).clip(CircleShape).clickable { com.sebas.zerkalo.audio.Listen.seekBy(-15_000) }, contentAlignment = Alignment.Center) {
+                            Text("−15", style = Type.uiSmall, color = p.text2)
+                        }
+                        Box(Modifier.size(40.dp).clip(CircleShape).background(p.text).clickable { com.sebas.zerkalo.audio.Listen.toggle() }, contentAlignment = Alignment.Center) {
+                            ZIcon(if (listenState.playing) "pause" else "play", p.bg, 18.dp)
+                        }
+                    }
+                }
                 var drag by remember { mutableStateOf<Float?>(null) }
                 ZSlider(
                     value = drag ?: ui.progress, onChange = { drag = it },
@@ -203,6 +235,39 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
 
         ReaderToast(ui, Modifier.align(Alignment.BottomCenter))
 
+        // Aviso al llegar al borde de un capítulo en desplazamiento continuo
+        AnimatedVisibility(ui.edgeHint != null, Modifier.align(Alignment.BottomCenter), enter = fadeIn(tween(120)), exit = fadeOut(tween(120))) {
+            Row(
+                Modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = 34.dp, start = 24.dp, end = 24.dp)
+                    .shadow(10.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp))
+                    .background(if (ui.edgeReady) p.accent else p.text).padding(horizontal = 18.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(ui.edgeHint ?: "", style = Type.ui, color = p.bg, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            }
+        }
+
+        // Avance automático: control flotante (pausa y velocidad) aunque los controles estén ocultos
+        AnimatedVisibility(ui.auto && !ui.controls, Modifier.align(Alignment.BottomEnd), enter = fadeIn(), exit = fadeOut()) {
+            Row(
+                Modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(end = 12.dp, bottom = 26.dp)
+                    .clip(RoundedCornerShape(22.dp)).background(p.text.copy(alpha = 0.82f)).padding(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val s = ui.settings
+                fun change(f: Float) {
+                    act.settings(
+                        if (s.scroll) s.copy(autoSpeed = (s.autoSpeed * f).coerceIn(4f, 400f))
+                        else s.copy(autoPage = (s.autoPage / f).coerceIn(3f, 300f)),
+                    )
+                }
+                Box(Modifier.size(38.dp).clip(CircleShape).clickable { change(1 / 1.15f) }, contentAlignment = Alignment.Center) { Text("−", style = Type.ui.copy(fontSize = 20.sp), color = p.bg) }
+                Text(if (s.scroll) "${s.autoSpeed.toInt()}" else "${s.autoPage.toInt()} s", style = Type.uiSmall, color = p.bg, modifier = Modifier.padding(horizontal = 4.dp))
+                Box(Modifier.size(38.dp).clip(CircleShape).clickable { change(1.15f) }, contentAlignment = Alignment.Center) { Text("+", style = Type.ui.copy(fontSize = 20.sp), color = p.bg) }
+                Box(Modifier.size(38.dp).clip(CircleShape).clickable { act.toggleAuto() }, contentAlignment = Alignment.Center) { ZIcon("pause", p.bg, 18.dp) }
+            }
+        }
+
         AnimatedVisibility(
             ui.lookup != null, Modifier.align(Alignment.BottomCenter),
             enter = fadeIn(tween(160)) + slideInVertically { it / 2 }, exit = fadeOut(tween(140)) + slideOutVertically { it / 2 },
@@ -217,6 +282,8 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
         "luz" -> LightSheet(ui, act) { ui.sheet = null }
         "fonts" -> FontSheet(ui, act) { ui.sheet = "type" }
         "pair" -> PairSheet(ui, act) { ui.sheet = null }
+        "listen" -> ListenSheet(act) { ui.sheet = null }
+        "inks" -> InksSheet(act) { ui.sheet = null }
     }
     ui.activeMark?.let { MarkSheet(it, act) { ui.activeMark = null } }
     ui.noteFor?.let { NoteSheet(it, act) { ui.noteFor = null } }
@@ -261,13 +328,40 @@ private fun Sheet(onClose: () -> Unit, content: @Composable () -> Unit) {
 @Composable
 private fun TocSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
     val p = LocalPalette.current
-    var tab by remember { mutableIntStateOf(0) }
+    val tab = ui.tocTab
     val shioris = ui.marks.filter { it.type == "shiori" }.sortedBy { it.progress }
-    val hls = ui.marks.filter { it.type == "hl" }.sortedBy { it.progress }
+    val allHls = ui.marks.filter { it.type == "hl" }.sortedBy { it.progress }
+    val colors = allHls.map { it.color }.distinct()
+    val hls = ui.marksFilter?.let { f -> allHls.filter { it.color == f } } ?: allHls
+    // El índice se abre mostrando el capítulo actual; las marcas, donde las dejaste.
+    LaunchedEffect(Unit) {
+        if (tab == 0) ui.toc.indexOfFirst { it.title == ui.chapter }.takeIf { it > 2 }?.let { ui.tocState.scrollToItem(it - 2) }
+    }
     Sheet(onClose) {
-        Segmented(listOf("Índice", "Marcas · ${shioris.size + hls.size}"), tab, { tab = it })
+        Segmented(listOf("Índice", "Marcas · ${shioris.size + allHls.size}"), tab, { ui.tocTab = it })
         Spacer(Modifier.height(10.dp))
-        LazyColumn(Modifier.heightIn(max = 520.dp)) {
+        if (tab == 1 && colors.size > 1) {
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(bottom = 8.dp)) {
+                item {
+                    Box(
+                        Modifier.clip(RoundedCornerShape(14.dp)).background(if (ui.marksFilter == null) p.text else p.card.copy(alpha = 0.7f))
+                            .clickable { ui.marksFilter = null }.padding(horizontal = 12.dp, vertical = 7.dp),
+                    ) { Text("Todas", style = Type.uiSmall, color = if (ui.marksFilter == null) p.bg else p.text) }
+                }
+                items(colors) { c ->
+                    val on = ui.marksFilter == c
+                    Row(
+                        Modifier.clip(RoundedCornerShape(14.dp)).background(if (on) p.text else p.card.copy(alpha = 0.7f))
+                            .clickable { ui.marksFilter = if (on) null else c }.padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(12.dp).clip(CircleShape).background(highlightColor(c)))
+                        com.sebas.zerkalo.ui.inkName(c).takeIf { it.isNotBlank() }?.let { Text("  $it", style = Type.uiSmall, color = if (on) p.bg else p.text) }
+                    }
+                }
+            }
+        }
+        LazyColumn(Modifier.heightIn(max = 520.dp), state = if (tab == 0) ui.tocState else ui.marksState) {
             if (tab == 0) {
                 if (ui.toc.isEmpty()) item { Text("Este libro no trae índice.", style = Type.ui, color = p.text2, modifier = Modifier.padding(12.dp)) }
                 items(ui.toc) { t ->
@@ -282,7 +376,7 @@ private fun TocSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                 if (shioris.isEmpty() && hls.isEmpty()) item {
                     Text("Aún no hay marcas. Pon un shiori con la cinta o mantén presionado el texto para subrayar.", style = Type.ui, color = p.text2, modifier = Modifier.padding(12.dp))
                 }
-                items(shioris) { m ->
+                if (ui.marksFilter == null) items(shioris) { m ->
                     Row(Modifier.fillMaxWidth().clickable { locatorOf(m)?.let(act.go); onClose() }.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         ZIcon("shiori", p.accent, 16.dp)
                         Text(m.chapter.ifBlank { "Shiori" }, style = Type.ui, color = p.text, modifier = Modifier.weight(1f).padding(start = 10.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -293,6 +387,9 @@ private fun TocSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                     Row(Modifier.fillMaxWidth().clickable { locatorOf(m)?.let(act.go); onClose() }.padding(12.dp)) {
                         Box(Modifier.width(3.dp).height(40.dp).background(highlightColor(m.color)))
                         Column(Modifier.padding(start = 12.dp)) {
+                            com.sebas.zerkalo.ui.inkName(m.color).takeIf { it.isNotBlank() }?.let {
+                                Text(it.uppercase(), style = Type.caption.copy(fontSize = 9.5.sp), color = highlightColor(m.color))
+                            }
                             Text(m.text.take(180), style = Type.body.copy(fontSize = 14.5.sp), color = p.text, maxLines = 3, overflow = TextOverflow.Ellipsis)
                             if (m.note.isNotBlank()) Text(m.note, style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
                         }
@@ -456,6 +553,122 @@ private fun PairSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
     }
 }
 
+/** Escuchar el libro que estás leyendo, con la voz de una persona (LibriVox). */
+@Composable
+private fun ListenSheet(act: ReaderActions, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    val scope = rememberCoroutineScope()
+    val linked = remember { act.linkedAudio() }
+    var found by remember { mutableStateOf<List<com.sebas.zerkalo.data.AudioBook>?>(null) }
+    var busy by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) { if (linked == null) found = act.findAudio() }
+    fun start(ab: com.sebas.zerkalo.data.AudioBook) {
+        if (ab.tracks.isNotEmpty()) { act.listen(ab); return }
+        busy = ab.id
+        scope.launch {
+            val t = runCatching { com.sebas.zerkalo.data.LibriVox.tracks(ab.id) }.getOrDefault(emptyList())
+            busy = null
+            if (t.isNotEmpty()) act.listen(ab.copy(tracks = t))
+        }
+    }
+    Sheet(onClose) {
+        Text("Escuchar este libro", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+        Text("Audiolibros de LibriVox, leídos por personas. Empieza en el capítulo donde vas.", style = Type.ui, color = p.text2, modifier = Modifier.padding(top = 6.dp))
+        Spacer(Modifier.height(14.dp))
+        when {
+            linked != null -> {
+                Card2 {
+                    Caption("Tu audiolibro")
+                    Text(linked.title, style = Type.ui, color = p.text, modifier = Modifier.padding(top = 4.dp))
+                    if (linked.author.isNotBlank()) Text(linked.author, style = Type.uiSmall, color = p.text2)
+                }
+                PillButton("Escuchar desde aquí", { start(linked) }, Modifier.fillMaxWidth().padding(top = 12.dp), icon = "play")
+            }
+            found == null -> Text("Buscando en LibriVox…", style = Type.ui, color = p.text2)
+            found!!.isEmpty() -> Text(
+                "No encontré este libro en audio. LibriVox solo graba obras de dominio público; prueba en la pestaña Escuchar con otro título.",
+                style = Type.ui, color = p.text2,
+            )
+            else -> LazyColumn(Modifier.heightIn(max = 420.dp)) {
+                items(found!!, key = { it.id }) { ab ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { start(ab) }.padding(vertical = 10.dp, horizontal = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        coil.compose.AsyncImage(
+                            model = ab.cover, contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                            modifier = Modifier.size(48.dp).clip(RoundedCornerShape(6.dp)).background(p.card),
+                        )
+                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                            Text(ab.title, style = Type.ui, color = p.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            if (ab.author.isNotBlank()) Text(ab.author, style = Type.uiSmall, color = p.text2, maxLines = 1)
+                        }
+                        Text(if (busy == ab.id) "…" else "Escuchar", style = Type.uiSmall, color = p.accent)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Tus colores de subrayado: cambiar el nombre, el tono, agregar o quitar. */
+@Composable
+private fun InksSheet(act: ReaderActions, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    val inks by com.sebas.zerkalo.data.Prefs.inks.collectAsState()
+    var editing by remember { mutableStateOf<Int?>(null) } // índice; -1 = nuevo
+    Sheet(onClose) {
+      Column(Modifier.heightIn(max = 640.dp).verticalScroll(rememberScrollState())) {
+        Text("Colores de subrayado", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+        Text("Ponle un significado a cada color: por ejemplo Cita, Duda o Para el examen. Así puedes filtrarlos en Marcas.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
+        Spacer(Modifier.height(10.dp))
+        inks.forEachIndexed { i, ink ->
+            Row(
+                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable { editing = i }.padding(vertical = 10.dp, horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.size(28.dp).clip(CircleShape).background(Color(ink.argb)))
+                Text(ink.name, style = Type.ui, color = p.text, modifier = Modifier.weight(1f).padding(start = 12.dp))
+                if (inks.size > 1) Text("Quitar", style = Type.uiSmall, color = p.text2, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable {
+                    act.setInks(inks.filterIndexed { j, _ -> j != i }); editing = null
+                }.padding(6.dp))
+            }
+            if (editing == i) InkEditor(ink, onSave = { n -> act.setInks(inks.mapIndexed { j, x -> if (j == i) n else x }); editing = null })
+        }
+        if (editing == -1) InkEditor(com.sebas.zerkalo.data.InkColor("", 0xFFB07CC6.toInt()), onSave = { n -> act.setInks(inks + n); editing = null })
+        else PillButton("Agregar color", { editing = -1 }, Modifier.fillMaxWidth().padding(top = 10.dp), ghost = true, icon = "plus")
+      }
+    }
+}
+
+@Composable
+private fun InkEditor(start: com.sebas.zerkalo.data.InkColor, onSave: (com.sebas.zerkalo.data.InkColor) -> Unit) {
+    val p = LocalPalette.current
+    val hsv = remember { FloatArray(3).also { android.graphics.Color.colorToHSV(start.argb, it) } }
+    var hue by remember { mutableFloatStateOf(hsv[0]) }
+    var sat by remember { mutableFloatStateOf(hsv[1].coerceIn(0.15f, 1f)) }
+    var value by remember { mutableFloatStateOf(hsv[2].coerceIn(0.3f, 1f)) }
+    var name by remember { mutableStateOf(start.name) }
+    val argb = android.graphics.Color.HSVToColor(floatArrayOf(hue, sat, value))
+    Column(Modifier.fillMaxWidth().padding(vertical = 8.dp).clip(RoundedCornerShape(16.dp)).background(p.card.copy(alpha = 0.6f)).padding(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(34.dp).clip(CircleShape).background(Color(argb)))
+            Box(Modifier.padding(start = 12.dp).weight(1f).clip(RoundedCornerShape(12.dp)).background(p.surface).padding(horizontal = 12.dp, vertical = 10.dp)) {
+                if (name.isEmpty()) Text("Nombre (por ejemplo: Cita)", style = Type.ui, color = p.text2)
+                BasicTextField(name, { name = it.take(24) }, singleLine = true, textStyle = Type.ui.copy(color = p.text), cursorBrush = SolidColor(p.accent), modifier = Modifier.fillMaxWidth())
+            }
+        }
+        Text("Tono", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 10.dp))
+        Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(Brush.horizontalGradient((0..6).map { Color(android.graphics.Color.HSVToColor(floatArrayOf(it * 60f, 0.8f, 0.9f))) })))
+        ZSlider(hue, { hue = it }, range = 0f..359f)
+        Text("Intensidad", style = Type.uiSmall, color = p.text2)
+        ZSlider(sat, { sat = it }, range = 0.15f..1f)
+        Text("Luz", style = Type.uiSmall, color = p.text2)
+        ZSlider(value, { value = it }, range = 0.3f..1f)
+        PillButton("Guardar", { onSave(com.sebas.zerkalo.data.InkColor(name.trim().ifBlank { "Color" }, argb)) }, Modifier.fillMaxWidth().padding(top = 6.dp))
+    }
+}
+
 @Composable
 private fun Card2(content: @Composable () -> Unit) {
     val p = LocalPalette.current
@@ -519,6 +732,26 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                 else ui.settings.copy(dyslexia = false, spacing = 0, justify = true, lineHeight = 1.6f),
             )
         }
+        Label("Pantalla")
+        SwitchRow("Usar toda la pantalla", "El texto sube hasta la cámara y se ocultan la hora y la batería del sistema", s.fullscreen) { act.settings(ui.settings.copy(fullscreen = it)) }
+        Label("Margen arriba y abajo")
+        Segmented(listOf("Compacto", "Normal", "Amplio"), s.vMargin, { act.settings(ui.settings.copy(vMargin = it)) })
+
+        Label("Avance automático", if (s.scroll) "${s.autoSpeed.toInt()} píxeles por segundo" else "una página cada ${s.autoPage.toInt()} s")
+        if (s.scroll) {
+            var v by remember(s.autoSpeed) { mutableFloatStateOf(s.autoSpeed) }
+            ZSlider(v, { v = it }, range = 4f..200f, onFinished = { act.settings(ui.settings.copy(autoSpeed = v)) })
+        } else {
+            var v by remember(s.autoPage) { mutableFloatStateOf(s.autoPage) }
+            ZSlider(v, { v = it }, range = 5f..180f, onFinished = { act.settings(ui.settings.copy(autoPage = v)) })
+        }
+        Text(
+            if (s.scroll) "El texto sube solo; tocar o deslizar lo pausa. Al acabar un capítulo sigue con el siguiente."
+            else "Pasa de página solo. En desplazamiento continuo el texto sube suave, como un teleprompter.",
+            style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 2.dp),
+        )
+        PillButton(if (ui.auto) "Detener avance automático" else "Empezar avance automático", { act.toggleAuto(); onClose() }, Modifier.fillMaxWidth().padding(top = 10.dp), icon = if (ui.auto) "pause" else "auto")
+
         Label("Espacio entre párrafos")
         Segmented(listOf("Como el libro", "Separados", "Aireados"), s.paragraph, { act.settings(s.copy(paragraph = it)) })
         Label("Espacio entre letras", "más amplio ayuda con la dislexia")
@@ -715,9 +948,24 @@ private fun MarkSheet(m: Mark, act: ReaderActions, onClose: () -> Unit) {
             Text(m.text, style = Type.body, color = p.text, modifier = Modifier.padding(start = 12.dp), maxLines = 8, overflow = TextOverflow.Ellipsis)
         }
         if (m.note.isNotBlank()) Text(m.note, style = Type.ui, color = p.text2, modifier = Modifier.padding(top = 10.dp))
-        Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            (0..3).forEach { c ->
-                Box(Modifier.size(34.dp).clip(CircleShape).background(highlightColor(c)).clickable { act.recolor(m, c) })
+        val inks by com.sebas.zerkalo.data.Prefs.inks.collectAsState()
+        val cur = highlightColor(m.color)
+        LazyRow(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(inks) { ink ->
+                val sel = Color(ink.argb) == cur
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(58.dp).clickable { act.recolor(m, ink.argb) }) {
+                    Box(
+                        Modifier.size(if (sel) 38.dp else 34.dp).clip(CircleShape).background(Color(ink.argb)),
+                        contentAlignment = Alignment.Center,
+                    ) { if (sel) ZIcon("check", Color.White, 16.dp) }
+                    Text(ink.name, style = Type.uiSmall.copy(fontSize = 11.sp), color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
+                }
+            }
+            item {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(58.dp).clickable { act.openInks() }) {
+                    Box(Modifier.size(34.dp).clip(CircleShape).background(p.card), contentAlignment = Alignment.Center) { ZIcon("plus", p.text, 16.dp) }
+                    Text("Editar", style = Type.uiSmall.copy(fontSize = 11.sp), color = p.text2, modifier = Modifier.padding(top = 4.dp))
+                }
             }
         }
         Row(Modifier.padding(top = 20.dp)) {

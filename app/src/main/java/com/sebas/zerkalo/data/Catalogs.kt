@@ -246,7 +246,7 @@ object Catalogs {
             if (!seen.add(title)) continue
             items += CatalogItem(
                 key = "ws:$wl:$title", source = "Wikisource", title = title, author = "", lang = wl,
-                epubUrls = listOf("https://ws-export.wmcloud.org/?format=epub&lang=$wl&page=" + enc(title)),
+                epubUrls = listOf("wsb:$wl:$title"),
                 summary = Importer.cleanHtml(r.optString("snippet")),
             )
             if (items.size >= 15) break
@@ -255,11 +255,22 @@ object Catalogs {
     }
 
     // ---------------- OAPEN (libros académicos de acceso abierto) ----------------
-    suspend fun oapen(q: String): Page = try {
-        oapenRest(q)
-    } catch (e: Exception) {
-        // Si la API de OAPEN nos rechaza, se usa su catálogo OPDS.
-        opdsBooks("https://library.oapen.org/opds/search?query=" + enc(q), "OAPEN", depth = 0)
+    /** OAPEN limita cuántas veces se le pregunta: si dice "espera" (429), se le deja en paz 15 minutos. */
+    @Volatile private var oapenPauseUntil = 0L
+    private val oapenLock = kotlinx.coroutines.sync.Mutex()
+
+    suspend fun oapen(q: String): Page = oapenLock.withLock {
+        if (System.currentTimeMillis() < oapenPauseUntil) throw NetError("OAPEN pidió una pausa", 429)
+        try {
+            oapenRest(q)
+        } catch (e: Exception) {
+            if ((e as? NetError)?.code == 429 || e.message?.contains("429") == true) {
+                oapenPauseUntil = System.currentTimeMillis() + 15 * 60_000
+                throw e
+            }
+            // Si la API de OAPEN falla por otra razón, se usa su catálogo OPDS.
+            opdsBooks("https://library.oapen.org/opds/search?query=" + enc(q), "OAPEN", depth = 0)
+        }
     }
 
     private suspend fun oapenRest(q: String): Page {

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Zerkalo controla los márgenes de arriba y abajo (con "Usar toda la pantalla" y el ajuste de margen);
+         sin esto, Readium sumaba 40 dp más de espacio vacío arriba y abajo. -->
+    <dimen name="readium_navigator_epub_vertical_padding">0dp</dimen>
+</resources>

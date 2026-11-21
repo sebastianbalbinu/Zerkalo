@@ -2,6 +2,9 @@ package com.sebas.zerkalo.ui
 
 import android.content.Intent
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,6 +61,7 @@ fun BookScreen(id: String) {
     val days = remember(sessions, id) { Library.bookDays(id) }
     val haze = rememberHazeState()
     var menu by remember { mutableStateOf(false) }
+    var share by remember { mutableStateOf(false) }
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val washi = Taller.WASHI.getOrElse(book.binding.washi) { Taller.WASHI[0] }.color
 
@@ -78,6 +82,8 @@ fun BookScreen(id: String) {
                         if (book.source.isNotBlank()) Chip(book.source)
                         if (book.progress > 0) Chip("${(book.progress * 100).toInt()} %")
                     }
+                    Gap(12)
+                    TagEditor(book)
                 }
             }
             if (book.finished) item {
@@ -142,10 +148,11 @@ fun BookScreen(id: String) {
                 { a.read(book) }, Modifier.weight(1f),
             )
             Spacer(Modifier.width(10.dp))
-            CircleButton("taller", { a.open(Screen.Taller(book.id)) }, size = 52.dp, glass = haze)
+            CircleButton("share", { share = true }, size = 52.dp, glass = haze)
         }
     }
     if (menu) BookMenu(book) { menu = false }
+    if (share) ShareSheet(book) { share = false }
 }
 
 private fun shortDate(d: String): String = try {
@@ -166,6 +173,7 @@ private fun BookMenu(book: Book, onClose: () -> Unit) {
                 ListRow(if (book.useBinding) "Mostrar la portada original" else "Mostrar mi encuadernación", onClick = {
                     Library.update(book.id) { it.copy(useBinding = !it.useBinding) }; onClose()
                 })
+                ListRow("Diseñar su encuadernación", "Washi, patrón e hilo para su portada", onClick = { onClose(); a.open(Screen.Taller(book.id)) })
                 ListRow(if (book.finished) "Marcar como no terminado" else "Marcar como terminado", onClick = {
                     Library.update(book.id) { if (it.finished) it.copy(finishedAt = 0) else it.copy(finishedAt = System.currentTimeMillis(), progress = 1.0) }
                     onClose()
@@ -188,6 +196,108 @@ private fun BookMenu(book: Book, onClose: () -> Unit) {
                     PillButton("Quitar", { Library.remove(book); onClose(); a.back(); a.toast("Libro quitado") }, Modifier.weight(1f), accent = true)
                 }
             }
+        }
+    }
+}
+
+/** Etiquetas propias del libro: se agregan escribiendo y se quitan tocándolas. */
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun TagEditor(book: Book) {
+    val p = LocalPalette.current
+    val all by Library.books.collectAsState()
+    var adding by remember { mutableStateOf(false) }
+    var text by remember { mutableStateOf("") }
+    val suggestions = remember(all, book.tags) { all.flatMap { it.tags }.distinct().filter { it !in book.tags }.take(8) }
+    fun add(t: String) {
+        val tag = t.trim().take(28)
+        if (tag.isNotEmpty()) Library.update(book.id) { it.copy(tags = (it.tags + tag).distinct()) }
+        text = ""; adding = false
+    }
+    androidx.compose.foundation.layout.FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        book.tags.forEach { t ->
+            Row(
+                Modifier.clip(RoundedCornerShape(14.dp)).background(p.text.copy(alpha = 0.9f)).clickable {
+                    Library.update(book.id) { it.copy(tags = it.tags - t) }
+                }.padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("#$t", style = Type.uiSmall, color = p.bg)
+                Text("  ×", style = Type.uiSmall, color = p.bg.copy(alpha = 0.7f))
+            }
+        }
+        if (!adding) Row(
+            Modifier.clip(RoundedCornerShape(14.dp)).background(p.surface).clickable { adding = true }.padding(horizontal = 12.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ZIcon("tag", p.text2, 14.dp)
+            Text(if (book.tags.isEmpty()) "  Agregar etiqueta" else "  Otra", style = Type.uiSmall, color = p.text2)
+        }
+    }
+    if (adding) {
+        Gap(10)
+        SearchField(text, { text = it }, "Nueva etiqueta (por ejemplo: Rusos)", Modifier.fillMaxWidth(), onSubmit = { add(text) })
+        if (suggestions.isNotEmpty()) {
+            Gap(8)
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(suggestions) { t -> SmallPill("#$t", false) { add(t) } }
+            }
+        }
+        Gap(8)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            PillButton("Agregar", { add(text) }, enabled = text.isNotBlank())
+            PillButton("Cancelar", { adding = false; text = "" }, ghost = true)
+        }
+    }
+}
+
+/** Enlace público del libro en su biblioteca de origen (si se puede armar). */
+fun sourceLink(book: Book): String? {
+    val k = book.key
+    return when {
+        k.startsWith("pg:") -> "https://www.gutenberg.org/ebooks/" + k.removePrefix("pg:")
+        k.startsWith("ia:") -> "https://archive.org/details/" + k.removePrefix("ia:")
+        k.startsWith("ws:") -> k.removePrefix("ws:").split(":", limit = 2).let { "https://${it[0]}.wikisource.org/wiki/" + java.net.URLEncoder.encode(it.getOrElse(1) { "" }.replace(' ', '_'), "UTF-8").replace("+", "%20").replace("%2F", "/") }
+        k.startsWith("oapen:") -> "https://library.oapen.org/handle/" + k.removePrefix("oapen:")
+        else -> null
+    }
+}
+
+/** Compartir con amigos: el archivo EPUB (WhatsApp, Quick Share, correo…) o solo el enlace. */
+@Composable
+private fun ShareSheet(book: Book, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    val ctx = LocalContext.current
+    val a = LocalActions.current
+    val link = remember(book.key) { sourceLink(book) }
+    ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface) {
+        Column(Modifier.padding(horizontal = 22.dp).padding(bottom = 30.dp)) {
+            Text("Compartir", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+            Text(book.title, style = Type.ui, color = p.text2, modifier = Modifier.padding(top = 4.dp))
+            Gap(12)
+            ListRow("Enviar el libro", "El archivo EPUB: tu amigo lo abre en Zerkalo o en cualquier lector", onClick = {
+                runCatching {
+                    val dir = java.io.File(ctx.cacheDir, "compartir").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
+                    val name = (book.title.take(60) + if (book.author.isNotBlank()) " - " + book.author.take(40) else "")
+                        .replace(Regex("[\\/:*?\"<>|]"), " ").trim() + ".epub"
+                    val out = java.io.File(dir, name)
+                    java.io.File(Library.booksDir, book.file).copyTo(out, overwrite = true)
+                    val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".archivos", out)
+                    val send = Intent(Intent.ACTION_SEND).setType("application/epub+zip").putExtra(Intent.EXTRA_STREAM, uri)
+                        .putExtra(Intent.EXTRA_TEXT, "Te comparto «${book.title}» 📖").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    ctx.startActivity(Intent.createChooser(send, "Enviar libro"))
+                }.onFailure { a.toast("No se pudo preparar el archivo") }
+                onClose()
+            })
+            if (link != null) ListRow("Enviar el enlace", "Pesa nada: lo bajan de ${book.source}", onClick = {
+                val t = "«${book.title}»" + (if (book.author.isNotBlank()) " de ${book.author}" else "") + "\n$link"
+                ctx.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, t), "Enviar enlace"))
+                onClose()
+            })
         }
     }
 }

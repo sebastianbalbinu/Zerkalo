@@ -62,6 +62,7 @@ import org.readium.r2.navigator.epub.EpubPreferences
 import org.readium.r2.navigator.epub.css.FontStyle
 import org.readium.r2.navigator.input.InputListener
 import org.readium.r2.navigator.input.TapEvent
+import org.readium.r2.navigator.input.DragEvent
 import org.readium.r2.navigator.preferences.FontFamily
 import org.readium.r2.navigator.preferences.TextAlign
 import org.readium.r2.navigator.util.DirectionalNavigationAdapter
@@ -129,6 +130,13 @@ class ReaderUi {
     var dim by mutableFloatStateOf(0f)        // velo negro para oscurecer por debajo del mínimo
     var clock by mutableStateOf("")
     var rulerY by mutableFloatStateOf(0.42f)  // posición de la regla de lectura (0..1)
+    var edgeHint by mutableStateOf<String?>(null) // aviso al llegar al borde de un capítulo (desplazamiento)
+    var edgeReady by mutableStateOf(false)        // ya basta con soltar para cambiar de capítulo
+    var auto by mutableStateOf(false)             // avance automático encendido
+    var tocTab by mutableIntStateOf(0)
+    val tocState = androidx.compose.foundation.lazy.LazyListState()
+    val marksState = androidx.compose.foundation.lazy.LazyListState()
+    var marksFilter by mutableStateOf<Int?>(null)
     fun say(s: String) { toast = s to System.currentTimeMillis() }
 }
 
@@ -151,6 +159,9 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private var pairPositions: List<List<Locator>> = emptyList()
     private var pairLang = ""
     private var lookupJob: Job? = null
+    private var lastInsets: WindowInsetsCompat? = null
+    private var autoJob: Job? = null
+    private val dragEdge = HashMap<EpubNavigatorFragment, String>()
     private var tts: TextToSpeech? = null
     private var ttsReady = false
 
@@ -190,14 +201,33 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         root.addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         setContentView(root)
         // El texto queda siempre dentro de la zona segura, aunque las barras se oculten (sin saltos).
-        ViewCompat.setOnApplyWindowInsetsListener(panes) { v, insets ->
-            val i = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
-            v.setPadding(i.left, i.top, i.right, i.bottom)
+        if (android.os.Build.VERSION.SDK_INT >= 28) {
+            window.attributes = window.attributes.apply { layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES }
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(panes) { _, insets ->
+            lastInsets = insets
+            applyMargins()
             insets
         }
         applyPaper()
         applyBrightness(ui.settings.brightness)
         lifecycleScope.launch { open() }
+    }
+
+    /**
+     * Márgenes del texto. Normal: debajo de la barra de estado. "Usar toda la pantalla": el texto sube
+     * hasta la altura de la cámara. Arriba y abajo se suma el margen elegido (compacto, normal o amplio).
+     */
+    private fun applyMargins() {
+        val insets = lastInsets ?: return
+        val r = ui.settings
+        val i = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+        val dp = resources.displayMetrics.density
+        val extra = (listOf(6, 22, 42).getOrElse(r.vMargin) { 22 } * dp).toInt()
+        val top = if (r.fullscreen) extra else i.top + extra
+        // Abajo queda sitio para el pie (hora y %); en pantalla completa se ignora la barra de gestos.
+        val bottom = (if (r.fullscreen) (14 * dp).toInt() else i.bottom) + extra + (12 * dp).toInt()
+        panes.setPadding(i.left, top, i.right, bottom)
     }
 
     /** Vertical: un libro encima del otro. Horizontal: uno al lado del otro. */
@@ -285,6 +315,10 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         readiumCssRsProperties = org.readium.r2.navigator.epub.css.RsProperties(maxLineLength = org.readium.r2.navigator.epub.css.Length.Rem(34.0))
         servedAssets = listOf("fonts/.*")
         selectionActionModeCallback = selectionCallback
+        // Los cambios de capítulo en desplazamiento continuo los maneja Zerkalo (ver onDrag), no Readium:
+        // Readium cambiaba de capítulo con cualquier gesto un poco de lado y siempre volvía al inicio.
+        disablePageTurnsWhileScrolling = true
+        shouldApplyInsetsPadding = false
         val files = FontFiles.available(this@ReaderActivity).toSet()
         ReaderFonts.forEachIndexed { i, f ->
             if (f.css != null && f.regular != null && i in files) declareFont(f.css, "fonts/${f.regular}", f.italic?.let { "fonts/$it" }, f.bold?.let { "fonts/$it" })
@@ -322,6 +356,149 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             if (dir == 0) setControls(!ui.controls) else turn(nav, dir)
             return true
         }
+
+        /**
+         * Desplazamiento continuo: para pasar de capítulo hay que llegar al final (o al inicio) y seguir
+         * deslizando a propósito. Aparece un aviso; al soltar pasado el umbral, se cambia de capítulo.
+         * Un deslizamiento claramente horizontal también cambia de capítulo.
+         */
+        override fun onDrag(event: DragEvent): Boolean {
+            if (!ui.settings.scroll) return false
+            val th = 110 * resources.displayMetrics.density
+            val dx = event.offset.x
+            val dy = event.offset.y
+            when (event.type) {
+                DragEvent.Type.Start -> {
+                    dragEdge[nav] = ""
+                    lifecycleScope.launch { dragEdge[nav] = runCatching { nav.evaluateJavascript(EDGE_STATE) }.getOrNull().orEmpty() }
+                    if (ui.auto) stopAuto()
+                }
+                DragEvent.Type.Move -> {
+                    val edge = dragEdge[nav].orEmpty()
+                    val vertical = abs(dy) > abs(dx) * 1.4f
+                    val toNext = vertical && dy < 0 && (edge.contains("bottom") || edge.contains("both"))
+                    val toPrev = vertical && dy > 0 && (edge.contains("top") || edge.contains("both"))
+                    ui.edgeReady = (toNext || toPrev) && abs(dy) > th
+                    ui.edgeHint = when {
+                        toNext && ui.edgeReady -> "Suelta para ir a: " + neighborTitle(nav, 1)
+                        toPrev && ui.edgeReady -> "Suelta para volver a: " + neighborTitle(nav, -1)
+                        toNext && abs(dy) > th * 0.25f -> "Sigue deslizando para el siguiente capítulo"
+                        toPrev && abs(dy) > th * 0.25f -> "Sigue deslizando para el capítulo anterior"
+                        else -> null
+                    }
+                }
+                DragEvent.Type.End -> {
+                    val edge = dragEdge[nav].orEmpty()
+                    val vertical = abs(dy) > abs(dx) * 1.4f
+                    val horizontal = abs(dx) > th * 1.3f && abs(dx) > abs(dy) * 2.2f
+                    ui.edgeHint = null; ui.edgeReady = false
+                    when {
+                        vertical && dy < -th && (edge.contains("bottom") || edge.contains("both")) -> chapterJump(nav, 1)
+                        vertical && dy > th && (edge.contains("top") || edge.contains("both")) -> chapterJump(nav, -1)
+                        horizontal -> chapterJump(nav, if (dx < 0) 1 else -1)
+                    }
+                }
+            }
+            return false
+        }
+    }
+
+    private fun pubOf(nav: EpubNavigatorFragment): Publication? = if (nav === pairNav) pairPub else publication
+
+    private fun resourceIndex(pub: Publication, loc: Locator): Int {
+        val href = loc.href.toString().substringBefore('#')
+        return pub.readingOrder.indexOfFirst { it.url().toString().substringBefore('#') == href }
+    }
+
+    private fun neighborTitle(nav: EpubNavigatorFragment, dir: Int): String {
+        val pub = pubOf(nav) ?: return ""
+        val link = pub.readingOrder.getOrNull(resourceIndex(pub, nav.currentLocator.value) + dir) ?: return if (dir > 0) "fin del libro" else "inicio"
+        val href = link.url().toString().substringBefore('#')
+        fun find(ls: List<org.readium.r2.shared.publication.Link>): String? {
+            for (l in ls) {
+                if (l.url().toString().substringBefore('#') == href) return l.title
+                find(l.children)?.let { return it }
+            }
+            return null
+        }
+        return find(pub.tableOfContents) ?: link.title ?: if (dir > 0) "siguiente capítulo" else "capítulo anterior"
+    }
+
+    /**
+     * Cambia de capítulo en desplazamiento continuo: hacia adelante empieza arriba del siguiente;
+     * hacia atrás abre el anterior por el final, justo donde lo dejaste.
+     */
+    private fun chapterJump(nav: EpubNavigatorFragment, dir: Int) {
+        val pub = pubOf(nav) ?: return
+        val idx = resourceIndex(pub, nav.currentLocator.value)
+        val link = pub.readingOrder.getOrNull(idx + dir) ?: run { ui.say(if (dir > 0) "Es el final del libro" else "Es el inicio del libro"); return }
+        val loc = pub.locatorFromLink(link)?.copyWithLocations(progression = if (dir > 0) 0.0 else 1.0) ?: return
+        if (ui.settings.haptic) root.performHapticFeedback(HapticFeedbackConstants.CONTEXT_CLICK)
+        nav.go(loc, animated = false)
+    }
+
+    // ---------------- leer y escuchar ----------------
+    private fun norm(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9ivxlc ]"), " ").replace(Regex("\\s+"), " ").trim()
+
+    /** El capítulo del audiolibro que corresponde a donde vas leyendo: por título si coincide; si no, por proporción. */
+    private fun trackFor(ab: com.sebas.zerkalo.data.AudioBook): Int {
+        if (ab.tracks.isEmpty()) return 0
+        val ch = norm(ui.chapter)
+        if (ch.length > 3) {
+            val i = ab.tracks.indexOfFirst { t -> val n = norm(t.title); n.length > 3 && (n.contains(ch) || ch.contains(n)) }
+            if (i >= 0) return i
+        }
+        val pub = publication ?: return 0
+        val idx = navigator?.currentLocator?.value?.let { resourceIndex(pub, it) }?.coerceAtLeast(0) ?: 0
+        return ((idx.toFloat() / pub.readingOrder.size.coerceAtLeast(1)) * ab.tracks.size).toInt().coerceIn(0, ab.tracks.size - 1)
+    }
+
+    /** Lleva el texto al capítulo que está sonando. */
+    private fun goToChapterNamed(title: String) {
+        val n = norm(title)
+        val hit = ui.toc.firstOrNull { t -> val c = norm(t.title); c.length > 3 && (n.contains(c) || c.contains(n)) }
+        if (hit != null) { navigator?.go(hit.link, animated = false); setControls(false) } else ui.say("No encontré ese capítulo en el texto")
+    }
+
+    // ---------------- avance automático ----------------
+    /** Desplazamiento: el texto sube solo a la velocidad elegida. Páginas: pasa de página cada tantos segundos. */
+    fun startAuto() {
+        val nav = navigator ?: return
+        autoJob?.cancel()
+        ui.auto = true
+        setControls(false)
+        autoJob = lifecycleScope.launch {
+            if (!ui.settings.scroll) {
+                while (true) {
+                    delay((ui.settings.autoPage * 1000).toLong())
+                    if (ui.sheet != null || ui.controls || ui.lookup != null) continue
+                    if (!nav.goForward(animated = ui.settings.animate)) { stopAuto(); ui.say("Llegaste al final"); break }
+                }
+            } else {
+                runCatching { nav.evaluateJavascript(AUTO_SCROLL.replace("__S__", ui.settings.autoSpeed.toString())) }
+                while (true) {
+                    delay(700)
+                    val paused = ui.sheet != null || ui.controls || ui.lookup != null
+                    val st = runCatching { nav.evaluateJavascript(if (paused) AUTO_PAUSE else AUTO_STATE) }.getOrNull().orEmpty()
+                    if (st.contains("off")) runCatching { nav.evaluateJavascript(AUTO_SCROLL.replace("__S__", ui.settings.autoSpeed.toString())) }
+                    if (st.contains("end")) {
+                        // Fin del capítulo: pausa breve y sigue con el siguiente.
+                        delay(1200)
+                        val pub = publication ?: break
+                        if (resourceIndex(pub, nav.currentLocator.value) >= pub.readingOrder.size - 1) { stopAuto(); ui.say("Llegaste al final"); break }
+                        chapterJump(nav, 1)
+                        delay(1500)
+                    }
+                }
+            }
+        }
+    }
+
+    fun stopAuto() {
+        autoJob?.cancel(); autoJob = null
+        ui.auto = false
+        lifecycleScope.launch { runCatching { navigator?.evaluateJavascript(AUTO_STOP) } }
     }
 
     /** Pasa página. En desplazamiento continuo avanza una pantalla dejando dos líneas de referencia. */
@@ -336,7 +513,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             val js = SCROLL_BY.replace("__D__", dir.toString()).replace("__S__", if (ui.settings.animate) "smooth" else "auto")
             val r = runCatching { nav.evaluateJavascript(js) }.getOrNull().orEmpty()
             // Al final (o al inicio) del capítulo, se pasa al siguiente (o al anterior).
-            if (r.contains("edge")) { if (dir > 0) nav.goForward(animated = false) else nav.goBackward(animated = false) }
+            if (r.contains("edge")) chapterJump(nav, dir)
         }
     }
 
@@ -513,8 +690,14 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         ui.settings = r
         ui.palette = paletteFor(r)
         if (old.brightness != r.brightness) applyBrightness(r.brightness)
+        if (old.fullscreen != r.fullscreen || old.vMargin != r.vMargin) applyMargins()
+        if (ui.auto && (old.autoSpeed != r.autoSpeed || old.autoPage != r.autoPage || old.scroll != r.scroll)) startAuto()
         // Estos ajustes no necesitan rehacer las páginas.
-        if (old.copy(brightness = r.brightness, ruler = r.ruler, haptic = r.haptic, volumeKeys = r.volumeKeys, breaks = r.breaks, animate = r.animate) == r) return
+        if (old.copy(
+                brightness = r.brightness, ruler = r.ruler, haptic = r.haptic, volumeKeys = r.volumeKeys, breaks = r.breaks, animate = r.animate,
+                fullscreen = r.fullscreen, vMargin = r.vMargin, autoSpeed = r.autoSpeed, autoPage = r.autoPage,
+            ) == r
+        ) return
         applyPaper()
         navigator?.submitPreferences(preferences(r, ui.palette))
         pairNav?.submitPreferences(preferences(r, ui.palette))
@@ -569,8 +752,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
         override fun onActionItemClicked(mode: ActionMode, item: MenuItem): Boolean {
             when (item.itemId) {
-                101 -> highlight(0)
-                102 -> highlight(1, note = "")
+                101 -> highlight(Prefs.lastInk)
+                102 -> highlight(Prefs.lastInk, note = "")
                 104 -> lifecycleScope.launch {
                     // La selección puede estar en cualquiera de los dos paneles.
                     val (nav, lang) = listOfNotNull(navigator?.let { it to ui.lang }, pairNav?.let { it to pairLang })
@@ -601,9 +784,21 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         settings = { updateSettings(it) },
         removeMark = { Library.removeMark(it.id); ui.activeMark = null; refreshMarks() },
         saveNote = { loc, note -> saveHighlight(loc, 1, note); ui.noteFor = null },
-        recolor = { m, c -> Library.putMark(m.copy(color = c)); ui.activeMark = null; refreshMarks() },
+        recolor = { m, c -> Prefs.lastInk = c; Library.putMark(m.copy(color = c)); ui.activeMark = null; refreshMarks() },
         seek = { f -> seek(f) },
         brightnessLive = { v -> applyBrightness(v) },
+        toggleAuto = { if (ui.auto) stopAuto() else startAuto() },
+        findAudio = { com.sebas.zerkalo.data.AudioStore.findFor(book) },
+        linkedAudio = { com.sebas.zerkalo.data.AudioStore.forBook(book.id) },
+        listen = { ab ->
+            val linked = ab.copy(linkedBook = book.id)
+            com.sebas.zerkalo.audio.Listen.play(this, linked, trackFor(linked), 0)
+            ui.sheet = null
+        },
+        goToTrack = { title -> goToChapterNamed(title) },
+        setInks = { Prefs.setInks(it) },
+        highlightWith = { c -> Prefs.lastInk = c },
+        openInks = { ui.activeMark = null; ui.sheet = "inks" },
         turn = { d -> navigator?.let { turn(it, d) } },
         toggleStudy = {
             ui.studyTap = !ui.studyTap; Prefs.studyTap = ui.studyTap
@@ -821,6 +1016,14 @@ class ReaderActions(
     val recolor: (Mark, Int) -> Unit,
     val seek: (Float) -> Unit,
     val brightnessLive: (Float) -> Unit,
+    val toggleAuto: () -> Unit,
+    val findAudio: suspend () -> List<com.sebas.zerkalo.data.AudioBook>,
+    val linkedAudio: () -> com.sebas.zerkalo.data.AudioBook?,
+    val listen: (com.sebas.zerkalo.data.AudioBook) -> Unit,
+    val goToTrack: (String) -> Unit,
+    val setInks: (List<com.sebas.zerkalo.data.InkColor>) -> Unit,
+    val highlightWith: (Int) -> Unit,
+    val openInks: () -> Unit,
     val turn: (Int) -> Unit,
     val toggleStudy: () -> Unit,
     val closeLookup: () -> Unit,
@@ -833,6 +1036,36 @@ class ReaderActions(
     val togglePair: () -> Unit,
     val syncPair: () -> Unit,
 )
+
+/** Dónde está el texto: "top", "bottom", "both" (capítulo corto) o "none". */
+private const val EDGE_STATE = """(function(){
+  var se = document.scrollingElement || document.documentElement, h = window.innerHeight, max = se.scrollHeight - h;
+  var t = se.scrollTop <= 6, b = se.scrollTop >= max - 6;
+  return (t && b) ? 'both' : t ? 'top' : b ? 'bottom' : 'none';
+})()"""
+
+/** Avance automático suave (requestAnimationFrame): __S__ píxeles por segundo. */
+private const val AUTO_SCROLL = """(function(s){
+  if (window.__zk) { window.__zk.s = s; window.__zk.on = true; return 'ok'; }
+  var z = window.__zk = { s: s, on: true, last: 0, acc: 0 };
+  function f(t) {
+    if (window.__zk !== z) return;
+    if (z.on && z.last) { z.acc += z.s * (t - z.last) / 1000; if (z.acc >= 1) { var n = Math.floor(z.acc); window.scrollBy(0, n); z.acc -= n; } }
+    z.last = t; requestAnimationFrame(f);
+  }
+  requestAnimationFrame(f); return 'ok';
+})(__S__)"""
+
+/** Estado del avance automático: "end" al final del capítulo, "off" si la página es nueva y hay que encenderlo. */
+private const val AUTO_STATE = """(function(){
+  var se = document.scrollingElement || document.documentElement, max = se.scrollHeight - window.innerHeight;
+  if (!window.__zk) return 'off';
+  window.__zk.on = true;
+  return se.scrollTop >= max - 2 ? 'end' : 'on';
+})()"""
+
+private const val AUTO_PAUSE = "(function(){ if (window.__zk) window.__zk.on = false; return 'paused'; })()"
+private const val AUTO_STOP = "(function(){ window.__zk = null; return 'off'; })()"
 
 /** Desplaza una pantalla (menos dos líneas). Devuelve "edge" si ya está al final o al inicio del capítulo. */
 private const val SCROLL_BY = """(function(){

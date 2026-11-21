@@ -142,10 +142,17 @@ object Importer {
         val id = newId()
         val dest = File(Library.booksDir, "$id.epub")
         return try {
-            // Internet Archive: primero se busca cuál es su archivo EPUB libre.
-            val urls = item.epubUrls.flatMap { u -> if (u.startsWith("ia:")) Catalogs.resolveIa(u.removePrefix("ia:")) else listOf(u) }
-            if (urls.isEmpty()) throw NetError("Este libro del Internet Archive no tiene un EPUB libre")
-            Net.download(urls, dest) { p -> onProgress(p?.let { it * 0.92f }) }
+            val ws = item.epubUrls.firstOrNull { it.startsWith("wsb:") }
+            if (ws != null) {
+                // Wikisource: Zerkalo arma el EPUB con el texto de la obra.
+                val (lang, title) = ws.removePrefix("wsb:").split(":", limit = 2).let { it[0] to it.getOrElse(1) { "" } }
+                WikisourceEpub.build(lang, title, item.author, dest) { p -> onProgress(p?.let { it * 0.92f }) }
+            } else {
+                // Internet Archive: primero se busca cuál es su archivo EPUB libre.
+                val urls = item.epubUrls.flatMap { u -> if (u.startsWith("ia:")) Catalogs.resolveIa(u.removePrefix("ia:")) else listOf(u) }
+                if (urls.isEmpty()) throw NetError("Este libro del Internet Archive no tiene un EPUB libre")
+                Net.download(urls, dest) { p -> onProgress(p?.let { it * 0.92f }) }
+            }
             val r = fromFile(core, dest, id, item.key, item.source, item = item)
             onProgress(1f)
             r

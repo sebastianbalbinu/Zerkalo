@@ -52,6 +52,12 @@ import com.sebas.zerkalo.data.Study
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 
+/** Recuerda por dónde ibas en las listas aunque cambies de pestaña. */
+object ScrollMemory {
+    val notas = androidx.compose.foundation.lazy.LazyListState()
+    val escuchar = androidx.compose.foundation.lazy.LazyListState()
+}
+
 /** Notas: todo lo que subrayaste, anotaste y guardaste, agrupado por libro, con su resumen de estudio. */
 @Composable
 fun NotasScreen(haze: HazeState) {
@@ -78,7 +84,7 @@ fun NotasScreen(haze: HazeState) {
     val week = remember(sessions) { (sessions.filter { System.currentTimeMillis() - it.at < 7 * 86_400_000L }.sumOf { it.ms } / 60_000).toInt() }
 
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize().hazeSource(haze), contentPadding = PaddingValues(top = top + 18.dp, bottom = 150.dp)) {
+        LazyColumn(Modifier.fillMaxSize().hazeSource(haze), state = ScrollMemory.notas, contentPadding = PaddingValues(top = top + 18.dp, bottom = 150.dp)) {
             item(key = "head") {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.Bottom) {
                     Column(Modifier.weight(1f)) {
@@ -95,6 +101,7 @@ fun NotasScreen(haze: HazeState) {
                     Stat("Terminados", done.size.toString(), Modifier.weight(1f))
                 }
             }
+            item(key = "stats2") { ReadingStats(sessions, books) }
             if (notes.isNotEmpty()) item(key = "search") {
                 SearchField(query, { query = it }, "Buscar en tus notas", Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp))
             }
@@ -134,7 +141,7 @@ fun NotasScreen(haze: HazeState) {
                 }
             }
         }
-        ProgressiveEdge(haze, top = true, height = top + 26.dp, modifier = Modifier.align(Alignment.TopCenter))
+        CollapsingTop("Notas", ScrollMemory.notas, Modifier.align(Alignment.TopCenter))
         ProgressiveEdge(haze, top = false, height = 150.dp, modifier = Modifier.align(Alignment.BottomCenter))
     }
 
@@ -153,7 +160,8 @@ private fun Help(t: String) {
 @Composable
 private fun BookNotes(b: Book, xs: List<Mark>, onSummary: () -> Unit) {
     val p = LocalPalette.current
-    val hls = xs.filter { it.type == "hl" }.sortedByDescending { it.at }
+    // En el orden del libro, no en el orden en que se subrayaron.
+    val hls = xs.filter { it.type == "hl" }.sortedBy { it.progress }
     val words = xs.count { it.type == "word" }
     var open by remember { mutableStateOf(false) }
     Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp), PaddingValues(16.dp)) {
@@ -199,6 +207,100 @@ private fun NoteRow(m: Mark, book: String, modifier: Modifier, bare: Boolean = f
         }
     }
     if (bare) Box(modifier) { body() } else Card(modifier, PaddingValues(14.dp)) { body() }
+}
+
+/** Estadísticas de lectura: la semana día por día, racha, mes, año y a qué hora lees más. */
+@Composable
+private fun ReadingStats(sessions: List<com.sebas.zerkalo.data.Session>, books: List<Book>) {
+    val p = LocalPalette.current
+    val st = remember(sessions, books) { computeStats(sessions, books) }
+    Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), PaddingValues(18.dp)) {
+        Column {
+            Caption("Tu lectura")
+            // Últimos 7 días
+            val max = (st.week.maxOrNull() ?: 0).coerceAtLeast(10)
+            Row(Modifier.fillMaxWidth().height(110.dp).padding(top = 14.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.Bottom) {
+                st.week.forEachIndexed { i, m ->
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                        if (m > 0) Text("$m", style = Type.uiSmall.copy(fontSize = 10.sp), color = p.text2)
+                        Box(
+                            Modifier.padding(top = 3.dp).width(16.dp).height((70f * m / max).coerceAtLeast(3f).dp).clip(RoundedCornerShape(4.dp))
+                                .background(if (i == 6) p.accent else p.text2.copy(alpha = if (m > 0) 0.55f else 0.18f)),
+                        )
+                        Text(st.dayNames[i], style = Type.uiSmall.copy(fontSize = 10.5.sp), color = if (i == 6) p.text else p.text2, modifier = Modifier.padding(top = 4.dp))
+                    }
+                }
+            }
+            Text("minutos por día", style = Type.uiSmall.copy(fontSize = 10.5.sp), color = p.text2, modifier = Modifier.padding(top = 4.dp))
+            Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MiniStat("Racha", if (st.streak == 1) "1 día" else "${st.streak} días", Modifier.weight(1f))
+                MiniStat("Este mes", hm(st.monthMin), Modifier.weight(1f))
+                MiniStat("Este año", hm(st.yearMin), Modifier.weight(1f))
+            }
+            Row(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                MiniStat("Libros del año", st.yearBooks.toString(), Modifier.weight(1f))
+                MiniStat("Racha más larga", "${st.bestStreak} d", Modifier.weight(1f))
+                MiniStat("Lees más", st.favTime, Modifier.weight(1f))
+            }
+            st.topBook?.let { Text("Lo que más leíste este mes: $it", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 12.dp)) }
+        }
+    }
+}
+
+@Composable
+private fun MiniStat(label: String, value: String, modifier: Modifier) {
+    val p = LocalPalette.current
+    Column(modifier) {
+        Text(value, style = Type.title.copy(fontSize = 17.sp), color = p.text, maxLines = 1)
+        Text(label, style = Type.uiSmall.copy(fontSize = 11.sp), color = p.text2, maxLines = 1)
+    }
+}
+
+private fun hm(m: Int) = if (m < 60) "$m min" else "${m / 60} h ${m % 60}"
+
+private data class Stats(
+    val week: List<Int>, val dayNames: List<String>, val streak: Int, val bestStreak: Int, val monthMin: Int, val yearMin: Int,
+    val yearBooks: Int, val favTime: String, val topBook: String?,
+)
+
+private fun computeStats(sessions: List<com.sebas.zerkalo.data.Session>, books: List<Book>): Stats {
+    val cal = java.util.Calendar.getInstance()
+    fun dayKey(t: Long): Int { cal.timeInMillis = t; return cal.get(java.util.Calendar.YEAR) * 1000 + cal.get(java.util.Calendar.DAY_OF_YEAR) }
+    val byDay = HashMap<Int, Long>()
+    sessions.forEach { byDay[dayKey(it.at)] = (byDay[dayKey(it.at)] ?: 0L) + it.ms }
+    val now = System.currentTimeMillis()
+    val names = listOf("D", "L", "M", "X", "J", "V", "S")
+    val week = (6 downTo 0).map { d -> ((byDay[dayKey(now - d * 86_400_000L)] ?: 0L) / 60_000).toInt() }
+    val dayNames = (6 downTo 0).map { d -> cal.timeInMillis = now - d * 86_400_000L; names[cal.get(java.util.Calendar.DAY_OF_WEEK) - 1] }
+    // Racha: días seguidos con al menos 1 minuto (hoy cuenta si ya leíste; si no, desde ayer)
+    var streak = 0
+    var d = if ((byDay[dayKey(now)] ?: 0L) >= 60_000) 0 else 1
+    while ((byDay[dayKey(now - d * 86_400_000L)] ?: 0L) >= 60_000) { streak++; d++ }
+    var best = 0; var cur = 0; var prev = -1L
+    byDay.filterValues { it >= 60_000 }.keys.sorted().forEach { k ->
+        // Días consecutivos dentro del mismo año o en el cambio de año
+        val kl = k.toLong()
+        val consecutive = prev >= 0 && (kl - prev == 1L || (kl / 1000 - prev / 1000 == 1L && kl % 1000 == 1L))
+        cur = if (consecutive) cur + 1 else 1; best = maxOf(best, cur); prev = kl
+    }
+    cal.timeInMillis = now
+    val y = cal.get(java.util.Calendar.YEAR); val mo = cal.get(java.util.Calendar.MONTH)
+    var month = 0L; var year = 0L
+    val hours = IntArray(4)
+    val perBook = HashMap<String, Long>()
+    sessions.forEach { s ->
+        cal.timeInMillis = s.at
+        if (cal.get(java.util.Calendar.YEAR) == y) {
+            year += s.ms
+            if (cal.get(java.util.Calendar.MONTH) == mo) { month += s.ms; perBook[s.bookId] = (perBook[s.bookId] ?: 0L) + s.ms }
+        }
+        val h = cal.get(java.util.Calendar.HOUR_OF_DAY)
+        hours[when (h) { in 5..11 -> 0; in 12..17 -> 1; in 18..22 -> 2; else -> 3 }] += (s.ms / 60_000).toInt()
+    }
+    val fav = if (hours.all { it == 0 }) "—" else listOf("Mañana", "Tarde", "Noche", "Madrugada")[hours.indices.maxBy { hours[it] }]
+    val yearBooks = books.count { b -> b.finished && run { cal.timeInMillis = b.finishedAt; cal.get(java.util.Calendar.YEAR) == y } }
+    val top = perBook.maxByOrNull { it.value }?.key?.let { id -> books.firstOrNull { it.id == id }?.title }
+    return Stats(week, dayNames, streak, maxOf(best, streak), (month / 60_000).toInt(), (year / 60_000).toInt(), yearBooks, fav, top)
 }
 
 /** Vista previa del resumen de estudio, con compartir y guardar en PDF. */
@@ -258,5 +360,12 @@ private fun Stat(label: String, value: String, modifier: Modifier) {
     }
 }
 
-/** Colores de subrayado: kin (oro), koke (musgo), shu (bermellón), ai (índigo). */
-fun highlightColor(i: Int): Color = listOf(Color(0xFFE2BE52), Color(0xFF8CA05A), Color(0xFFD9694F), Color(0xFF6F8DBF)).getOrElse(i) { Color(0xFFE2BE52) }
+/** Color de un subrayado: los antiguos guardaban un índice (0..3); los nuevos, el color exacto (ARGB). */
+fun highlightColor(i: Int): Color =
+    if (i in 0..15) Color(com.sebas.zerkalo.data.InkColor.DEFAULTS.getOrElse(i) { com.sebas.zerkalo.data.InkColor.DEFAULTS[0] }.argb) else Color(i)
+
+/** Nombre del color de un subrayado según tus colores. */
+fun inkName(i: Int): String {
+    val argb = if (i in 0..15) com.sebas.zerkalo.data.InkColor.DEFAULTS.getOrElse(i) { com.sebas.zerkalo.data.InkColor.DEFAULTS[0] }.argb else i
+    return com.sebas.zerkalo.data.Prefs.inks.value.firstOrNull { it.argb == argb }?.name ?: ""
+}
