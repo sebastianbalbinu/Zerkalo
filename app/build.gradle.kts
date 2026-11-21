@@ -45,6 +45,15 @@ android {
     buildFeatures {
         compose = true
     }
+    // Un APK por tipo de procesador: el traductor trae piezas nativas pesadas y así cada teléfono baja solo la suya.
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64")
+            isUniversalApk = false
+        }
+    }
     packaging {
         resources.excludes += setOf("META-INF/*.kotlin_module", "META-INF/AL2.0", "META-INF/LGPL2.1", "META-INF/LICENSE*", "META-INF/NOTICE*")
     }

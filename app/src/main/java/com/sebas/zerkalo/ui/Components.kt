@@ -1,5 +1,9 @@
 package com.sebas.zerkalo.ui
 
+import androidx.compose.foundation.layout.offset
+
+import androidx.compose.ui.input.pointer.pointerInput
+
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -81,6 +85,47 @@ object WoodBitmaps {
     private val cache = HashMap<Int, ImageBitmap>()
     fun get(res: android.content.res.Resources, id: Int): ImageBitmap = synchronized(cache) {
         cache.getOrPut(id) { ImageBitmap.imageResource(res, id) }
+    }
+}
+
+/** Deslizador propio: pista fina, perilla redonda y una marca opcional (por ejemplo, el mínimo del brillo). */
+@Composable
+fun ZSlider(
+    value: Float,
+    onChange: (Float) -> Unit,
+    modifier: Modifier = Modifier,
+    range: ClosedFloatingPointRange<Float> = 0f..1f,
+    onFinished: (() -> Unit)? = null,
+    marker: Float? = null,
+) {
+    val p = LocalPalette.current
+    val change by androidx.compose.runtime.rememberUpdatedState(onChange)
+    val finished by androidx.compose.runtime.rememberUpdatedState(onFinished)
+    val span = (range.endInclusive - range.start).takeIf { it > 0f } ?: 1f
+    androidx.compose.foundation.layout.BoxWithConstraints(
+        modifier.fillMaxWidth().height(36.dp).pointerInput(range) {
+            fun set(x: Float) = change(range.start + (x / size.width).coerceIn(0f, 1f) * span)
+            androidx.compose.foundation.gestures.awaitEachGesture {
+                val down = androidx.compose.foundation.gestures.awaitFirstDown()
+                set(down.position.x); down.consume()
+                androidx.compose.foundation.gestures.drag(down.id) { set(it.position.x); it.consume() }
+                finished?.invoke()
+            }
+        },
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        val f = ((value - range.start) / span).coerceIn(0f, 1f)
+        val knob = 22.dp
+        Box(Modifier.padding(horizontal = knob / 2).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(p.line.copy(alpha = 0.5f)))
+        Box(Modifier.padding(start = knob / 2).width((maxWidth - knob) * f).height(4.dp).clip(RoundedCornerShape(2.dp)).background(p.accent))
+        marker?.let { m ->
+            val mf = ((m - range.start) / span).coerceIn(0f, 1f)
+            Box(Modifier.offset(x = knob / 2 + (maxWidth - knob) * mf - 1.dp).size(2.dp, 12.dp).background(p.text2.copy(alpha = 0.6f)))
+        }
+        Box(
+            Modifier.offset(x = (maxWidth - knob) * f).size(knob).shadow(4.dp, CircleShape).clip(CircleShape).background(p.surface)
+                .border(2.5.dp, p.accent, CircleShape),
+        )
     }
 }
 

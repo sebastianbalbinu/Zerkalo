@@ -73,6 +73,11 @@ import com.sebas.zerkalo.ui.Segmented
 import com.sebas.zerkalo.ui.Type
 import com.sebas.zerkalo.ui.ZIcon
 import com.sebas.zerkalo.ui.ZSwitch
+import com.sebas.zerkalo.ui.ZSlider
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
 import com.sebas.zerkalo.ui.ZerkaloTheme
 import com.sebas.zerkalo.ui.highlightColor
 import kotlinx.coroutines.delay
@@ -105,18 +110,25 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
             return@Box
         }
 
-        // Filtro cálido: un velo ámbar muy suave sobre la página (no recibe toques).
-        if (ui.settings.warmth > 0f) Box(Modifier.fillMaxSize().background(Color(0xFFFF8A2B).copy(alpha = ui.settings.warmth * 0.24f)))
+        // Regla de lectura: atenúa todo menos la franja que estás leyendo.
+        if (ui.settings.ruler && !ui.controls) ReadingRuler(ui)
+
+        // Oscurecer por debajo del mínimo del teléfono (no recibe toques).
+        if (ui.dim > 0f) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = ui.dim)))
+
+        // Brillo deslizando el dedo por el borde izquierdo, como en Moon+ Reader.
+        BrightnessEdge(ui, act, Modifier.align(Alignment.CenterStart))
 
         // Cinta del shiori en la esquina, como un marcapáginas de tela.
         AnimatedVisibility(ui.bookmarked, Modifier.align(Alignment.TopEnd).padding(end = 28.dp), enter = slideInVertically { -it }, exit = slideOutVertically { -it }) {
             Box(Modifier.size(14.dp, 54.dp).background(p.accent))
         }
 
-        // Pie discreto mientras se lee
+        // Pie discreto mientras se lee: hora y avance
         AnimatedVisibility(!ui.controls, Modifier.align(Alignment.BottomCenter), enter = fadeIn(tween(400)), exit = fadeOut(tween(150))) {
             Text(
-                "${(ui.progress * 100).toInt()} %", style = Type.uiSmall.copy(fontSize = 11.sp), color = p.text2.copy(alpha = 0.6f),
+                listOf(ui.clock, "${(ui.progress * 100).toInt()} %").filter { it.isNotBlank() }.joinToString("   ·   "),
+                style = Type.uiSmall.copy(fontSize = 11.sp), color = p.text2.copy(alpha = 0.6f),
                 modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = 6.dp),
             )
         }
@@ -158,11 +170,9 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                     .windowInsetsPadding(WindowInsets.navigationBars).padding(start = 16.dp, end = 16.dp, top = 40.dp, bottom = 10.dp),
             ) {
                 var drag by remember { mutableStateOf<Float?>(null) }
-                Slider(
-                    value = drag ?: ui.progress, onValueChange = { drag = it },
-                    onValueChangeFinished = { drag?.let(act.seek); drag = null },
-                    colors = SliderDefaults.colors(thumbColor = p.accent, activeTrackColor = p.accent, inactiveTrackColor = p.line),
-                    modifier = Modifier.height(30.dp),
+                ZSlider(
+                    value = drag ?: ui.progress, onChange = { drag = it },
+                    onFinished = { drag?.let(act.seek); drag = null },
                 )
                 Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
                     Text(ui.chapterLeft, style = Type.uiSmall.copy(fontSize = 12.sp), color = p.text2, modifier = Modifier.weight(1f), maxLines = 1)
@@ -456,6 +466,7 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
     val p = LocalPalette.current
     val s = ui.settings
     Sheet(onClose) {
+      Column(Modifier.heightIn(max = 640.dp).verticalScroll(rememberScrollState())) {
         Text("Lectura", style = Type.title.copy(fontSize = 21.sp), color = p.text)
         Label("Modo")
         Segmented(listOf("Páginas", "Desplazamiento continuo"), if (s.scroll) 1 else 0, { act.settings(s.copy(scroll = it == 1)) })
@@ -478,10 +489,9 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             RoundPill("minus", { act.settings(s.copy(size = (s.size - 10).coerceAtLeast(70))) })
             var v by remember(s.size) { mutableFloatStateOf(s.size.toFloat()) }
-            Slider(
-                value = v, onValueChange = { v = it }, valueRange = 70f..200f,
-                onValueChangeFinished = { act.settings(s.copy(size = (v / 5).toInt() * 5)) },
-                colors = SliderDefaults.colors(thumbColor = p.accent, activeTrackColor = p.accent, inactiveTrackColor = p.line),
+            ZSlider(
+                value = v, onChange = { v = it }, range = 70f..200f,
+                onFinished = { act.settings(ui.settings.copy(size = (v / 5).toInt() * 5)) },
                 modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
             )
             RoundPill("plus", { act.settings(s.copy(size = (s.size + 10).coerceAtMost(200))) })
@@ -497,6 +507,108 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                 Text("Con guiones, como un libro impreso", style = Type.uiSmall, color = p.text2)
             }
             ZSwitch(s.justify) { act.settings(s.copy(justify = it)) }
+        }
+        SwitchRow(
+            "Modo dislexia",
+            "Letra Lexend, más espacio entre letras y palabras, interlineado amplio y sin justificar (así no quedan huecos irregulares)",
+            s.dyslexia,
+        ) { on ->
+            act.settings(
+                if (on) ui.settings.copy(dyslexia = true, font = 6, spacing = 1, justify = false, lineHeight = 1.85f, paragraph = maxOf(ui.settings.paragraph, 1))
+                else ui.settings.copy(dyslexia = false, spacing = 0, justify = true, lineHeight = 1.6f),
+            )
+        }
+        Label("Espacio entre párrafos")
+        Segmented(listOf("Como el libro", "Separados", "Aireados"), s.paragraph, { act.settings(s.copy(paragraph = it)) })
+        Label("Espacio entre letras", "más amplio ayuda con la dislexia")
+        Segmented(listOf("Normal", "Amplio", "Muy amplio"), s.spacing, { act.settings(s.copy(spacing = it)) })
+
+        Label("Comodidad")
+        SwitchRow("Regla de lectura", "Resalta la línea que lees; arrástrala desde la derecha", s.ruler) { act.settings(ui.settings.copy(ruler = it)) }
+        SwitchRow("Animación al pasar página", "Apágala si prefieres un cambio instantáneo", s.animate) { act.settings(ui.settings.copy(animate = it)) }
+        SwitchRow("Vibración suave al pasar página", "", s.haptic) { act.settings(ui.settings.copy(haptic = it)) }
+        SwitchRow("Botones de volumen", "Bajar volumen: siguiente · subir: anterior", s.volumeKeys) { act.settings(ui.settings.copy(volumeKeys = it)) }
+        SwitchRow("Pausas para los ojos", "Un aviso suave cada 20 minutos de lectura", s.breaks) { act.settings(ui.settings.copy(breaks = it)) }
+        Text(
+            "Toques: izquierda o arriba, página anterior · derecha o abajo, siguiente · centro, menú. Desliza por el borde izquierdo para el brillo.",
+            style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 14.dp),
+        )
+      }
+    }
+}
+
+@Composable
+private fun SwitchRow(title: String, sub: String, on: Boolean, onChange: (Boolean) -> Unit) {
+    val p = LocalPalette.current
+    Row(Modifier.fillMaxWidth().padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f).padding(end = 12.dp)) {
+            Text(title, style = Type.ui, color = p.text)
+            if (sub.isNotBlank()) Text(sub, style = Type.uiSmall, color = p.text2)
+        }
+        ZSwitch(on, onChange)
+    }
+}
+
+/** Franja de lectura: lo de arriba y abajo queda en penumbra. La manija de la derecha la mueve. */
+@Composable
+private fun ReadingRuler(ui: ReaderUi) {
+    val p = LocalPalette.current
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.foundation.layout.BoxWithConstraints(Modifier.fillMaxSize()) {
+        val total = maxHeight
+        // Unas dos líneas y media del tamaño actual de letra
+        val band = (16f * ui.settings.size / 100f * ui.settings.lineHeight * 2.5f).dp
+        val center = total * ui.rulerY
+        val top = (center - band / 2).coerceAtLeast(0.dp)
+        val shade = p.bg.copy(alpha = if (p.isDark) 0.62f else 0.55f)
+        Box(Modifier.fillMaxWidth().height(top).background(shade))
+        Box(Modifier.fillMaxWidth().padding(top = top + band).fillMaxHeight().background(shade))
+        Box(
+            Modifier.align(Alignment.TopEnd).padding(top = top + band / 2 - 22.dp, end = 2.dp).size(26.dp, 44.dp)
+                .pointerInput(Unit) {
+                    detectVerticalDragGestures { ch, dy ->
+                        ch.consume()
+                        val h = with(density) { total.toPx() }
+                        ui.rulerY = (ui.rulerY + dy / h).coerceIn(0.08f, 0.92f)
+                    }
+                },
+            contentAlignment = Alignment.Center,
+        ) { Box(Modifier.size(5.dp, 30.dp).clip(RoundedCornerShape(3.dp)).background(p.accent.copy(alpha = 0.8f))) }
+    }
+}
+
+/** Borde izquierdo: deslizar arriba o abajo cambia el brillo; un toque pasa a la página anterior. */
+@Composable
+private fun BrightnessEdge(ui: ReaderUi, act: ReaderActions, modifier: Modifier) {
+    val p = LocalPalette.current
+    var live by remember { mutableStateOf<Float?>(null) }
+    var height by remember { mutableFloatStateOf(1f) }
+    Box(
+        modifier.width(26.dp).fillMaxHeight(0.72f)
+            .onSizeChanged { height = it.height.toFloat().coerceAtLeast(1f) }
+            .pointerInput(Unit) { androidx.compose.foundation.gestures.detectTapGestures { act.turn(-1) } }
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onDragStart = { live = ui.settings.brightness.takeIf { it >= 0f } ?: 0.65f },
+                    onDragEnd = { live?.let { act.settings(ui.settings.copy(brightness = it)) }; live = null },
+                    onDragCancel = { live?.let { act.settings(ui.settings.copy(brightness = it)) }; live = null },
+                ) { ch, dy ->
+                    ch.consume()
+                    val v = ((live ?: 0.65f) - dy / height * 1.2f).coerceIn(0f, 1f)
+                    live = v
+                    act.brightnessLive(v)
+                }
+            },
+    )
+    live?.let { v ->
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Row(
+                Modifier.shadow(10.dp, RoundedCornerShape(20.dp)).clip(RoundedCornerShape(20.dp)).background(p.text).padding(horizontal = 18.dp, vertical = 11.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ZIcon(if (v < 0.3f) "moon" else "sun", p.bg, 18.dp)
+                Text(if (v < 0.3f) "  Más oscuro que el mínimo" else "  Brillo ${((v - 0.3f) / 0.7f * 100).toInt()} %", style = Type.ui, color = p.bg)
+            }
         }
     }
 }
@@ -514,24 +626,37 @@ private fun LightSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                 Text("Brillo automático", style = Type.ui, color = p.text)
                 Text("El del teléfono", style = Type.uiSmall, color = p.text2)
             }
-            ZSwitch(s.brightness < 0f) { act.settings(s.copy(brightness = if (it) -1f else 0.5f)) }
+            ZSwitch(s.brightness < 0f) { act.settings(s.copy(brightness = if (it) -1f else 0.65f)) }
         }
         if (s.brightness >= 0f) {
             var b by remember { mutableFloatStateOf(s.brightness) }
             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
                 ZIcon("moon", p.text2, 18.dp)
-                Slider(
-                    value = b, onValueChange = { b = it; act.settings(ui.settings.copy(brightness = it)) }, valueRange = 0.02f..1f,
-                    colors = sliderColors, modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+                ZSlider(
+                    value = b, onChange = { b = it; act.brightnessLive(it) }, onFinished = { act.settings(ui.settings.copy(brightness = b)) },
+                    marker = 0.3f, modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
                 )
                 ZIcon("sun", p.text2, 20.dp)
             }
+            Text(
+                if (b < 0.3f) "Más oscuro que el mínimo del teléfono" else "A la izquierda de la marca oscurece más que el mínimo del teléfono",
+                style = Type.uiSmall, color = p.text2,
+            )
         }
         Label("Filtro cálido", if (s.warmth <= 0f) "apagado" else "${(s.warmth * 100).toInt()} %")
         var w by remember { mutableFloatStateOf(s.warmth) }
-        Slider(value = w, onValueChange = { w = it; act.settings(ui.settings.copy(warmth = it)) }, valueRange = 0f..1f, colors = sliderColors)
-        Label("Papel")
-        Segmented(listOf("Crema", "Nogal", "Sumi", "Como la app"), if (s.paper in 0..2) s.paper else 3, { act.settings(s.copy(paper = if (it == 3) -1 else it)) })
+        ZSlider(value = w, onChange = { w = it }, onFinished = { act.settings(ui.settings.copy(warmth = w)) })
+        Label("Papel", "el claro se lee mejor de día")
+        val papers = listOf("Crema" to 0, "Sepia" to 3, "Gris" to 4, "Nogal" to 1, "Negro" to 2, "Según la hora" to -2, "Como la app" to -1)
+        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(papers) { (name, id) ->
+                val on = s.paper == id
+                Box(
+                    Modifier.clip(RoundedCornerShape(16.dp)).background(if (on) p.text else p.card.copy(alpha = 0.7f))
+                        .clickable { act.settings(ui.settings.copy(paper = id)) }.padding(horizontal = 14.dp, vertical = 10.dp),
+                ) { Text(name, style = Type.ui, color = if (on) p.bg else p.text) }
+            }
+        }
         if (ui.palette.isDark) {
             Label("Color de la letra")
             LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -555,9 +680,9 @@ private fun LightSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                 fun push() = act.settings(ui.settings.copy(customInk = android.graphics.Color.HSVToColor(floatArrayOf(hue, 0.22f, light))))
                 Label("Tono")
                 Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(Brush.horizontalGradient((0..6).map { Color.hsv(it * 60f, 0.35f, 0.9f) })))
-                Slider(value = hue, onValueChange = { hue = it }, onValueChangeFinished = { push() }, valueRange = 0f..359f, colors = sliderColors)
+                ZSlider(value = hue, onChange = { hue = it }, onFinished = { push() }, range = 0f..359f)
                 Label("Claridad")
-                Slider(value = light, onValueChange = { light = it }, onValueChangeFinished = { push() }, valueRange = 0.55f..1f, colors = sliderColors)
+                ZSlider(value = light, onChange = { light = it }, onFinished = { push() }, range = 0.55f..1f)
             }
         }
     }
@@ -565,6 +690,7 @@ private fun LightSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
 
 private fun originalInk(s: com.sebas.zerkalo.data.ReaderSettings): Color = when (s.paper) {
     2 -> Color(0xFFE9CDA4)
+    4 -> Color(0xFFDAD6CF)
     else -> Color(0xFFF0E6D4)
 }
 

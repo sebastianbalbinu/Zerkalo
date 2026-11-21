@@ -33,8 +33,23 @@ jobs:
           done
           ls -la app/src/main/assets/catalogo
 
+      # Las fuentes recortadas se guardan entre compilaciones (antes tardaban 7 minutos cada vez).
+      - name: Recuperar fuentes guardadas
+        id: fuentes
+        uses: actions/cache@v4
+        with:
+          path: fuentes-cache
+          key: fuentes-${{ hashFiles('.github/scripts/fuentes.sh') }}
+
       - name: Incluir fuentes libres de lectura
-        run: bash .github/scripts/fuentes.sh
+        run: |
+          if [ "${{ steps.fuentes.outputs.cache-hit }}" != "true" ]; then
+            bash .github/scripts/fuentes.sh
+            mkdir -p fuentes-cache && cp app/src/main/assets/fonts/*.ttf fuentes-cache/
+          else
+            cp -n fuentes-cache/*.ttf app/src/main/assets/fonts/
+          fi
+          ls app/src/main/assets/fonts | wc -l
 
       - name: Preparar llave de firma
         env:
@@ -58,12 +73,18 @@ jobs:
           files: build-log.txt
 
       - name: Renombrar APK
-        run: cp app/build/outputs/apk/release/app-release.apk Zerkalo.apk
+        run: |
+          D=app/build/outputs/apk/release
+          ls -la $D
+          cp $D/app-arm64-v8a-release.apk Zerkalo.apk          # la de casi todos los teléfonos de hoy
+          cp $D/app-armeabi-v7a-release.apk Zerkalo-armv7.apk  # teléfonos viejos de 32 bits
+          cp $D/app-x86_64-release.apk Zerkalo-x86_64.apk      # emuladores de prueba
+          ls -la Zerkalo*.apk
 
       - uses: actions/upload-artifact@v4
         with:
           name: apk
-          path: Zerkalo.apk
+          path: Zerkalo*.apk
 
   probar:
     needs: build
@@ -136,4 +157,6 @@ jobs:
           name: Zerkalo 1.0.${{ github.run_number }}
           make_latest: true
           body: "Zerkalo nativa: lector EPUB con Readium, probado en emuladores Android 14, 15 y 16. Si ya tienes Zerkalo, se actualiza sola."
-          files: Zerkalo.apk
+          files: |
+            Zerkalo.apk
+            Zerkalo-armv7.apk

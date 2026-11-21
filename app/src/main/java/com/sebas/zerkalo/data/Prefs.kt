@@ -15,12 +15,20 @@ data class ReaderSettings(
     val lineHeight: Float = 1.6f,
     val margin: Int = 1,        // 0 estrechos, 1 medios, 2 amplios
     val justify: Boolean = true,
-    val paper: Int = -1,        // -1 = el mismo de la app; 0 crema, 1 nogal, 2 sumi
+    val paper: Int = -1,        // -1 = el mismo de la app; -2 = según la hora; 0 crema, 1 nogal, 2 negro, 3 sepia, 4 gris
     val scroll: Boolean = false, // desplazamiento continuo en vez de páginas
     val ink: Int = 0,           // color de letra en papel oscuro: 0 original, 1 azul claro, 2 blanco cálido, 3 gris perla, 4 ámbar suave, 5 propio
     val customInk: Int = 0xFFC7D8EA.toInt(),
-    val brightness: Float = -1f, // -1 = el del sistema
+    val brightness: Float = -1f, // -1 = el del sistema; 0..0.3 oscurece por debajo del mínimo; 0.3..1 brillo de pantalla
     val warmth: Float = 0f,     // filtro cálido, 0..1
+    val paragraph: Int = 0,     // espacio entre párrafos: 0 como el libro, 1 separados, 2 aireados
+    val spacing: Int = 0,       // espacio entre letras y palabras: 0 normal, 1 amplio, 2 muy amplio
+    val animate: Boolean = true, // animación al pasar página
+    val haptic: Boolean = false, // vibración suave al pasar página
+    val volumeKeys: Boolean = true, // pasar página con los botones de volumen
+    val ruler: Boolean = false, // regla de lectura
+    val breaks: Boolean = false, // recordar pausas para los ojos
+    val dyslexia: Boolean = false, // modo dislexia: letra clara, más espacio, sin justificar
 )
 
 data class OpdsCatalog(val name: String, val url: String)
@@ -39,6 +47,9 @@ object Prefs {
             margin = sp.getInt("rMargin", 1), justify = sp.getBoolean("rJustify", true), paper = sp.getInt("rPaper", -1),
             scroll = sp.getBoolean("rScroll", false), ink = sp.getInt("rInk", 0), customInk = sp.getInt("rCustomInk", 0xFFC7D8EA.toInt()),
             brightness = sp.getFloat("rBright", -1f), warmth = sp.getFloat("rWarm", 0f),
+            paragraph = sp.getInt("rPara", 0), spacing = sp.getInt("rSpacing", 0), animate = sp.getBoolean("rAnim", true),
+            haptic = sp.getBoolean("rHaptic", false), volumeKeys = sp.getBoolean("rVol", true), ruler = sp.getBoolean("rRuler", false),
+            breaks = sp.getBoolean("rBreaks", false), dyslexia = sp.getBoolean("rDys", false),
         )
         catalogs.value = runCatching {
             val a = JSONArray(sp.getString("opds", "[]"))
@@ -53,7 +64,10 @@ object Prefs {
         sp.edit().putInt("rFont", r.font).putInt("rSize", r.size).putFloat("rLh", r.lineHeight)
             .putInt("rMargin", r.margin).putBoolean("rJustify", r.justify).putInt("rPaper", r.paper)
             .putBoolean("rScroll", r.scroll).putInt("rInk", r.ink).putInt("rCustomInk", r.customInk)
-            .putFloat("rBright", r.brightness).putFloat("rWarm", r.warmth).apply()
+            .putFloat("rBright", r.brightness).putFloat("rWarm", r.warmth)
+            .putInt("rPara", r.paragraph).putInt("rSpacing", r.spacing).putBoolean("rAnim", r.animate)
+            .putBoolean("rHaptic", r.haptic).putBoolean("rVol", r.volumeKeys).putBoolean("rRuler", r.ruler)
+            .putBoolean("rBreaks", r.breaks).putBoolean("rDys", r.dyslexia).apply()
     }
 
     fun setCatalogs(list: List<OpdsCatalog>) {

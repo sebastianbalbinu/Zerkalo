@@ -45,6 +45,10 @@ import com.sebas.zerkalo.ui.Chashitsu
 import com.sebas.zerkalo.ui.Nogal
 import com.sebas.zerkalo.ui.Palette
 import com.sebas.zerkalo.ui.SumiPalette
+import com.sebas.zerkalo.ui.SepiaPalette
+import com.sebas.zerkalo.ui.GrisPalette
+import android.view.KeyEvent
+import android.view.HapticFeedbackConstants
 import com.sebas.zerkalo.ui.highlightColor
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -122,6 +126,9 @@ class ReaderUi {
     var pairOn by mutableStateOf(false)
     var pairTitle by mutableStateOf("")
     var lang by mutableStateOf("")
+    var dim by mutableFloatStateOf(0f)        // velo negro para oscurecer por debajo del mínimo
+    var clock by mutableStateOf("")
+    var rulerY by mutableFloatStateOf(0.42f)  // posición de la regla de lectura (0..1)
     fun say(s: String) { toast = s to System.currentTimeMillis() }
 }
 
@@ -234,7 +241,6 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val nav = supportFragmentManager.findFragmentByTag("lector") as EpubNavigatorFragment
         navigator = nav
         nav.addInputListener(tapListener(nav, pair = false))
-        nav.addInputListener(DirectionalNavigationAdapter(nav, animatedTransition = true))
         nav.addDecorationListener("subrayados", object : DecorableNavigator.Listener {
             override fun onDecorationActivated(event: DecorableNavigator.OnActivatedEvent): Boolean {
                 ui.activeMark = ui.marks.firstOrNull { it.id == event.decoration.id }
@@ -253,9 +259,17 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         }
         lifecycleScope.launch { applyHighlights() }
         lifecycleScope.launch {
+            var sinceBreak = 0L
             while (true) {
+                ui.clock = java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date())
                 delay(30_000)
                 ui.minutesToday = Library.minutesToday() + ((activeMs + pendingMs()) / 60_000).toInt()
+                // Pausa para los ojos: cada 20 minutos de lectura activa
+                if (lastEvent > 0 && System.currentTimeMillis() - lastEvent < 180_000) sinceBreak += 30_000
+                if (ui.settings.breaks && sinceBreak >= 20 * 60_000L) {
+                    sinceBreak = 0
+                    ui.say("Llevas 20 minutos: mira algo lejano unos segundos y parpadea")
+                }
             }
         }
         ui.loading = false
@@ -265,7 +279,10 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         lifecycleScope.launch { delay(1600); setControls(false) }
     }
 
+    @OptIn(ExperimentalReadiumApi::class)
     private fun navConfig() = EpubNavigatorFragment.Configuration {
+        // Largo de línea: unos 66 caracteres, lo ideal según los estudios (antes ~80). Afecta tabletas y el modo horizontal.
+        readiumCssRsProperties = org.readium.r2.navigator.epub.css.RsProperties(maxLineLength = org.readium.r2.navigator.epub.css.Length.Rem(34.0))
         servedAssets = listOf("fonts/.*")
         selectionActionModeCallback = selectionCallback
         val files = FontFiles.available(this@ReaderActivity).toSet()
@@ -274,11 +291,17 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         }
     }
 
-    /** Toques: en el centro muestran u ocultan los controles; en modo estudio, tocar una palabra la traduce. */
+    /**
+     * Zonas de toque como Moon+ Reader:
+     * izquierda o franja de arriba = anterior; derecha o franja de abajo = siguiente; centro = menú.
+     * En modo estudio, tocar una palabra la traduce (los bordes siguen pasando página).
+     */
     private fun tapListener(nav: EpubNavigatorFragment, pair: Boolean) = object : InputListener {
         override fun onTap(event: TapEvent): Boolean {
             val w = nav.publicationView.width.toFloat().coerceAtLeast(1f)
+            val h = nav.publicationView.height.toFloat().coerceAtLeast(1f)
             val x = event.point.x / w
+            val y = event.point.y / h
             if (ui.studyTap && x in 0.16f..0.84f) {
                 lifecycleScope.launch {
                     if (!lookUpAt(nav, event.point, if (pair) pairLang else ui.lang)) {
@@ -287,8 +310,52 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                 }
                 return true
             }
-            return if (x in 0.3f..0.7f) { setControls(!ui.controls); true } else { if (ui.controls) setControls(false); false }
+            if (ui.lookup != null) { lookupJob?.cancel(); ui.lookup = null; return true }
+            val dir = when {
+                ui.studyTap -> if (x < 0.5f) -1 else 1
+                x < 0.33f -> -1
+                x > 0.67f -> 1
+                y < 0.22f -> -1
+                y > 0.78f -> 1
+                else -> 0
+            }
+            if (dir == 0) setControls(!ui.controls) else turn(nav, dir)
+            return true
         }
+    }
+
+    /** Pasa página. En desplazamiento continuo avanza una pantalla dejando dos líneas de referencia. */
+    private fun turn(nav: EpubNavigatorFragment, dir: Int) {
+        if (ui.controls) setControls(false)
+        if (ui.settings.haptic) root.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+        if (!ui.settings.scroll) {
+            if (dir > 0) nav.goForward(animated = ui.settings.animate) else nav.goBackward(animated = ui.settings.animate)
+            return
+        }
+        lifecycleScope.launch {
+            val js = SCROLL_BY.replace("__D__", dir.toString()).replace("__S__", if (ui.settings.animate) "smooth" else "auto")
+            val r = runCatching { nav.evaluateJavascript(js) }.getOrNull().orEmpty()
+            // Al final (o al inicio) del capítulo, se pasa al siguiente (o al anterior).
+            if (r.contains("edge")) { if (dir > 0) nav.goForward(animated = false) else nav.goBackward(animated = false) }
+        }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        val nav = navigator
+        if (nav != null && ui.sheet == null) {
+            val dir = when (event.keyCode) {
+                KeyEvent.KEYCODE_VOLUME_DOWN -> if (ui.settings.volumeKeys) 1 else 0
+                KeyEvent.KEYCODE_VOLUME_UP -> if (ui.settings.volumeKeys) -1 else 0
+                KeyEvent.KEYCODE_PAGE_DOWN, KeyEvent.KEYCODE_DPAD_RIGHT, KeyEvent.KEYCODE_SPACE -> 1
+                KeyEvent.KEYCODE_PAGE_UP, KeyEvent.KEYCODE_DPAD_LEFT -> -1
+                else -> 0
+            }
+            if (dir != 0) {
+                if (event.action == KeyEvent.ACTION_DOWN) turn(nav, dir)
+                return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun EpubNavigatorFragment.Configuration.declareFont(name: String, regular: String, italic: String?, bold: String?) {
@@ -361,18 +428,33 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     }
 
     private fun paletteFor(r: ReaderSettings): Palette {
-        val base = basePalette(r)
-        if (!base.isDark || r.ink == 0) return base
-        val argb = if (r.ink == 5) r.customInk else InkColors.getOrElse(r.ink) { 0 }
-        if (argb == 0) return base
-        val ink = androidx.compose.ui.graphics.Color(argb)
-        return base.copy(text = ink, text2 = ink.copy(alpha = 0.72f))
+        var pal = basePalette(r)
+        if (pal.isDark && r.ink != 0) {
+            val argb = if (r.ink == 5) r.customInk else InkColors.getOrElse(r.ink) { 0 }
+            if (argb != 0) {
+                val ink = androidx.compose.ui.graphics.Color(argb)
+                pal = pal.copy(text = ink, text2 = ink.copy(alpha = 0.72f))
+            }
+        }
+        // Filtro cálido de verdad: se tiñen el papel y la letra (no un velo encima), así el texto sigue nítido.
+        if (r.warmth > 0f) {
+            val w = r.warmth
+            fun warm(c: androidx.compose.ui.graphics.Color) = androidx.compose.ui.graphics.Color(
+                red = c.red, green = c.green * (1f - 0.10f * w), blue = c.blue * (1f - 0.42f * w), alpha = c.alpha,
+            )
+            pal = pal.copy(bg = warm(pal.bg), surface = warm(pal.surface), card = warm(pal.card), text = warm(pal.text), text2 = warm(pal.text2))
+        }
+        return pal
     }
 
     private fun basePalette(r: ReaderSettings): Palette = when (r.paper) {
         0 -> Chashitsu
         1 -> Nogal
         2 -> SumiPalette
+        3 -> SepiaPalette
+        4 -> GrisPalette
+        // Según la hora: papel claro de día (se lee mejor), oscuro de noche (menos luz en los ojos).
+        -2 -> java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY).let { if (it in 7..18) Chashitsu else Nogal }
         else -> when (Prefs.paper.value) {
             PaperPref.CREMA -> Chashitsu
             PaperPref.NOGAL -> Nogal
@@ -406,14 +488,23 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             hyphens = r.justify,
             publisherStyles = false,
             scroll = r.scroll,
+            paragraphSpacing = listOf(null, 0.6, 1.2).getOrNull(r.paragraph),
+            letterSpacing = listOf(null, 0.06, 0.14).getOrNull(r.spacing),
+            wordSpacing = listOf(null, 0.15, 0.3).getOrNull(r.spacing),
         )
     }
 
     /** Brillo propio del lector (no cambia el del sistema). */
     private fun applyBrightness(b: Float) {
-        window.attributes = window.attributes.apply {
-            screenBrightness = if (b < 0f) WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE else b.coerceIn(0.02f, 1f)
+        // 0..0.3: pantalla al mínimo y un velo negro que oscurece todavía más (como Moon+ Reader).
+        // 0.3..1: brillo normal de la pantalla.
+        val screen = when {
+            b < 0f -> WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            b < 0.3f -> 0.01f
+            else -> 0.02f + (b - 0.3f) / 0.7f * 0.98f
         }
+        ui.dim = if (b in 0f..0.3f) (0.3f - b) / 0.3f * 0.78f else 0f
+        window.attributes = window.attributes.apply { screenBrightness = screen }
     }
 
     fun updateSettings(r: ReaderSettings) {
@@ -422,8 +513,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         ui.settings = r
         ui.palette = paletteFor(r)
         if (old.brightness != r.brightness) applyBrightness(r.brightness)
-        // El brillo y el filtro cálido no necesitan rehacer las páginas.
-        if (old.copy(brightness = r.brightness, warmth = r.warmth) == r) return
+        // Estos ajustes no necesitan rehacer las páginas.
+        if (old.copy(brightness = r.brightness, ruler = r.ruler, haptic = r.haptic, volumeKeys = r.volumeKeys, breaks = r.breaks, animate = r.animate) == r) return
         applyPaper()
         navigator?.submitPreferences(preferences(r, ui.palette))
         pairNav?.submitPreferences(preferences(r, ui.palette))
@@ -512,6 +603,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         saveNote = { loc, note -> saveHighlight(loc, 1, note); ui.noteFor = null },
         recolor = { m, c -> Library.putMark(m.copy(color = c)); ui.activeMark = null; refreshMarks() },
         seek = { f -> seek(f) },
+        brightnessLive = { v -> applyBrightness(v) },
+        turn = { d -> navigator?.let { turn(it, d) } },
         toggleStudy = {
             ui.studyTap = !ui.studyTap; Prefs.studyTap = ui.studyTap
             ui.say(if (ui.studyTap) "Toca una palabra para traducirla" else "Modo estudio apagado")
@@ -655,7 +748,6 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             supportFragmentManager.commitNow { replace(pairId, frag, "pareja") }
             pairNav = frag
             frag.addInputListener(tapListener(frag, pair = true))
-            frag.addInputListener(DirectionalNavigationAdapter(frag, animatedTransition = true))
             ui.pairOn = true; Prefs.setPairOn(book.id, true)
             pairPositions = runCatching { pub.positionsByReadingOrder() }.getOrDefault(emptyList())
             navigator?.currentLocator?.value?.let { syncPair(it, force = true) }
@@ -728,6 +820,8 @@ class ReaderActions(
     val saveNote: (Locator, String) -> Unit,
     val recolor: (Mark, Int) -> Unit,
     val seek: (Float) -> Unit,
+    val brightnessLive: (Float) -> Unit,
+    val turn: (Int) -> Unit,
     val toggleStudy: () -> Unit,
     val closeLookup: () -> Unit,
     val retarget: (String) -> Unit,
@@ -739,6 +833,17 @@ class ReaderActions(
     val togglePair: () -> Unit,
     val syncPair: () -> Unit,
 )
+
+/** Desplaza una pantalla (menos dos líneas). Devuelve "edge" si ya está al final o al inicio del capítulo. */
+private const val SCROLL_BY = """(function(){
+  var d = __D__, se = document.scrollingElement || document.documentElement, h = window.innerHeight;
+  var lh = parseFloat(getComputedStyle(document.body).lineHeight) || 26;
+  var max = se.scrollHeight - h;
+  if (d > 0 && se.scrollTop >= max - 4) return 'edge';
+  if (d < 0 && se.scrollTop <= 4) return 'edge';
+  window.scrollBy({ top: d * (h - 2 * lh), behavior: '__S__' });
+  return 'ok';
+})()"""
 
 /** Busca la palabra bajo el dedo y su frase. Las coordenadas llegan en píxeles físicos. */
 private const val WORD_AT_POINT = """(function(){
