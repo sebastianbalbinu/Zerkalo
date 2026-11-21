@@ -1,0 +1,33 @@
+name: Catálogo de Gutenberg
+
+# Cada lunes arma el índice propio de libros de Gutenberg y lo deja en la versión "catalogo".
+# La app lo descarga de ahí (rápido, desde GitHub) y solo le pide a Gutenberg el libro al bajarlo.
+on:
+  schedule:
+    - cron: "17 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  catalogo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Armar el índice
+        run: python3 .github/scripts/catalogo.py catalogo
+
+      - name: Publicar en la versión "catalogo"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: catalogo
+          name: Catálogo de libros (se actualiza cada semana)
+          prerelease: true
+          make_latest: false
+          body: "Índice de libros de Project Gutenberg para el Tansu de Zerkalo. Lo arma una tarea automática cada lunes a partir de los datos oficiales de Gutenberg."
+          files: |
+            catalogo/*.json.gz
+            catalogo/indice.json
