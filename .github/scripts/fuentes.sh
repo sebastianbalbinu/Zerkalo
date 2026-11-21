@@ -10,6 +10,8 @@ RANGES="U+0000-024F,U+0259,U+02B0-036F,U+0370-03FF,U+0400-04FF,U+1E00-1EFF,U+200
 
 # nombre_en_la_app  carpeta  archivo_en_google_fonts
 LIST="
+literata_v   literata                 Literata[opsz,wght].ttf
+garamond_v   ebgaramond               EBGaramond[wght].ttf
 atkinson     atkinsonhyperlegiblenext AtkinsonHyperlegibleNext[wght].ttf
 atkinson_i   atkinsonhyperlegiblenext AtkinsonHyperlegibleNext-Italic[wght].ttf
 lexend       lexend                   Lexend[wght].ttf

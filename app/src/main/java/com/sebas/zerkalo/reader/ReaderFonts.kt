@@ -17,13 +17,16 @@ data class ReaderFont(
     val italic: String? = null,
     val bold: String? = null,
     val note: String = "",
+    val boldAlt: String? = null, // negrita de respaldo si [bold] no vino en esta compilación
 )
 
 val ReaderFonts: List<ReaderFont> = listOf(
-    ReaderFont("Literata", "Literata", true, "literata_400_normal.ttf", "literata_400_italic.ttf", "literata_500_normal.ttf", "Hecha para leer libros en pantalla"),
-    ReaderFont("Mincho", "Shippori Mincho", true, "shippori_mincho_400_normal.ttf", null, "shippori_mincho_600_normal.ttf", "Elegante, de inspiración japonesa"),
-    ReaderFont("Garamond", "EB Garamond", true, "eb_garamond_400_normal.ttf", "eb_garamond_400_italic.ttf", null, "Clásica de libro impreso"),
-    ReaderFont("Gótica", "Zen Kaku Gothic New", false, "zen_kaku_gothic_new_400_normal.ttf", null, "zen_kaku_gothic_new_700_normal.ttf", "Sencilla y limpia"),
+    // Negrita real: Literata y Garamond la toman de su versión completa (variable); si no está, la de antes.
+    ReaderFont("Literata", "Literata", true, "literata_400_normal.ttf", "literata_400_italic.ttf", "literata_v.ttf", "Hecha para leer libros en pantalla", boldAlt = "literata_500_normal.ttf"),
+    // Mincho y Gótica no tienen cursiva: se usa una cursiva hermana de verdad en vez de inclinar la letra.
+    ReaderFont("Mincho", "Shippori Mincho", true, "shippori_mincho_400_normal.ttf", "eb_garamond_400_italic.ttf", "shippori_mincho_600_normal.ttf", "Elegante, de inspiración japonesa"),
+    ReaderFont("Garamond", "EB Garamond", true, "eb_garamond_400_normal.ttf", "eb_garamond_400_italic.ttf", "garamond_v.ttf", "Clásica de libro impreso"),
+    ReaderFont("Gótica", "Zen Kaku Gothic New", false, "zen_kaku_gothic_new_400_normal.ttf", "notosans_i.ttf", "zen_kaku_gothic_new_700_normal.ttf", "Sencilla y limpia"),
     ReaderFont("Original", null, true, note = "La que trae el libro"),
     // Sin serifa, elegidas por legibilidad comprobada en pantalla
     ReaderFont("Atkinson", "Atkinson Hyperlegible Next", false, "atkinson.ttf", "atkinson_i.ttf", "atkinson.ttf", "Del Braille Institute: letras imposibles de confundir"),
@@ -48,6 +51,20 @@ val ReaderFonts: List<ReaderFont> = listOf(
 object FontFiles {
     private var present: Set<String>? = null
     private val previews = HashMap<Int, FontFamily>()
+
+    private var smallCaps: Set<String>? = null
+
+    fun has(ctx: Context, file: String?): Boolean {
+        val files = present ?: (ctx.assets.list("fonts")?.toSet() ?: emptySet()).also { present = it }
+        return file != null && file in files
+    }
+
+    /** Si la letra trae versalitas propias (las anota la compilación en fonts/versalitas.txt). */
+    fun hasSmallCaps(ctx: Context, i: Int): Boolean {
+        val set = smallCaps ?: runCatching { ctx.assets.open("fonts/versalitas.txt").bufferedReader().readLines().map { it.trim() }.toSet() }
+            .getOrDefault(emptySet()).also { smallCaps = it }
+        return ReaderFonts.getOrNull(i)?.regular in set
+    }
 
     /** Solo se ofrecen las fuentes que de verdad vienen dentro de la app. */
     fun available(ctx: Context): List<Int> {

@@ -102,13 +102,16 @@ fun CollapsingTop(title: String, state: androidx.compose.foundation.lazy.LazyLis
         enter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(180)),
         exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(140)),
     ) {
-        Box(
-            Modifier.fillMaxWidth()
-                .background(Brush.verticalGradient(listOf(p.bg.copy(alpha = 0.97f), p.bg.copy(alpha = 0.93f), p.bg.copy(alpha = 0f)), endY = Float.POSITIVE_INFINITY))
-                .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.statusBars).height(52.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(title, style = Type.ui.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), color = p.text, modifier = Modifier.padding(bottom = 8.dp))
+        // Franja firme (para que el título siempre se lea sobre las portadas) y una sombra suave debajo.
+        Column(Modifier.fillMaxWidth()) {
+            Box(
+                Modifier.fillMaxWidth().background(p.bg.copy(alpha = 0.985f))
+                    .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.statusBars).height(48.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(title, style = Type.ui.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold), color = p.text, modifier = Modifier.padding(bottom = 4.dp))
+            }
+            Box(Modifier.fillMaxWidth().height(22.dp).background(Brush.verticalGradient(listOf(p.bg.copy(alpha = 0.985f), p.bg.copy(alpha = 0f)))))
         }
     }
 }

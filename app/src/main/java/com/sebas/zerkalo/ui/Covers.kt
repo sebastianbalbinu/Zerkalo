@@ -11,7 +11,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -65,10 +68,22 @@ fun BookCover(book: Book, width: Dp, height: Dp, modifier: Modifier = Modifier, 
     val file = remember(book.cover) { book.cover?.let { File(Library.coversDir, it) }?.takeIf { it.exists() } }
     CoverFrame(width, height, modifier, elevation) {
         if (book.useBinding || file == null) BindingCover(book.title, book.binding, Modifier.fillMaxSize())
-        else AsyncImage(
-            model = ImageRequest.Builder(LocalContext.current).data(file).size(360).build(),
-            contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize(),
-        )
+        else {
+            // Si la portada no tiene la forma del libro, se muestra entera (sin recortar el título ni el sello)
+            // sobre una versión desenfocada de sí misma, en vez de cortarle los bordes.
+            var ratio by androidx.compose.runtime.remember(file) { androidx.compose.runtime.mutableFloatStateOf(0f) }
+            val frame = width.value / height.value
+            val fit = ratio > 0f && kotlin.math.abs(ratio - frame) / frame > 0.07f
+            val req = ImageRequest.Builder(LocalContext.current).data(file).size(360).build()
+            if (fit) {
+                AsyncImage(model = req, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(14.dp))
+                Box(Modifier.fillMaxSize().background(Color(0x40000000)))
+            }
+            AsyncImage(
+                model = req, contentDescription = null, contentScale = if (fit) ContentScale.Fit else ContentScale.Crop, modifier = Modifier.fillMaxSize(),
+                onSuccess = { s -> val d = s.result.drawable; if (d.intrinsicHeight > 0) ratio = d.intrinsicWidth.toFloat() / d.intrinsicHeight },
+            )
+        }
         if (ribbon) Box(
             Modifier.align(Alignment.TopEnd).padding(end = width * 0.12f).size(width * 0.09f, height * 0.26f)
                 .background(LocalPalette.current.accent),
