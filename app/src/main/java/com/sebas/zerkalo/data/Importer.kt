@@ -138,6 +138,7 @@ object Importer {
                 source = source,
                 summary = item?.summary?.takeIf { it.isNotBlank() } ?: cleanHtml(md.description ?: ""),
                 file = file.name, cover = cover,
+                genre = Genres.detect(md.subjects.map { it.name }, item?.title ?: md.title.orEmpty()).ifBlank { "-" },
             )
             Library.upsert(book)
             Result.success(book)

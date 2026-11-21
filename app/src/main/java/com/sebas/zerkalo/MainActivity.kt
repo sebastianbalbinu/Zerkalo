@@ -74,8 +74,9 @@ class MainActivity : ComponentActivity() {
             else -> null
         }
         if (uri != null) {
+            val image = intent.type?.startsWith("image/") == true
             intent.action = null
-            AppEvents.incoming.value = uri
+            if (image) AppEvents.coverIncoming.value = uri else AppEvents.incoming.value = uri
         }
     }
 }

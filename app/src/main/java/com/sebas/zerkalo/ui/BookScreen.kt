@@ -151,7 +151,11 @@ fun BookScreen(id: String) {
             CircleButton("share", { share = true }, size = 52.dp, glass = haze)
         }
     }
-    if (menu) BookMenu(book) { menu = false }
+    var cover by remember { mutableStateOf(false) }
+    var shelf by remember { mutableStateOf(false) }
+    if (menu) BookMenu(book, onCover = { menu = false; cover = true }, onShelf = { menu = false; shelf = true }) { menu = false }
+    if (cover) CoverSheet(book) { cover = false }
+    if (shelf) BookQuickSheet(book, startMode = "genre") { shelf = false }
     if (share) ShareSheet(book) { share = false }
 }
 
@@ -160,7 +164,7 @@ private fun shortDate(d: String): String = try {
 } catch (e: Exception) { d }
 
 @Composable
-private fun BookMenu(book: Book, onClose: () -> Unit) {
+private fun BookMenu(book: Book, onCover: () -> Unit, onShelf: () -> Unit, onClose: () -> Unit) {
     val p = LocalPalette.current
     val a = LocalActions.current
     val ctx = LocalContext.current
@@ -170,6 +174,11 @@ private fun BookMenu(book: Book, onClose: () -> Unit) {
             if (!confirm) {
                 Text(book.title, style = Type.title.copy(fontSize = 20.sp), color = p.text)
                 Gap(8)
+                ListRow(if (book.favorite) "♥ Quitar de favoritos" else "♡ Agregar a favoritos", onClick = {
+                    Library.update(book.id) { it.copy(favorite = !it.favorite) }; onClose()
+                })
+                ListRow("Cambiar portada", "Otras ediciones, Google o tu galería", onClick = onCover)
+                ListRow("Estante: " + com.sebas.zerkalo.data.Genres.name(book.genre), "Cambiar el género del libro", onClick = onShelf)
                 ListRow(if (book.useBinding) "Mostrar la portada original" else "Mostrar mi encuadernación", onClick = {
                     Library.update(book.id) { it.copy(useBinding = !it.useBinding) }; onClose()
                 })

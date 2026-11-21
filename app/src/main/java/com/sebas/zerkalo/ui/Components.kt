@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -340,4 +341,38 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mod
             ) { Text(o, style = Type.uiSmall.copy(fontSize = 14.sp), color = if (i == selected) p.text else p.text2, maxLines = 1) }
         }
     }
+}
+
+/**
+ * Separador de madera entre las dos ediciones del lector bilingüe, con el idioma de cada lado
+ * y el botón para casarlas (pasar página juntas). Tocar la madera abre o cierra el menú.
+ */
+@Composable
+fun WoodDivider(vertical: Boolean, first: String, second: String, linked: Boolean, onLink: () -> Unit, onTap: () -> Unit) {
+    val p = LocalPalette.current
+    val res = androidx.compose.ui.platform.LocalContext.current.resources
+    val img = WoodBitmaps.get(res, if (p.wood == Wood.NOGAL) R.drawable.shelf_nogal_front else R.drawable.shelf_keyaki_front)
+    val wood: Brush = remember(img) { ShaderBrush(ImageShader(img, TileMode.Repeated, TileMode.Repeated)) }
+    val shade = Brush.verticalGradient(listOf(Color(0x33FFFFFF), Color(0x00000000), Color(0x4D000000)))
+    Box(
+        Modifier.then(if (vertical) Modifier.width(26.dp).fillMaxHeight() else Modifier.fillMaxWidth().height(26.dp))
+            .background(wood).background(shade).clickable(onClick = onTap),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (vertical) Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            WoodKnob(first, vertical); WoodKnob(if (linked) "⇄" else "∥", vertical, linked, onLink); WoodKnob(second, vertical)
+        } else Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            WoodKnob(first, vertical); WoodKnob(if (linked) "⇅ casadas" else "∥ separadas", vertical, linked, onLink); WoodKnob(second, vertical)
+        }
+    }
+}
+
+@Composable
+private fun WoodKnob(text: String, vertical: Boolean, on: Boolean = false, click: (() -> Unit)? = null) {
+    val p = LocalPalette.current
+    Box(
+        Modifier.clip(RoundedCornerShape(10.dp)).background(if (on) p.accent else Color(0xF2F7F2E8))
+            .then(if (click != null) Modifier.clickable(onClick = click) else Modifier)
+            .padding(horizontal = if (vertical) 3.dp else 9.dp, vertical = 2.dp),
+    ) { Text(text, style = Type.uiSmall.copy(fontSize = 10.sp), color = if (on) Color.White else Color(0xFF2E231D), maxLines = 1) }
 }

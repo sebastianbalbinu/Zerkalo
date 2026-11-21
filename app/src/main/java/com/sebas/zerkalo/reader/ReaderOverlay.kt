@@ -141,14 +141,16 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
             )
         }
 
-        // Aviso discreto del modo estudio
+        // Modo traducir: aviso y botón para salir sin tener que abrir el menú
         AnimatedVisibility(!ui.controls && ui.studyTap && ui.lookup == null, Modifier.align(Alignment.BottomStart), enter = fadeIn(tween(400)), exit = fadeOut(tween(150))) {
             Row(
-                Modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(start = 14.dp, bottom = 4.dp),
+                Modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(start = 12.dp, bottom = 2.dp)
+                    .clip(RoundedCornerShape(16.dp)).background(p.accent.copy(alpha = 0.92f)).clickable { act.toggleStudy() }
+                    .padding(horizontal = 12.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                ZIcon("translate", p.accent.copy(alpha = 0.75f), 14.dp)
-                Text("Toca una palabra", style = Type.uiSmall.copy(fontSize = 11.sp), color = p.text2.copy(alpha = 0.6f), modifier = Modifier.padding(start = 5.dp))
+                ZIcon("close", Color.White, 12.dp)
+                Text("Salir de traducir", style = Type.uiSmall.copy(fontSize = 12.sp), color = Color.White, modifier = Modifier.padding(start = 6.dp))
             }
         }
 
@@ -525,6 +527,20 @@ private fun PairSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
             Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 PillButton(if (ui.pairOn) "Ocultar" else "Mostrar", { act.togglePair(); onClose() }, Modifier.weight(1f), icon = "pair")
                 if (ui.pairOn) PillButton("Alinear", { act.syncPair(); onClose() }, Modifier.weight(1f), ghost = true, icon = "swap")
+            }
+            Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Casadas", style = Type.ui, color = p.text)
+                    Text("Al pasar página en una, la otra también pasa", style = Type.uiSmall, color = p.text2)
+                }
+                ZSwitch(ui.pairLinked) { act.togglePairLink() }
+            }
+            Label("Orden y tamaño")
+            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                item { SmallPill("Intercambiar", false) { act.swapPair() } }
+                items(listOf(50 to "Mitad y mitad", 60 to "60 / 40", 40 to "40 / 60")) { (v, name) ->
+                    SmallPill(name, ui.pairRatio == v) { act.setPairRatio(v) }
+                }
             }
             Text(
                 "Quitar la pareja", style = Type.uiSmall, color = p.text2,
@@ -909,6 +925,13 @@ private fun LightSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                 style = Type.uiSmall, color = p.text2,
             )
         }
+        var veil by remember { mutableFloatStateOf(s.veil) }
+        Label("Velo", if (veil <= 0f) "apagado" else "${(veil / 0.85f * 100).toInt()} %")
+        ZSlider(
+            value = veil, onChange = { veil = it; act.veilLive(it) }, onFinished = { act.settings(ui.settings.copy(veil = veil)) },
+            range = 0f..0.85f,
+        )
+        Text("Atenúa la página sin cambiar el brillo de la pantalla.", style = Type.uiSmall, color = p.text2)
         Label("Filtro cálido", if (s.warmth <= 0f) "apagado" else "${(s.warmth * 100).toInt()} %")
         var w by remember { mutableFloatStateOf(s.warmth) }
         ZSlider(value = w, onChange = { w = it }, onFinished = { act.settings(ui.settings.copy(warmth = w)) })

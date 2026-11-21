@@ -35,7 +35,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
+import com.sebas.zerkalo.data.Prefs
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -69,6 +73,11 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
         val q = query.trim().lowercase()
         sorted.filter { (q.isEmpty() || (it.title + " " + it.author + " " + it.tags.joinToString(" ")).lowercase().contains(q)) && (tagSel == null || tagSel in it.tags) }
     }
+    var mode by rememberSaveable { mutableStateOf(Prefs.libraryMode) }
+    var quick by remember { mutableStateOf<Book?>(null) }
+    val favorites = list.filter { it.favorite }
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(Unit) { com.sebas.zerkalo.data.Genres.backfill((ctx.applicationContext as com.sebas.zerkalo.ZerkaloApp).readium) }
     val reading = list.filter { it.reading }
     val unread = list.filter { !it.reading && !it.finished }
     val done = list.filter { it.finished }
@@ -103,17 +112,39 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
                     items(allTags.size) { i -> val t = allTags[i]; SmallPill("#$t", tagSel == t) { tagSel = if (tagSel == t) null else t } }
                 }
             }
+            if (books.isNotEmpty()) item(key = "modes") {
+                androidx.compose.foundation.lazy.LazyRow(
+                    contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(top = 14.dp),
+                ) {
+                    items(LIB_MODES.size) { i -> SmallPill(LIB_MODES[i], mode == i) { mode = i; Prefs.libraryMode = i } }
+                }
+            }
             item(key = "inbox") { LibraryInbox() }
             if (searching) item(key = "search") { SearchField(query, { query = it }, "Título o autor", Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp)) }
 
             if (books.isEmpty()) {
                 item(key = "empty") { EmptyLibrary() }
             } else {
+                val onLong: (Book) -> Unit = { quick = it }
                 current?.let { b -> item(key = "cont") { ContinueCard(b) } }
-                val rest = if (current != null) reading.drop(1) else reading
-                if (rest.isNotEmpty()) item(key = "s-reading") { ShelfRow("Leyendo", count(reading.size), rest) }
-                item(key = "s-unread") { ShelfRow("Por leer", if (unread.isEmpty()) "" else count(unread.size), unread, addSlot = query.isBlank()) }
-                if (done.isNotEmpty()) item(key = "s-done") { ShelfRow("Terminados", count(done.size), done) }
+                if (favorites.isNotEmpty()) item(key = "s-fav") { ShelfRow("♥ Favoritos", count(favorites.size), favorites, onLong = onLong) }
+                when (mode) {
+                    1, 2, 3 -> {
+                        val shelves = shelvesFor(mode, list)
+                        shelves.forEach { (title, group) ->
+                            item(key = "g-$mode-$title") {
+                                ShelfRow(title, count(group.size), group, addSlot = query.isBlank() && mode == 1, onAdd = { a.goTab(1) }, onLong = onLong)
+                            }
+                        }
+                    }
+                    else -> {
+                        val rest = if (current != null) reading.drop(1) else reading
+                        if (rest.isNotEmpty()) item(key = "s-reading") { ShelfRow("Leyendo", count(reading.size), rest, onLong = onLong) }
+                        item(key = "s-unread") { ShelfRow("Por leer", if (unread.isEmpty()) "" else count(unread.size), unread, addSlot = query.isBlank(), onLong = onLong) }
+                        if (done.isNotEmpty()) item(key = "s-done") { ShelfRow("Terminados", count(done.size), done, onLong = onLong) }
+                    }
+                }
                 if (query.isNotBlank() && list.isEmpty()) item(key = "none") {
                     Text("Nada con «$query» en tu estante.", style = Type.ui, color = p.text2, modifier = Modifier.fillMaxWidth().padding(40.dp), textAlign = TextAlign.Center)
                 }
@@ -121,6 +152,29 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
         }
         CollapsingTop("Biblioteca", listState, Modifier.align(Alignment.TopCenter))
         ProgressiveEdge(haze, top = false, height = 150.dp, modifier = Modifier.align(Alignment.BottomCenter))
+    }
+    quick?.let { BookQuickSheet(it) { quick = null } }
+}
+
+private val LIB_MODES = listOf("Estado", "Géneros", "Autores", "Idiomas")
+
+/**
+ * Estantes de la biblioteca según el modo: por género, por autor o por idioma.
+ * Los autores con un solo libro van juntos en "Más autores", para que cada estante se vea lleno.
+ */
+private fun shelvesFor(mode: Int, books: List<Book>): List<Pair<String, List<Book>>> = when (mode) {
+    1 -> books.groupBy { b -> b.genre.takeIf { g -> com.sebas.zerkalo.data.Catalogs.TOPICS.any { it.id == g } } ?: "-" }
+        .entries.sortedWith(compareBy<Map.Entry<String, List<Book>>> { it.key == "-" }.thenByDescending { it.value.size })
+        .map { com.sebas.zerkalo.data.Genres.name(it.key) to it.value }
+    2 -> {
+        fun who(b: Book) = b.author.split(',', ';', '&').firstOrNull()?.trim().orEmpty().ifBlank { "Autor desconocido" }
+        val byAuthor = books.groupBy { who(it) }
+        val big = byAuthor.filter { it.value.size >= 2 }.entries.sortedByDescending { it.value.size }.map { it.key to it.value }
+        val rest = byAuthor.filter { it.value.size < 2 }.values.flatten().sortedBy { who(it) }
+        big + if (rest.isNotEmpty()) listOf("Más autores" to rest) else emptyList()
+    }
+    else -> books.groupBy { it.lang.take(2) }.entries.sortedByDescending { it.value.size }.map { (l, g) ->
+        (com.sebas.zerkalo.data.Catalogs.LANGS.firstOrNull { it.id == l }?.name ?: if (l.isBlank()) "Sin idioma" else l.uppercase()) to g
     }
 }
 
@@ -198,9 +252,13 @@ private fun ContinueCard(b: Book) {
 }
 
 @Composable
-private fun ShelfRow(title: String, more: String, books: List<Book>, addSlot: Boolean = false) {
+private fun ShelfRow(
+    title: String, more: String, books: List<Book>, addSlot: Boolean = false,
+    onAdd: (() -> Unit)? = null, onLong: ((Book) -> Unit)? = null,
+) {
     val p = LocalPalette.current
     val a = LocalActions.current
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
     Column(Modifier.padding(top = 30.dp)) {
         SectionTitle(title, more)
         Gap(14)
@@ -211,15 +269,30 @@ private fun ShelfRow(title: String, more: String, books: List<Book>, addSlot: Bo
                 verticalAlignment = Alignment.Bottom,
             ) {
                 items(books, key = { it.id }, contentType = { "libro" }) { b ->
-                    BookCover(b, 100.dp, 148.dp, Modifier.clickable { a.open(Screen.BookDetail(b.id)) }, ribbon = b.reading)
+                    Box {
+                        BookCover(
+                            b, 100.dp, 148.dp,
+                            Modifier.pointerInput(b.id) {
+                                detectTapGestures(
+                                    onTap = { a.open(Screen.BookDetail(b.id)) },
+                                    onLongPress = { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); (onLong ?: { x: Book -> a.open(Screen.BookDetail(x.id)) })(b) },
+                                )
+                            },
+                            ribbon = b.reading,
+                        )
+                        if (b.favorite) Text(
+                            "♥", color = p.accent, style = Type.uiSmall.copy(fontSize = 14.sp),
+                            modifier = Modifier.align(Alignment.TopStart).padding(5.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xE6F7F2E8)).padding(horizontal = 4.dp),
+                        )
+                    }
                 }
                 if (addSlot) item(key = "add") {
                     Column(
-                        Modifier.size(100.dp, 148.dp).clip(RoundedCornerShape(6.dp)).background(p.surface.copy(alpha = 0.7f)).clickable { a.importEpub() },
+                        Modifier.size(100.dp, 148.dp).clip(RoundedCornerShape(6.dp)).background(p.surface.copy(alpha = 0.7f)).clickable { (onAdd ?: a.importEpub)() },
                         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
                     ) {
                         ZIcon("plus", p.text2, 24.dp)
-                        Text("Importar\nEPUB", style = Type.uiSmall, color = p.text2, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
+                        Text(if (onAdd != null) "Buscar en\nel Tansu" else "Importar\nEPUB", style = Type.uiSmall, color = p.text2, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
                     }
                 }
             }
