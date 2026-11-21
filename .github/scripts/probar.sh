@@ -36,7 +36,7 @@ $T adb exec-out screencap -p > shot4.png
 $T adb logcat -d > logcat-full.txt
 {
   echo "== Android $($T adb shell getprop ro.build.version.release) =="
-  echo "-- Tansu (fuentes y tiempos) --"; grep -E "ZK_TANSU|ZK_FUENTE" logcat-full.txt | sed 's/^.*Zerkalo *: //' | head -40
+  echo "-- Tansu (fuentes y tiempos) --"; grep -E "ZK_TANSU|ZK_FUENTE|ZK_INDICE" logcat-full.txt | sed 's/^.*Zerkalo *: //' | head -40
   echo "-- Fluidez al deslizar el Tansu --"
   grep -E "Total frames rendered|Janky frames|50th percentile|90th percentile|99th percentile|Slow UI thread|Frame deadline missed" gfx-tansu.txt | head -8
 } > metricas.txt

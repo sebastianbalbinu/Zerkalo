@@ -24,6 +24,15 @@ jobs:
         with:
           gradle-version: "8.14.3"
 
+      - name: Incluir el catálogo más reciente (si existe)
+        run: |
+          mkdir -p app/src/main/assets/catalogo
+          for l in es en fr pt de it ru ja la; do
+            curl -fsSL -o app/src/main/assets/catalogo/gutenberg-$l.json.gz \
+              https://github.com/sebastianbalbinu/Zerkalo/releases/download/catalogo/gutenberg-$l.json.gz || rm -f app/src/main/assets/catalogo/gutenberg-$l.json.gz
+          done
+          ls -la app/src/main/assets/catalogo
+
       - name: Preparar llave de firma
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}

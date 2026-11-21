@@ -81,7 +81,7 @@ object Net {
      * Descarga un archivo a [dest]. Prueba las direcciones en orden hasta que una funcione.
      * Revisa que lo descargado sea de verdad un EPUB (un ZIP), y no una página de error.
      */
-    suspend fun download(urls: List<String>, dest: File, onProgress: (Float?) -> Unit): File = withContext(Dispatchers.IO) {
+    suspend fun download(urls: List<String>, dest: File, zip: Boolean = true, onProgress: (Float?) -> Unit): File = withContext(Dispatchers.IO) {
         val tmp = File(dest.parentFile, dest.name + ".part")
         var lastError: NetError = NetError("No hay enlace de descarga")
         for (url in urls) {
@@ -111,7 +111,7 @@ object Net {
                         }
                     }
                     c.disconnect()
-                    if (!isZip(tmp)) throw NetError("La biblioteca mandó una página en vez del libro")
+                    if (zip && !isZip(tmp)) throw NetError("La biblioteca mandó una página en vez del libro")
                     dest.delete()
                     if (!tmp.renameTo(dest)) { tmp.copyTo(dest, true); tmp.delete() }
                     onProgress(1f)

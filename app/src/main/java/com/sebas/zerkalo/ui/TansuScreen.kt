@@ -160,29 +160,34 @@ fun TansuScreen(haze: HazeState) {
             if (query.isNotEmpty()) {
                 item(key = "sg$query$lang") { TansuRow("En Project Gutenberg", "", "pg-s:$lang:$query", { Catalogs.gutenberg(lang, search = query) }, "Sin resultados en este idioma.") { preview = it } }
                 item(key = "sw$query$lang") { TansuRow("En Wikisource", "", "ws:$lang:$query", { Catalogs.wikisource(query, lang) }) { preview = it } }
+                item(key = "si$query$lang") { TansuRow("En Internet Archive", "Dominio público", "ia-s:$lang:$query", { Catalogs.internetArchive(lang, query) }) { preview = it } }
                 item(key = "so$query") { TansuRow("Libros académicos", "OAPEN", "oa:$query", { Catalogs.oapen(query) }) { preview = it } }
             } else {
                 item(key = "pop$lang") { TansuRow("Los más leídos", "Project Gutenberg", "pg:$lang", { Catalogs.gutenberg(lang) }) { preview = it } }
+                if (lang == "es") item(key = "tx") { TansuRow("Biblioteca en español", "textos.info", "tx", { Catalogs.opdsBooks(Catalogs.TEXTOS, "textos.info") }) { preview = it } }
                 Catalogs.TOPICS.take(6).forEach { t ->
                     item(key = "t${t.id}$lang") { TansuRow(t.name, "", "pg:$lang:${t.id}", { Catalogs.gutenberg(lang, topic = t.id) }) { preview = it } }
                 }
+                item(key = "ug") { TansuRow("Licencias abiertas", "Unglue.it", "ug", { Catalogs.opdsBooks(Catalogs.UNGLUE, "Unglue.it") }) { preview = it } }
+                item(key = "ia$lang") { TansuRow("Dominio público escaneado", "Internet Archive", "ia:$lang", { Catalogs.internetArchive(lang) }) { preview = it } }
                 if (lang == "en") item(key = "se") { TansuRow("Recién editados", "Standard Ebooks", "se", { Catalogs.standardEbooks() }) { preview = it } }
                 item(key = "oa$lang") {
                     val term = mapOf("es" to "historia", "fr" to "histoire", "pt" to "história", "de" to "Geschichte", "it" to "storia")[lang] ?: "history"
                     TansuRow(if (lang == "es") "Ensayo y ciencia abiertos" else "Open access", "OAPEN", "oa:$term", { Catalogs.oapen(term) }) { preview = it }
                 }
-                if (cats.isNotEmpty()) item(key = "mine") {
+                item(key = "mine") {
+                    val all = listOf(OpdsCatalog("Unglue.it", Catalogs.UNGLUE), OpdsCatalog("textos.info", Catalogs.TEXTOS)) + cats
                     Column(Modifier.padding(top = 30.dp)) {
-                        SectionTitle("Mis catálogos")
+                        SectionTitle("Explorar catálogos")
                         LazyRow(contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 12.dp)) {
-                            items(cats) { c -> SmallPill(c.name, false) { a.open(Screen.Catalog(c.url, c.name)) } }
+                            items(all) { c -> SmallPill(c.name, false) { a.open(Screen.Catalog(c.url, c.name)) } }
                         }
                     }
                 }
             }
             item(key = "note") {
                 Text(
-                    "Zerkalo no guarda libros: los trae directo de Project Gutenberg, Wikisource, OAPEN, Standard Ebooks y los catálogos que agregues. Todo es de dominio público o de acceso abierto.",
+                    "Zerkalo no guarda libros: los trae directo de Project Gutenberg, Wikisource, textos.info, Unglue.it, Internet Archive, OAPEN, Standard Ebooks y los catálogos que agregues. Todo es de dominio público o con licencia abierta.",
                     style = Type.uiSmall, color = p.text2, textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp, vertical = 30.dp),
                 )
@@ -273,7 +278,11 @@ fun PreviewSheet(item: CatalogItem, onClose: () -> Unit) {
                 }
             }
             Text(
-                if (item.source == "Wikisource") "Wikisource prepara el EPUB al momento: puede tardar un poco." else "Se descarga directo de la biblioteca de origen.",
+                when (item.source) {
+                    "Wikisource" -> "Wikisource prepara el EPUB al momento: puede tardar un poco."
+                    "Internet Archive" -> "Es un escaneo con el texto reconocido automáticamente: puede traer algunos errores."
+                    else -> "Se descarga directo de la biblioteca de origen."
+                },
                 style = Type.uiSmall.copy(fontSize = 11.5.sp), color = p.text2, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
             )
         }
