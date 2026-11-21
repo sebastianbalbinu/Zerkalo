@@ -1,5 +1,7 @@
 package com.sebas.zerkalo.ui
 
+import androidx.compose.foundation.layout.statusBars
+
 import androidx.compose.foundation.layout.windowInsetsPadding
 
 import androidx.compose.foundation.gestures.awaitEachGesture
