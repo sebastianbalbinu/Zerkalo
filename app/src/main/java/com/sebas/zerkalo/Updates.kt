@@ -37,6 +37,13 @@ object Updates {
     /** La app está a la vista (entre onStart y onStop). */
     val foreground = MutableStateFlow(false)
     val installing = MutableStateFlow(false)
+    /** Avance de la descarga (0..1), o null si no se está descargando. */
+    val progress = MutableStateFlow<Float?>(null)
+    /** La última descarga se cortó: se puede reintentar y sigue donde quedó. */
+    val failed = MutableStateFlow(false)
+    private val lock = kotlinx.coroutines.sync.Mutex()
+
+    private fun mb(b: Long) = String.format(java.util.Locale.forLanguageTag("es"), "%.1f", b / 1_048_576.0)
 
     fun currentCode(ctx: Context): Long = try {
         val pi = ctx.packageManager.getPackageInfo(ctx.packageName, 0)
@@ -99,8 +106,8 @@ object Updates {
         if (force) dismissed.value = false
         try {
             val conn = URL(API).openConnection() as HttpURLConnection
-            conn.connectTimeout = 8000
-            conn.readTimeout = 8000
+            conn.connectTimeout = 15000
+            conn.readTimeout = 15000
             conn.setRequestProperty("Accept", "application/vnd.github+json")
             val text = conn.inputStream.bufferedReader().use { it.readText() }
             conn.disconnect()
@@ -121,8 +128,8 @@ object Updates {
             if (code > currentCode(ctx)) {
                 val info = UpdateInfo(tag, code, url, o.optString("body"))
                 available.value = info
-                status.value = String.format("Hay una versión nueva: %s", tag)
-                if (autoEnabled(ctx)) download(ctx, info)
+                status.value = if (ready.value != null) String.format("Versión %s lista para instalar", tag) else String.format("Hay una versión nueva: %s", tag)
+                if (autoEnabled(ctx) && ready.value == null) download(ctx, info)
             } else {
                 available.value = null
                 status.value = "Tienes la última versión"
@@ -132,43 +139,101 @@ object Updates {
         }
     }
 
-    /** Descarga la APK en segundo plano (si no estaba ya). */
+    /**
+     * Descarga la APK en segundo plano mostrando el avance. Si se corta, la próxima vez sigue donde quedó
+     * (no empieza de cero). Nunca hay dos descargas a la vez.
+     */
     suspend fun download(ctx: Context, info: UpdateInfo): File? = withContext(Dispatchers.IO) {
+        if (lock.isLocked) return@withContext null
+        lock.lock()
         val f = apkFile(ctx)
-        if (ready.value != null && prefs(ctx).getLong("readyCode", 0L) == info.code) return@withContext ready.value
-        status.value = String.format("Descargando la versión %s…", info.version)
-        val tmp = File(f.parentFile, "Zerkalo.part")
+        val tmp = File(f.parentFile, "Zerkalo-${info.code}.part")
         try {
-            var url = URL(info.url)
-            var conn: HttpURLConnection
-            var hops = 0
+            if (ready.value != null && prefs(ctx).getLong("readyCode", 0L) == info.code) return@withContext ready.value
+            // Restos de descargas de otras versiones
+            f.parentFile?.listFiles()?.filter { it.name.endsWith(".part") && it != tmp }?.forEach { it.delete() }
+            failed.value = false
+            var attempt = 0
             while (true) {
-                conn = url.openConnection() as HttpURLConnection
-                conn.connectTimeout = 15000
-                conn.readTimeout = 30000
-                conn.instanceFollowRedirects = true
-                val codeHttp = conn.responseCode
-                if (codeHttp in 300..399 && hops++ < 5) {
-                    url = URL(url, conn.getHeaderField("Location"))
-                    conn.disconnect()
-                    continue
+                attempt++
+                try {
+                    fetch(info, tmp)
+                    break
+                } catch (e: Exception) {
+                    android.util.Log.w("Zerkalo", "ZK_UPDATE intento $attempt: ${e.message}")
+                    if (attempt >= 4) throw e
+                    status.value = String.format("Se cortó la conexión, reintentando (%d de 3)…", attempt)
+                    kotlinx.coroutines.delay(3000L * attempt)
                 }
-                break
             }
-            conn.inputStream.use { input -> tmp.outputStream().use { input.copyTo(it) } }
-            conn.disconnect()
             if (tmp.length() < 1_000_000) { tmp.delete(); throw IllegalStateException("APK incompleta") }
             f.delete()
             tmp.renameTo(f)
             prefs(ctx).edit().putLong("readyCode", info.code).apply()
             ready.value = f
-            status.value = String.format("Versión %s lista · se instala sola", info.version)
+            status.value = String.format("Versión %s lista para instalar", info.version)
             f
         } catch (e: Exception) {
-            tmp.delete()
-            status.value = "No se pudo descargar la actualización"
+            failed.value = true
+            status.value = if (tmp.length() > 0) String.format("Se cortó la descarga en %s MB · toca Reintentar y sigue desde ahí", mb(tmp.length()))
+            else "No se pudo descargar · revisa tu internet y toca Reintentar"
             null
+        } finally {
+            progress.value = null
+            lock.unlock()
         }
+    }
+
+    /** Baja (o continúa) la APK en [tmp], actualizando [progress] y [status]. */
+    private fun fetch(info: UpdateInfo, tmp: File) {
+        var url = URL(info.url)
+        var conn: HttpURLConnection
+        var hops = 0
+        val have = if (tmp.exists()) tmp.length() else 0L
+        while (true) {
+            conn = url.openConnection() as HttpURLConnection
+            conn.connectTimeout = 15000
+            conn.readTimeout = 20000
+            conn.instanceFollowRedirects = false
+            if (have > 0) conn.setRequestProperty("Range", "bytes=$have-")
+            val codeHttp = conn.responseCode
+            if (codeHttp in 300..399 && hops++ < 6) {
+                url = URL(url, conn.getHeaderField("Location"))
+                conn.disconnect()
+                continue
+            }
+            break
+        }
+        val code = conn.responseCode
+        if (code == 416) { conn.disconnect(); return } // ya estaba completa
+        if (code !in 200..299) { conn.disconnect(); throw IllegalStateException("GitHub respondió $code") }
+        val resumed = code == 206 && have > 0
+        val start = if (resumed) have else 0L
+        val total = conn.contentLengthLong.let { if (it > 0) it + start else -1L }
+        progress.value = if (total > 0) start.toFloat() / total else 0f
+        var last = 0L
+        conn.inputStream.use { input ->
+            java.io.FileOutputStream(tmp, resumed).use { out ->
+                val buf = ByteArray(64 * 1024)
+                var got = start
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    out.write(buf, 0, n)
+                    got += n
+                    val now = System.currentTimeMillis()
+                    if (now - last > 250) {
+                        last = now
+                        if (total > 0) {
+                            progress.value = got.toFloat() / total
+                            status.value = String.format("Descargando %s · %s de %s MB (%d %%)", info.version, mb(got), mb(total), (got * 100 / total).toInt())
+                        } else status.value = String.format("Descargando %s · %s MB", info.version, mb(got))
+                    }
+                }
+                if (total > 0 && got < total) throw java.io.IOException("Se cortó en ${mb(got)} de ${mb(total)} MB")
+            }
+        }
+        conn.disconnect()
     }
 
     /** Está sonando música en el teléfono (de Zerkalo o de otra app): entonces no se interrumpe nada. */
@@ -284,7 +349,7 @@ class UpdateWorker(ctx: Context, params: androidx.work.WorkerParameters) : andro
     override suspend fun doWork(): Result {
         val ctx = applicationContext
         if (!Updates.autoEnabled(ctx)) return Result.success()
-                Updates.check(ctx, force = true)
+        Updates.check(ctx, force = true)
         val info = Updates.available.value ?: return Result.success()
         Updates.ready.value ?: Updates.download(ctx, info) ?: return Result.retry()
         when {

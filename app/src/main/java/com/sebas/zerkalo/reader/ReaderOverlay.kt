@@ -619,7 +619,11 @@ private fun InksSheet(act: ReaderActions, onClose: () -> Unit) {
     var editing by remember { mutableStateOf<Int?>(null) } // índice; -1 = nuevo
     Sheet(onClose) {
       Column(Modifier.heightIn(max = 640.dp).verticalScroll(rememberScrollState())) {
-        Text("Colores de subrayado", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+        val rs by com.sebas.zerkalo.data.Prefs.reader.collectAsState()
+        Text("Subrayados", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+        Label("Cómo se ven")
+        Segmented(listOf("Marcador", "Lápiz", "Ondulado"), rs.markStyle, { act.settings(rs.copy(markStyle = it)) })
+        Label("Colores")
         Text("Ponle un significado a cada color: por ejemplo Cita, Duda o Para el examen. Así puedes filtrarlos en Marcas.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
         Spacer(Modifier.height(10.dp))
         inks.forEachIndexed { i, ink ->
@@ -684,6 +688,16 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
         Text("Lectura", style = Type.title.copy(fontSize = 21.sp), color = p.text)
         Label("Modo")
         Segmented(listOf("Páginas", "Desplazamiento continuo"), if (s.scroll) 1 else 0, { act.settings(s.copy(scroll = it == 1)) })
+        Label("Diagramación")
+        Segmented(listOf("Original", "Zerkalo", "Mía"), s.layout, { act.settings(s.copy(layout = it)) })
+        Text(
+            when (s.layout) {
+                0 -> "El diseño de la editorial, tal cual. Zerkalo solo arregla lo que se rompe en el teléfono."
+                2 -> "Tus ajustes se aplican a todo el libro, sin reglas automáticas."
+                else -> "Diagramación cuidada: poemas verso a verso, títulos proporcionados, márgenes que se adaptan a la letra y justificado solo donde queda bien."
+            },
+            style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp),
+        )
         Label("Letra")
         val ctx = LocalContext.current
         val font = ReaderFonts.getOrElse(s.font) { ReaderFonts[0] }
@@ -718,7 +732,7 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
         Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Justificar el texto", style = Type.ui, color = p.text)
-                Text("Con guiones, como un libro impreso", style = Type.uiSmall, color = p.text2)
+                Text(if (s.justify) "Con guiones, como un libro impreso. Los poemas nunca se justifican" else "Apagado en todo el libro: alineado a la izquierda", style = Type.uiSmall, color = p.text2)
             }
             ZSwitch(s.justify) { act.settings(s.copy(justify = it)) }
         }

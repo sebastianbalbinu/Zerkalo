@@ -96,6 +96,22 @@ object Importer {
         }
     }
 
+    /** Copia un EPUB que está en el teléfono (lo encontró el buscador) a la biblioteca. */
+    suspend fun fromPath(core: ReadiumCore, src: File): Result<Book> = withContext(Dispatchers.IO) {
+        try {
+            val id = newId()
+            val dest = File(Library.booksDir, "$id.epub")
+            src.inputStream().use { inp -> dest.outputStream().use { inp.copyTo(it) } }
+            fromFile(core, dest, id, key = "local:$id", source = "Importado", fallbackTitle = src.name.removeSuffix(".epub"))
+        } catch (e: Exception) {
+            Result.failure(ImportError("No se pudo copiar ${src.name}: ${e.message}"))
+        }
+    }
+
+    /** Nombre simplificado para reconocer un libro que ya está en la biblioteca. */
+    fun cleanName(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
+        .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9]+"), "")
+
     /** Registra un EPUB que ya está en la carpeta de libros. */
     suspend fun fromFile(
         core: ReadiumCore, file: File, id: String, key: String, source: String,

@@ -43,9 +43,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sebas.zerkalo.data.Book
 import com.sebas.zerkalo.data.Library
+import com.sebas.zerkalo.data.Scanner
 import dev.chrisbanes.haze.HazeState
 import dev.chrisbanes.haze.hazeSource
 import java.text.SimpleDateFormat
+import kotlinx.coroutines.launch
 import java.util.Date
 import java.util.Locale
 
@@ -85,6 +87,8 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
                         Caption(SimpleDateFormat("EEEE d 'de' MMMM", Locale("es")).format(Date()))
                         Text("Biblioteca", style = Type.display, color = p.text, modifier = Modifier.padding(top = 4.dp))
                     }
+                    CircleButton("plus", a.importEpub, desc = "Traer libros")
+                    Spacer(Modifier.width(10.dp))
                     CircleButton("search", { searching = !searching; if (!searching) query = "" })
                     Spacer(Modifier.width(10.dp))
                     CircleButton("gear", { a.open(Screen.Settings) })
@@ -99,6 +103,7 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
                     items(allTags.size) { i -> val t = allTags[i]; SmallPill("#$t", tagSel == t) { tagSel = if (tagSel == t) null else t } }
                 }
             }
+            item(key = "inbox") { LibraryInbox() }
             if (searching) item(key = "search") { SearchField(query, { query = it }, "Título o autor", Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp)) }
 
             if (books.isEmpty()) {
@@ -215,6 +220,80 @@ private fun ShelfRow(title: String, more: String, books: List<Book>, addSlot: Bo
                     ) {
                         ZIcon("plus", p.text2, 24.dp)
                         Text("Importar\nEPUB", style = Type.uiSmall, color = p.text2, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 8.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Avisos arriba de la biblioteca: EPUB nuevos encontrados en el teléfono, importación en curso
+ * y la actualización de Zerkalo (con su avance, para saber que está funcionando).
+ */
+@Composable
+private fun LibraryInbox() {
+    val p = LocalPalette.current
+    val a = LocalActions.current
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    val core = (ctx.applicationContext as com.sebas.zerkalo.ZerkaloApp).readium
+    val found by Scanner.found.collectAsState()
+    val job by Scanner.job.collectAsState()
+    val upInfo by com.sebas.zerkalo.Updates.available.collectAsState()
+    val upProgress by com.sebas.zerkalo.Updates.progress.collectAsState()
+    val upReady by com.sebas.zerkalo.Updates.ready.collectAsState()
+    val upFailed by com.sebas.zerkalo.Updates.failed.collectAsState()
+    val upStatus by com.sebas.zerkalo.Updates.status.collectAsState()
+    val prefs = remember { ctx.getSharedPreferences("zerkalo", android.content.Context.MODE_PRIVATE) }
+    var askOff by remember { mutableStateOf(prefs.getBoolean("scanAskOff", false)) }
+    var access by remember { mutableStateOf(Scanner.hasAccess(ctx)) }
+    val ask = rememberAccessRequest { access = true; Scanner.scan(ctx) }
+    // Busca sola una vez por sesión (y al volver del permiso)
+    LaunchedEffect(access) {
+        if (!access && !askOff) while (!Scanner.hasAccess(ctx)) kotlinx.coroutines.delay(1000)
+        access = Scanner.hasAccess(ctx)
+        if (access && Scanner.found.value == null) Scanner.scan(ctx)
+    }
+    val news = found.orEmpty()
+    Column {
+        if (upInfo != null && (upProgress != null || upReady != null || upFailed)) {
+            Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), PaddingValues(16.dp)) {
+                Column {
+                    Caption("Zerkalo ${upInfo?.version}", accent = true)
+                    Text(upStatus, style = Type.ui.copy(fontSize = 14.sp), color = p.text, modifier = Modifier.padding(top = 4.dp))
+                    upProgress?.let { ProgressLine(it, Modifier.fillMaxWidth().padding(top = 10.dp)) }
+                    if (upProgress == null) {
+                        Gap(12)
+                        val scope = androidx.compose.runtime.rememberCoroutineScope()
+                        PillButton(updateLabel(null, upReady != null, upFailed, true), { scope.launch { updateAction(ctx) } }, Modifier.fillMaxWidth(), icon = "download")
+                    }
+                }
+            }
+        }
+        when {
+            job.running -> Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), PaddingValues(16.dp)) { ImportProgress(job) }
+            access && news.isNotEmpty() -> Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), PaddingValues(16.dp)) {
+                Column {
+                    Caption("En tu teléfono", accent = true)
+                    Text(
+                        if (news.size == 1) "Encontré un EPUB: «${news[0].name.removeSuffix(".epub")}»" else "Encontré ${news.size} EPUB que aún no están aquí",
+                        style = Type.ui, color = p.text, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp),
+                    )
+                    Gap(12)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        PillButton(if (news.size == 1) "Traerlo" else "Traer todos", { Scanner.importFiles(core, news) }, Modifier.weight(1f), icon = "import")
+                        PillButton("Elegir", a.importEpub, Modifier.weight(1f), ghost = true)
+                    }
+                }
+            }
+            !access && !askOff -> Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp), PaddingValues(16.dp)) {
+                Column {
+                    Caption("Tus EPUB", accent = true)
+                    Text("¿Busco los EPUB que ya tienes en el teléfono? Así no tienes que encontrarlos uno por uno.", style = Type.ui.copy(fontSize = 14.sp), color = p.text, modifier = Modifier.padding(top = 4.dp))
+                    Gap(12)
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        PillButton("Buscar", ask, Modifier.weight(1f), icon = "search")
+                        PillButton("Ahora no", { askOff = true; prefs.edit().putBoolean("scanAskOff", true).apply() }, Modifier.weight(1f), ghost = true)
                     }
                 }
             }

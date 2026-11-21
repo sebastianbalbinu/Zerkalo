@@ -33,6 +33,8 @@ data class ReaderSettings(
     val vMargin: Int = 1,        // margen arriba y abajo: 0 compacto, 1 normal, 2 amplio
     val autoSpeed: Float = 30f,  // avance automático en desplazamiento: píxeles por segundo
     val autoPage: Float = 40f,   // avance automático en páginas: segundos por página
+    val layout: Int = 1,         // diagramación: 0 original del libro, 1 Zerkalo (cuidada), 2 mía (mis ajustes en todo)
+    val markStyle: Int = 0,      // subrayado: 0 marcador, 1 lápiz, 2 ondulado
 )
 
 data class OpdsCatalog(val name: String, val url: String)
@@ -66,6 +68,7 @@ object Prefs {
             breaks = sp.getBoolean("rBreaks", false), dyslexia = sp.getBoolean("rDys", false),
             fullscreen = sp.getBoolean("rFull", false), vMargin = sp.getInt("rVMargin", 1),
             autoSpeed = sp.getFloat("rAutoSpeed", 30f), autoPage = sp.getFloat("rAutoPage", 40f),
+            layout = sp.getInt("rLayout", 1), markStyle = sp.getInt("rMarkStyle", 0),
         )
         inks.value = runCatching {
             val a = JSONArray(sp.getString("inks", null) ?: "")
@@ -89,7 +92,8 @@ object Prefs {
             .putBoolean("rHaptic", r.haptic).putBoolean("rVol", r.volumeKeys).putBoolean("rRuler", r.ruler)
             .putBoolean("rBreaks", r.breaks).putBoolean("rDys", r.dyslexia)
             .putBoolean("rFull", r.fullscreen).putInt("rVMargin", r.vMargin)
-            .putFloat("rAutoSpeed", r.autoSpeed).putFloat("rAutoPage", r.autoPage).apply()
+            .putFloat("rAutoSpeed", r.autoSpeed).putFloat("rAutoPage", r.autoPage)
+            .putInt("rLayout", r.layout).putInt("rMarkStyle", r.markStyle).apply()
     }
 
     fun setCatalogs(list: List<OpdsCatalog>) {

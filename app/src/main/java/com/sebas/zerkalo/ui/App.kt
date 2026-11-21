@@ -61,6 +61,7 @@ import com.sebas.zerkalo.data.Book
 import com.sebas.zerkalo.data.Importer
 import com.sebas.zerkalo.data.Library
 import com.sebas.zerkalo.data.Prefs
+import com.sebas.zerkalo.data.Scanner
 import android.util.Log
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -130,9 +131,11 @@ fun ZerkaloRoot(onReady: () -> Unit) {
             .onFailure { e -> AppEvents.toast(e.message ?: "No se pudo importar") }
     }
 
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) scope.launch { doImport(uri, openAfter = false) }
+    // Elegir varios EPUB a la vez con el selector de Android
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
+        if (uris.isNotEmpty()) Scanner.importUris(ctx, app.readium, uris)
     }
+    var importSheet by remember { mutableStateOf(false) }
     // Primer arranque: un libro corto de bienvenida, para empezar a leer de inmediato.
     LaunchedEffect(Unit) {
         if (!Prefs.welcomed && Library.books.value.isEmpty()) {
@@ -162,7 +165,7 @@ fun ZerkaloRoot(onReady: () -> Unit) {
             open = { stack.add(it) },
             back = { if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex) },
             read = { openReader(ctx, it) },
-            importEpub = { picker.launch(arrayOf("application/epub+zip", "application/octet-stream", "application/zip")) },
+            importEpub = { importSheet = true },
             toast = { AppEvents.toast(it) },
             goTab = { tab = it },
         )
@@ -215,6 +218,10 @@ fun ZerkaloRoot(onReady: () -> Unit) {
             }
             Toast(Modifier.align(Alignment.BottomCenter))
         }
+        if (importSheet) ImportSheet(
+            onPickFiles = { importSheet = false; picker.launch(arrayOf("application/epub+zip", "application/octet-stream", "application/zip")) },
+            onClose = { importSheet = false },
+        )
     }
 }
 
