@@ -137,9 +137,10 @@ fun TansuScreen(haze: HazeState) {
     var catalogsSheet by remember { mutableStateOf(false) }
     val cats by Prefs.catalogs.collectAsState()
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     Box(Modifier.fillMaxSize()) {
-        LazyColumn(Modifier.fillMaxSize().hazeSource(haze), contentPadding = PaddingValues(top = top + 18.dp, bottom = 150.dp)) {
+        LazyColumn(Modifier.fillMaxSize().hazeSource(haze), state = listState, contentPadding = PaddingValues(top = top + 18.dp, bottom = 150.dp)) {
             item(key = "head") {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.Bottom) {
                     Column(Modifier.weight(1f)) {
@@ -193,7 +194,7 @@ fun TansuScreen(haze: HazeState) {
                 )
             }
         }
-        ProgressiveEdge(haze, top = true, height = top + 26.dp, modifier = Modifier.align(Alignment.TopCenter))
+        CollapsingTop("Tansu", listState, Modifier.align(Alignment.TopCenter))
         ProgressiveEdge(haze, top = false, height = 150.dp, modifier = Modifier.align(Alignment.BottomCenter))
     }
     preview?.let { PreviewSheet(it) { preview = null } }
@@ -201,9 +202,11 @@ fun TansuScreen(haze: HazeState) {
 }
 
 @Composable
-private fun TansuRow(title: String, kicker: String, key: String, fetch: suspend () -> Page, empty: String = "Nada por aquí todavía.", onItem: (CatalogItem) -> Unit) {
+private fun TansuRow(title: String, kicker: String, key: String, fetch: suspend () -> Page, empty: String? = null, onItem: (CatalogItem) -> Unit) {
     val st = rememberRow(key, fetch)
-    CatalogRow(title, kicker, st, empty, onRetry = { CatalogStore.ensure(key, fetch, force = true) }, onItem = onItem)
+    // Una biblioteca que no responde o no tiene nada se oculta sola (antes mostraba un error).
+    if (empty == null && !st.loading && st.items.isEmpty()) return
+    CatalogRow(title, kicker, st, empty ?: "", onRetry = { CatalogStore.ensure(key, fetch, force = true) }, onItem = onItem)
 }
 
 @Composable
