@@ -62,6 +62,16 @@ val SumiPalette = Palette(
     text = Color(0xFFE9CDA4), text2 = Color(0xFFA48D6C), line = Color(0x26E9CDA4), isDark = true, wood = Wood.NONE,
 )
 
+/** Papeles extra del lector. */
+val SepiaPalette = Palette(
+    "Sepia", bg = Color(0xFFF0E2C6), surface = Color(0xFFE6D5B5), card = Color(0xFFD9C6A2),
+    text = Color(0xFF3B2A1A), text2 = Color(0xFF6A5640), line = Color(0x1F3B2A1A), isDark = false, wood = Wood.KEYAKI,
+)
+val GrisPalette = Palette(
+    "Gris", bg = Color(0xFF2B2D30), surface = Color(0xFF35383C), card = Color(0xFF43474C),
+    text = Color(0xFFDAD6CF), text2 = Color(0xFFA9A49C), line = Color(0x24DAD6CF), isDark = true, wood = Wood.NONE,
+)
+
 val LocalPalette = staticCompositionLocalOf { Chashitsu }
 
 object Fonts {
