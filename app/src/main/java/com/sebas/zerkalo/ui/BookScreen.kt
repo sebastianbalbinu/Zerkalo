@@ -174,7 +174,7 @@ private fun BookMenu(book: Book, onCover: () -> Unit, onShelf: () -> Unit, onClo
             if (!confirm) {
                 Text(book.title, style = Type.title.copy(fontSize = 20.sp), color = p.text)
                 Gap(8)
-                ListRow(if (book.favorite) "♥ Quitar de favoritos" else "♡ Agregar a favoritos", onClick = {
+                ListRow(if (book.favorite) "Quitar de favoritos" else "Agregar a favoritos", onClick = {
                     Library.update(book.id) { it.copy(favorite = !it.favorite) }; onClose()
                 })
                 ListRow("Cambiar portada", "Otras ediciones, Google o tu galería", onClick = onCover)

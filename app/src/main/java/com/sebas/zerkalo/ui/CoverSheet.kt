@@ -172,7 +172,7 @@ fun BookQuickSheet(start: Book, startMode: String = "menu", onClose: () -> Unit)
             }
             Spacer(Modifier.height(10.dp))
             if (mode == "menu") {
-                ListRow(if (book.favorite) "♥ Quitar de favoritos" else "♡ Agregar a favoritos", onClick = {
+                ListRow(if (book.favorite) "Quitar de favoritos" else "Agregar a favoritos", onClick = {
                     Library.update(book.id) { it.copy(favorite = !it.favorite) }; onClose()
                 })
                 ListRow("Estante: " + Genres.name(book.genre), "Cambiar el género del libro", onClick = { mode = "genre" })
