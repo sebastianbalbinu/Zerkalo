@@ -40,6 +40,7 @@ data class Book(
     val binding: Binding = Binding.forSeed(id),
     val useBinding: Boolean = false,
     val pair: String? = null,   // la misma obra en otro idioma (para leer lado a lado)
+    val tags: List<String> = emptyList(), // etiquetas propias
 ) {
     val reading get() = progress > 0.0 && finishedAt == 0L
     val finished get() = finishedAt > 0L
@@ -50,6 +51,7 @@ data class Book(
         .put("addedAt", addedAt).put("lastOpened", lastOpened).put("progress", progress)
         .put("locator", locator ?: JSONObject.NULL).put("finishedAt", finishedAt)
         .put("binding", binding.toJson()).put("useBinding", useBinding).put("pair", pair ?: JSONObject.NULL)
+        .put("tags", JSONArray(tags))
 
     companion object {
         fun fromJson(o: JSONObject): Book {
@@ -62,6 +64,7 @@ data class Book(
                 locator = o.optStringOrNull("locator"), finishedAt = o.optLong("finishedAt"),
                 binding = Binding.fromJson(o.optJSONObject("binding")) ?: Binding.forSeed(id),
                 useBinding = o.optBoolean("useBinding"), pair = o.optStringOrNull("pair"),
+                tags = o.optJSONArray("tags")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() } } ?: emptyList(),
             )
         }
     }

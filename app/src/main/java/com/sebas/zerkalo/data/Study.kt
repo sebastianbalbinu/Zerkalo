@@ -27,8 +27,9 @@ object Study {
         val isEmpty get() = highlights == 0 && words.isEmpty()
     }
 
-    private val colorNames = listOf("Oro", "Musgo", "Bermellón", "Índigo")
-    private val colorHex = listOf("#E2BE52", "#8CA05A", "#D9694F", "#6F8DBF")
+    private fun argbOf(c: Int) = if (c in 0..15) InkColor.DEFAULTS.getOrElse(c) { InkColor.DEFAULTS[0] }.argb else c
+    private fun hex(c: Int) = String.format("#%06X", argbOf(c) and 0xFFFFFF)
+    private fun inkName(c: Int) = Prefs.inks.value.firstOrNull { it.argb == argbOf(c) }?.name.orEmpty()
 
     fun of(book: Book, all: List<Mark> = Library.marks.value): Summary {
         val mine = all.filter { it.bookId == book.id }
@@ -58,6 +59,7 @@ object Study {
         s.chapters.forEach { c ->
             appendLine(); appendLine("## ${c.title}"); appendLine()
             c.marks.forEach { m ->
+                inkName(m.color).takeIf { it.isNotBlank() }?.let { appendLine("[$it]") }
                 appendLine("> ${m.text.trim().replace("\n", "\n> ")}")
                 if (m.note.isNotBlank()) appendLine("\n**Nota:** ${m.note.trim()}")
                 appendLine()
@@ -95,6 +97,7 @@ object Study {
             table { border-collapse: collapse; width: 100%; font-size: 10.5pt; }
             td { border-bottom: 1px solid #e6ded4; padding: 5pt 6pt; vertical-align: top; } td.w { font-weight: bold; width: 26%; }
             .ctx { font-style: italic; color: #6b5d52; font-size: 9.5pt; }
+            .tag { display: block; font-family: sans-serif; font-size: 8.5pt; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 2pt; }
             .foot { margin-top: 24pt; font-family: sans-serif; font-size: 8.5pt; color: #9a8d82; }
             </style></head><body>""",
         )
@@ -104,7 +107,8 @@ object Study {
         s.chapters.forEach { c ->
             append("<h2>${esc(c.title)}</h2>")
             c.marks.forEach { m ->
-                append("<blockquote style='border-color:${colorHex.getOrElse(m.color) { colorHex[0] }}'>${esc(m.text.trim())}</blockquote>")
+                val tag = inkName(m.color).takeIf { it.isNotBlank() }?.let { "<span class='tag' style='color:${hex(m.color)}'>${esc(it)}</span>" }.orEmpty()
+                append("<blockquote style='border-color:${hex(m.color)}'>$tag${esc(m.text.trim())}</blockquote>")
                 if (m.note.isNotBlank()) append("<div class='note'>✎ ${esc(m.note.trim())}</div>")
             }
         }
@@ -120,7 +124,7 @@ object Study {
             s.shioris.forEach { append("<li>${esc(it.chapter.ifBlank { "Página marcada" })} (${(it.progress * 100).toInt()} %)</li>") }
             append("</ul>")
         }
-        append("<div class='foot'>Hecho con Zerkalo · colores: ${colorNames.joinToString(", ")}</div></body></html>")
+        append("<div class='foot'>Hecho con Zerkalo</div></body></html>")
     }
 
     fun share(ctx: Context, s: Summary) {
