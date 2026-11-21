@@ -70,10 +70,6 @@ jobs:
       fail-fast: false
       matrix:
         api: [34, 35, 36]
-        include:
-          # La imagen de Android 14 se caía con SwiftShader al dibujar el desenfoque; ANGLE es más estable.
-          - api: 34
-            gpu: swangle_indirect
     steps:
       - uses: actions/checkout@v4
 
@@ -97,7 +93,7 @@ jobs:
           cores: 4
           heap-size: 1024M
           force-avd-creation: false
-          emulator-options: -no-window -gpu ${{ matrix.gpu || 'swiftshader_indirect' }} -noaudio -no-boot-anim -no-snapshot
+          emulator-options: -no-window -gpu swangle_indirect -noaudio -no-boot-anim -no-snapshot
           disable-animations: false
           script: bash .github/scripts/probar.sh
 
