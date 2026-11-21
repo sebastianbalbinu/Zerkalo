@@ -109,11 +109,13 @@ object Updates {
             val tag = o.optString("tag_name").removePrefix("v")
             val code = tag.substringAfterLast('.').toLongOrNull() ?: 0L
             val assets = o.optJSONArray("assets")
-            var url = "https://github.com/sebastianbalbinu/Zerkalo/releases/latest/download/Zerkalo.apk"
+            // Cada teléfono baja el APK de su tipo de procesador (los de 32 bits usan Zerkalo-armv7.apk).
+            val wanted = if (android.os.Build.SUPPORTED_64_BIT_ABIS.isEmpty()) "Zerkalo-armv7.apk" else "Zerkalo.apk"
+            var url = "https://github.com/sebastianbalbinu/Zerkalo/releases/latest/download/$wanted"
             if (assets != null) {
                 for (i in 0 until assets.length()) {
                     val a = assets.getJSONObject(i)
-                    if (a.optString("name").endsWith(".apk")) url = a.optString("browser_download_url", url)
+                    if (a.optString("name") == wanted) url = a.optString("browser_download_url", url)
                 }
             }
             if (code > currentCode(ctx)) {
