@@ -140,6 +140,12 @@ object Importer {
                 file = file.name, cover = cover,
                 genre = Genres.detect(md.subjects.map { it.name }, item?.title ?: md.title.orEmpty()).ifBlank { "-" },
             )
+            // Si ya está (mismo título y autor, aunque el archivo se llame distinto), no se repite.
+            Library.twinOf(book.title, book.author, book.id)?.let { twin ->
+                if (twin.file != file.name) file.delete()
+                cover?.let { File(Library.coversDir, it).delete() }
+                return@withContext Result.success(twin)
+            }
             Library.upsert(book)
             Result.success(book)
         } finally {

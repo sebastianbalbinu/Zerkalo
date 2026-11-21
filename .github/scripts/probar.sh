@@ -25,7 +25,9 @@ fi
 $T adb shell dumpsys gfxinfo com.sebas.zerkalo > gfx-tansu.txt
 # Abrir el libro de bienvenida en el lector
 $T adb shell am start -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bienvenida
-sleep 15
+# Espera a que el libro abra (hasta 60 s: el emulador de Android 16 a veces es lento)
+for i in $(seq 1 30); do $T adb logcat -d | grep -q ZK_READER_OK && break; sleep 2; done
+sleep 3
 $T adb exec-out screencap -p > shot3.png
 # Pasar de página tocando el borde derecho y mostrar los controles
 [ -n "$W" ] && $T adb shell input tap $((W*92/100)) $((H/2))
