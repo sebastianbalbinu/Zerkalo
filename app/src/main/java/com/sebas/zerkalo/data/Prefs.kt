@@ -35,6 +35,7 @@ data class ReaderSettings(
     val autoPage: Float = 40f,   // avance automático en páginas: segundos por página
     val layout: Int = 1,         // diagramación: 0 original del libro, 1 Zerkalo (cuidada), 2 mía (mis ajustes en todo)
     val markStyle: Int = 0,      // subrayado: 0 marcador, 1 lápiz, 2 ondulado
+    val veil: Float = 0f,        // velo que atenúa la página sin tocar el brillo, 0..0.85
 )
 
 data class OpdsCatalog(val name: String, val url: String)
@@ -69,6 +70,7 @@ object Prefs {
             fullscreen = sp.getBoolean("rFull", false), vMargin = sp.getInt("rVMargin", 1),
             autoSpeed = sp.getFloat("rAutoSpeed", 30f), autoPage = sp.getFloat("rAutoPage", 40f),
             layout = sp.getInt("rLayout", 1), markStyle = sp.getInt("rMarkStyle", 0),
+            veil = sp.getFloat("rVeil", 0f),
         )
         inks.value = runCatching {
             val a = JSONArray(sp.getString("inks", null) ?: "")
@@ -93,7 +95,7 @@ object Prefs {
             .putBoolean("rBreaks", r.breaks).putBoolean("rDys", r.dyslexia)
             .putBoolean("rFull", r.fullscreen).putInt("rVMargin", r.vMargin)
             .putFloat("rAutoSpeed", r.autoSpeed).putFloat("rAutoPage", r.autoPage)
-            .putInt("rLayout", r.layout).putInt("rMarkStyle", r.markStyle).apply()
+            .putInt("rLayout", r.layout).putInt("rMarkStyle", r.markStyle).putFloat("rVeil", r.veil).apply()
     }
 
     fun setCatalogs(list: List<OpdsCatalog>) {
@@ -123,6 +125,31 @@ object Prefs {
     var audioFollow: Boolean
         get() = sp.getBoolean("audioFollow", true)
         set(v) { sp.edit().putBoolean("audioFollow", v).apply() }
+
+    /** Lector bilingüe: las dos ediciones pasan página juntas. */
+    var pairLinked: Boolean
+        get() = sp.getBoolean("pairLinked", true)
+        set(v) { sp.edit().putBoolean("pairLinked", v).apply() }
+
+    /** Lector bilingüe: la pareja va primero (arriba o a la izquierda). */
+    var pairSwap: Boolean
+        get() = sp.getBoolean("pairSwap", false)
+        set(v) { sp.edit().putBoolean("pairSwap", v).apply() }
+
+    /** Lector bilingüe: porcentaje de la pantalla para el libro principal. */
+    var pairRatio: Int
+        get() = sp.getInt("pairRatio", 50)
+        set(v) { sp.edit().putInt("pairRatio", v).apply() }
+
+    /** Cómo se ordena la biblioteca: 0 estado, 1 géneros, 2 autores, 3 idiomas. */
+    var libraryMode: Int
+        get() = sp.getInt("libMode", 0)
+        set(v) { sp.edit().putInt("libMode", v).apply() }
+
+    /** Libro que espera una portada buscada en Google Imágenes (id y hora en que se pidió). */
+    var pendingCover: Pair<String, Long>?
+        get() = sp.getString("pendCover", null)?.let { id -> id to sp.getLong("pendCoverAt", 0) }
+        set(v) { sp.edit().putString("pendCover", v?.first).putLong("pendCoverAt", v?.second ?: 0).apply() }
 
     fun pairOn(bookId: String) = sp.getBoolean("pairOn_$bookId", false)
     fun setPairOn(bookId: String, on: Boolean) { sp.edit().putBoolean("pairOn_$bookId", on).apply() }

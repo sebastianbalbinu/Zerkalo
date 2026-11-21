@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
@@ -97,6 +99,8 @@ val LocalActions = staticCompositionLocalOf<AppActions> { error("sin acciones") 
 object AppEvents {
     /** EPUB que llegó desde otra app y falta importar. */
     val incoming = MutableStateFlow<Uri?>(null)
+    /** Imagen compartida desde otra app para usarla como portada. */
+    val coverIncoming = MutableStateFlow<Uri?>(null)
     val toast = MutableStateFlow<Pair<String, Long>?>(null)
     /** Libro que hay que abrir en el lector apenas exista (lo usa la prueba automática). */
     val openBook = MutableStateFlow<String?>(null)
@@ -158,6 +162,21 @@ fun ZerkaloRoot(onReady: () -> Unit) {
     val incoming by AppEvents.incoming.collectAsState()
     LaunchedEffect(incoming) {
         incoming?.let { AppEvents.incoming.value = null; doImport(it, openAfter = true) }
+    }
+
+    // Imagen compartida (por ejemplo, desde Google Imágenes): portada del libro que la pidió, o se elige el libro.
+    val coverIn by AppEvents.coverIncoming.collectAsState()
+    var coverFor by remember { mutableStateOf<Uri?>(null) }
+    LaunchedEffect(coverIn) {
+        val uri = coverIn ?: return@LaunchedEffect
+        AppEvents.coverIncoming.value = null
+        val pending = Prefs.pendingCover?.takeIf { System.currentTimeMillis() - it.second < 3 * 3600_000L }?.let { Library.book(it.first) }
+        if (pending != null) {
+            val ok = com.sebas.zerkalo.data.CoverSearch.applyUri(ctx, pending, uri)
+            Prefs.pendingCover = null
+            AppEvents.toast(if (ok) "Nueva portada para «${pending.title}»" else "No se pudo usar esa imagen")
+            if (ok) { stack.clear(); tab = 0; stack.add(Screen.BookDetail(pending.id)) }
+        } else coverFor = uri
     }
 
     val actions = remember {
@@ -222,6 +241,44 @@ fun ZerkaloRoot(onReady: () -> Unit) {
             onPickFiles = { importSheet = false; picker.launch(arrayOf("application/epub+zip", "application/octet-stream", "application/zip")) },
             onClose = { importSheet = false },
         )
+        coverFor?.let { uri -> PickBookForCover(uri) { coverFor = null } }
+    }
+}
+
+/** Llegó una imagen compartida sin libro pendiente: se elige a qué libro ponérsela de portada. */
+@Composable
+private fun PickBookForCover(uri: Uri, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val books by Library.books.collectAsState()
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onClose,
+        sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface,
+    ) {
+        Column(Modifier.padding(horizontal = 22.dp).padding(bottom = 30.dp)) {
+            Text("¿Para qué libro es esta portada?", style = Type.title.copy(fontSize = 20.sp), color = p.text)
+            androidx.compose.foundation.lazy.LazyColumn(Modifier.heightIn(max = 460.dp).padding(top = 10.dp)) {
+                items(books.sortedByDescending { maxOf(it.lastOpened, it.addedAt) }, key = { it.id }) { b ->
+                    Row(
+                        Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable {
+                            scope.launch {
+                                val ok = com.sebas.zerkalo.data.CoverSearch.applyUri(ctx, b, uri)
+                                AppEvents.toast(if (ok) "Nueva portada para «${b.title}»" else "No se pudo usar esa imagen")
+                                onClose()
+                            }
+                        }.padding(vertical = 8.dp, horizontal = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        BookCover(b, 36.dp, 52.dp, elevation = 2.dp)
+                        Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                            Text(b.title, style = Type.ui, color = p.text, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                            Text(b.author, style = Type.uiSmall, color = p.text2, maxLines = 1)
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

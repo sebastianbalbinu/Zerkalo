@@ -128,6 +128,11 @@ class ReaderUi {
     var hasPair by mutableStateOf(false)
     var pairOn by mutableStateOf(false)
     var pairTitle by mutableStateOf("")
+    var pairLinked by mutableStateOf(true)      // las dos ediciones pasan página juntas
+    var pairLangLabel by mutableStateOf("")     // idioma de la pareja, en dos letras
+    var landscape by mutableStateOf(false)
+    var pairSwap by mutableStateOf(false)       // la pareja va arriba (o a la izquierda)
+    var pairRatio by mutableIntStateOf(50)      // % de la pantalla para el libro principal
     var lang by mutableStateOf("")
     var dim by mutableFloatStateOf(0f)        // velo negro para oscurecer por debajo del mínimo
     var clock by mutableStateOf("")
@@ -152,7 +157,11 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private lateinit var root: FrameLayout
     private lateinit var panes: LinearLayout
     private lateinit var pairContainer: FragmentContainerView
-    private lateinit var divider: View
+    private lateinit var divider: ComposeView
+    private lateinit var mainContainer: View
+    private var pairJob: Job? = null
+    private var ignorePairUntil = 0L   // la pareja se está moviendo porque la movió el lector
+    private var ignoreMainUntil = 0L   // el libro principal se está moviendo porque lo movió la pareja
 
     // La misma obra en otro idioma
     private var pairBook: Book? = null
@@ -190,7 +199,23 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         panes = LinearLayout(this)
         val container = FragmentContainerView(this).apply { id = containerId }
         pairContainer = FragmentContainerView(this).apply { id = pairId; visibility = View.GONE }
-        divider = View(this).apply { visibility = View.GONE }
+        ui.pairLinked = Prefs.pairLinked; ui.pairSwap = Prefs.pairSwap; ui.pairRatio = Prefs.pairRatio
+        divider = ComposeView(this).apply {
+            visibility = View.GONE
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                androidx.compose.runtime.CompositionLocalProvider(com.sebas.zerkalo.ui.LocalPalette provides ui.palette) {
+                    val main = ui.lang.ifBlank { "?" }.take(2).uppercase()
+                    val other = ui.pairLangLabel
+                    com.sebas.zerkalo.ui.WoodDivider(
+                        vertical = ui.landscape,
+                        first = if (ui.pairSwap) other else main, second = if (ui.pairSwap) main else other,
+                        linked = ui.pairLinked, onLink = { togglePairLink() }, onTap = { setControls(!ui.controls) },
+                    )
+                }
+            }
+        }
+        mainContainer = container
         panes.addView(container)
         panes.addView(divider)
         panes.addView(pairContainer)
@@ -214,6 +239,22 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         applyPaper()
         applyBrightness(ui.settings.brightness)
         lifecycleScope.launch { open() }
+        onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() { back() }
+        })
+    }
+
+    /** Atrás cierra en orden lo que esté abierto; solo al final sale del libro. */
+    private fun back() {
+        when {
+            ui.lookup != null -> { lookupJob?.cancel(); ui.lookup = null }
+            ui.activeMark != null -> ui.activeMark = null
+            ui.noteFor != null -> ui.noteFor = null
+            ui.sheet != null -> ui.sheet = null
+            ui.studyTap -> { ui.studyTap = false; Prefs.studyTap = false; ui.say("Modo traducir apagado") }
+            ui.auto -> stopAuto()
+            else -> finish()
+        }
     }
 
     /**
@@ -232,16 +273,43 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         panes.setPadding(i.left, top, i.right, bottom)
     }
 
-    /** Vertical: un libro encima del otro. Horizontal: uno al lado del otro. */
+    /**
+     * Vertical: un libro encima del otro. Horizontal: uno al lado del otro.
+     * El orden se puede intercambiar y el tamaño de cada parte elegir (mitad y mitad, 60/40…).
+     */
     private fun layoutPanes(c: Configuration) {
         val landscape = c.orientation == Configuration.ORIENTATION_LANDSCAPE
+        ui.landscape = landscape
         panes.orientation = if (landscape) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
         val w = if (landscape) 0 else ViewGroup.LayoutParams.MATCH_PARENT
         val h = if (landscape) ViewGroup.LayoutParams.MATCH_PARENT else 0
-        val line = (resources.displayMetrics.density).toInt().coerceAtLeast(1)
-        panes.getChildAt(0).layoutParams = LinearLayout.LayoutParams(w, h, 1f)
-        divider.layoutParams = if (landscape) LinearLayout.LayoutParams(line, ViewGroup.LayoutParams.MATCH_PARENT) else LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, line)
-        pairContainer.layoutParams = LinearLayout.LayoutParams(w, h, 1f)
+        val wood = (26 * resources.displayMetrics.density).toInt()
+        val main = mainContainer
+        val order = if (ui.pairSwap) listOf(pairContainer, divider, main) else listOf(main, divider, pairContainer)
+        if ((0 until panes.childCount).map { panes.getChildAt(it) } != order) {
+            order.forEach { v -> (v.parent as? ViewGroup)?.removeView(v) }
+            order.forEach { panes.addView(it) }
+        }
+        val r = ui.pairRatio.coerceIn(30, 70) / 100f
+        main.layoutParams = LinearLayout.LayoutParams(w, h, r)
+        divider.layoutParams = if (landscape) LinearLayout.LayoutParams(wood, ViewGroup.LayoutParams.MATCH_PARENT) else LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, wood)
+        pairContainer.layoutParams = LinearLayout.LayoutParams(w, h, 1f - r)
+    }
+
+    private fun togglePairLink() {
+        ui.pairLinked = !ui.pairLinked; Prefs.pairLinked = ui.pairLinked
+        ui.say(if (ui.pairLinked) "Casadas: pasan página juntas" else "Separadas: cada una a su ritmo")
+        if (ui.pairLinked) navigator?.currentLocator?.value?.let { syncPair(it, force = true) }
+    }
+
+    private fun swapPair() {
+        ui.pairSwap = !ui.pairSwap; Prefs.pairSwap = ui.pairSwap
+        layoutPanes(resources.configuration)
+    }
+
+    private fun setPairRatio(v: Int) {
+        ui.pairRatio = v; Prefs.pairRatio = v
+        layoutPanes(resources.configuration)
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -360,6 +428,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             val h = nav.publicationView.height.toFloat().coerceAtLeast(1f)
             val x = event.point.x / w
             val y = event.point.y / h
+            // En modo traducir, tocar la franja de arriba o de abajo sigue abriendo el menú.
+            if (ui.studyTap && (y < 0.1f || y > 0.9f)) { if (ui.lookup != null) { lookupJob?.cancel(); ui.lookup = null } else setControls(!ui.controls); return true }
             if (ui.studyTap && x in 0.16f..0.84f) {
                 lifecycleScope.launch {
                     if (!lookUpAt(nav, event.point, if (pair) pairLang else ui.lang)) {
@@ -625,7 +695,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val pos = loc.locations.position
         ui.bookmarked = pos != null && ui.marks.any { it.type == "shiori" && posOf(it) == pos }
         ui.chapterLeft = chapterLeft(pos)
-        if (turn) syncPair(loc)
+        if (turn && ui.pairLinked && System.currentTimeMillis() > ignoreMainUntil) syncPair(loc)
         val json = loc.toJSON().toString()
         Library.update(book.id) { it.copy(progress = total.toDouble(), locator = json, lastOpened = now) }
         val last = positions.lastOrNull()?.lastOrNull()?.locations?.position
@@ -767,7 +837,14 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             else -> 0.02f + (b - 0.3f) / 0.7f * 0.98f
         }
         ui.dim = if (b in 0f..0.3f) (0.3f - b) / 0.3f * 0.78f else 0f
+        applyVeil()
         window.attributes = window.attributes.apply { screenBrightness = screen }
+    }
+
+    /** El velo se suma al oscurecimiento del brillo: 1 − (1 − brillo)(1 − velo). */
+    private fun applyVeil() {
+        val base = if (ui.settings.brightness in 0f..0.3f) (0.3f - ui.settings.brightness) / 0.3f * 0.78f else 0f
+        ui.dim = 1f - (1f - base) * (1f - ui.settings.veil.coerceIn(0f, 0.85f))
     }
 
     fun updateSettings(r: ReaderSettings) {
@@ -776,11 +853,12 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         ui.settings = r
         ui.palette = paletteFor(r)
         if (old.brightness != r.brightness) applyBrightness(r.brightness)
+        if (old.veil != r.veil) applyVeil()
         if (old.fullscreen != r.fullscreen || old.vMargin != r.vMargin) applyMargins()
         if (ui.auto && (old.autoSpeed != r.autoSpeed || old.autoPage != r.autoPage || old.scroll != r.scroll)) startAuto()
         // Estos ajustes no necesitan rehacer las páginas.
         if (old.copy(
-                brightness = r.brightness, ruler = r.ruler, haptic = r.haptic, volumeKeys = r.volumeKeys, breaks = r.breaks, animate = r.animate,
+                brightness = r.brightness, veil = r.veil, ruler = r.ruler, haptic = r.haptic, volumeKeys = r.volumeKeys, breaks = r.breaks, animate = r.animate,
                 fullscreen = r.fullscreen, vMargin = r.vMargin, autoSpeed = r.autoSpeed, autoPage = r.autoPage,
             ) == r
         ) return
@@ -911,6 +989,10 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         setPair = { other -> setPair(other) },
         togglePair = { showPair(!ui.pairOn) },
         syncPair = { navigator?.currentLocator?.value?.let { syncPair(it, force = true) } },
+        togglePairLink = { togglePairLink() },
+        swapPair = { swapPair() },
+        setPairRatio = { setPairRatio(it) },
+        veilLive = { v -> ui.dim = 1f - (1f - (if (ui.settings.brightness in 0f..0.3f) (0.3f - ui.settings.brightness) / 0.3f * 0.78f else 0f)) * (1f - v) },
     )
 
     private fun toggleShiori() {
@@ -1021,6 +1103,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         if (!on) {
             ui.pairOn = false; Prefs.setPairOn(book.id, false)
             pairContainer.visibility = View.GONE; divider.visibility = View.GONE
+            pairJob?.cancel(); pairJob = null
             pairNav?.let { f -> supportFragmentManager.commitNow { remove(f) } }
             pairNav = null; runCatching { pairPub?.close() }; pairPub = null
             return
@@ -1031,6 +1114,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             val pub = core.open(File(Library.booksDir, other.file)).getOrElse { ui.say("No se pudo abrir «${other.title}»"); return@launch }
             pairPub = pub
             pairLang = other.lang.ifBlank { pub.metadata.languages.firstOrNull().orEmpty() }.ifBlank { "en" }
+            ui.pairLangLabel = pairLang.take(2).uppercase()
+            ignorePairUntil = System.currentTimeMillis() + 2_000
             val start = navigator?.currentLocator?.value?.let { mapLocator(it, publication ?: pub, pub) }
                 ?: other.locator?.let { runCatching { Locator.fromJSON(JSONObject(it)) }.getOrNull() }
             val ff = EpubNavigatorFactory(pub, EpubNavigatorFactory.Configuration(defaults = EpubDefaults(pageMargins = 1.2)))
@@ -1040,7 +1125,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             supportFragmentManager.commitNow { replace(pairId, frag, "pareja") }
             pairNav = frag
             frag.addInputListener(tapListener(frag, pair = true))
-            lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { frag.currentLocator.collect { typeset(frag) } } }
+            pairJob?.cancel()
+            pairJob = lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { frag.currentLocator.collect { typeset(frag); syncMain(it) } } }
             ui.pairOn = true; Prefs.setPairOn(book.id, true)
             pairPositions = runCatching { pub.positionsByReadingOrder() }.getOrDefault(emptyList())
             navigator?.currentLocator?.value?.let { syncPair(it, force = true) }
@@ -1055,7 +1141,21 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val target = mapLocator(loc, mp, pp) ?: return
         val cur = pn.currentLocator.value
         if (!force && cur.href.toString() == target.href.toString() && abs((cur.locations.progression ?: 0.0) - (target.locations.progression ?: 0.0)) < 0.01) return
+        ignorePairUntil = System.currentTimeMillis() + 900
         pn.go(target, animated = false)
+    }
+
+    /** Al pasar página en la pareja, el libro principal la sigue (si están casadas). */
+    private fun syncMain(loc: Locator) {
+        if (!ui.pairLinked || System.currentTimeMillis() < ignorePairUntil) return
+        val nav = navigator ?: return
+        val pp = pairPub ?: return
+        val mp = publication ?: return
+        val target = mapLocator(loc, pp, mp) ?: return
+        val cur = nav.currentLocator.value
+        if (cur.href.toString() == target.href.toString() && abs((cur.locations.progression ?: 0.0) - (target.locations.progression ?: 0.0)) < 0.01) return
+        ignoreMainUntil = System.currentTimeMillis() + 900
+        nav.go(target, animated = false)
     }
 
     private fun mapLocator(loc: Locator, from: Publication, to: Publication): Locator? {
@@ -1133,6 +1233,10 @@ class ReaderActions(
     val setPair: (Book?) -> Unit,
     val togglePair: () -> Unit,
     val syncPair: () -> Unit,
+    val togglePairLink: () -> Unit,
+    val swapPair: () -> Unit,
+    val setPairRatio: (Int) -> Unit,
+    val veilLive: (Float) -> Unit,
 )
 
 /** Dónde está el texto: "top", "bottom", "both" (capítulo corto) o "none". */
