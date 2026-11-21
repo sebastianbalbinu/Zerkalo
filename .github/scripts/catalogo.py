@@ -41,12 +41,16 @@ TOPICS = [
     ("children", ["juvenile", "children"]),
 ]
 
-SOURCES = [
-    "https://www.gutenberg.org/cache/epub/feeds/rdf-files.tar.bz2",
-    "https://aleph.gutenberg.org/cache/epub/feeds/rdf-files.tar.bz2",
-    "https://gutenberg.pglaf.org/cache/epub/feeds/rdf-files.tar.bz2",
-    "https://mirror.cs.odu.edu/gutenberg-epub/feeds/rdf-files.tar.bz2",
+# Espejos oficiales primero: gutenberg.org suele responder "ocupado" (503) a los servidores de GitHub.
+# (aleph.gutenberg.org tiene el certificado vencido para su nombre, por eso no está.)
+MIRRORS = [
+    "https://mirror.cs.odu.edu/gutenberg-epub/feeds/",
+    "https://gutenberg.pglaf.org/cache/epub/feeds/",
+    "https://www.gutenberg.org/cache/epub/feeds/",
 ]
+SOURCES = [m + "rdf-files.tar.bz2" for m in MIRRORS]
+CSV_SOURCES = [m + "pg_catalog.csv.gz" for m in MIRRORS]
+MAX_SECONDS = 8 * 60   # por fuente: si va demasiado lento, se pasa a la siguiente
 UA = "ZerkaloCatalogo/1.0 (+https://github.com/sebastianbalbinu/Zerkalo; una descarga semanal)"
 
 NS = {
@@ -57,22 +61,42 @@ NS = {
 RDF_ABOUT = "{%s}about" % NS["rdf"]
 
 
-def download():
-    for url in SOURCES:
-        for attempt in range(3):
+def fetch(url, min_size):
+    """Descarga mostrando el avance; abandona si tarda más de MAX_SECONDS."""
+    req = urllib.request.Request(url, headers={"User-Agent": UA})
+    start = time.time()
+    buf = bytearray()
+    with urllib.request.urlopen(req, timeout=60) as r:
+        total = int(r.headers.get("Content-Length") or 0)
+        next_report = 10_000_000
+        while True:
+            chunk = r.read(1 << 20)
+            if not chunk:
+                break
+            buf += chunk
+            if len(buf) >= next_report:
+                print(f"  {len(buf) / 1e6:.0f} MB" + (f" de {total / 1e6:.0f}" if total else ""), flush=True)
+                next_report += 10_000_000
+            if time.time() - start > MAX_SECONDS:
+                raise TimeoutError("demasiado lento")
+    if len(buf) < min_size:
+        raise ValueError(f"muy pequeño ({len(buf)} bytes)")
+    print(f"  ok: {len(buf) / 1e6:.1f} MB en {time.time() - start:.0f} s", flush=True)
+    return bytes(buf)
+
+
+def download(urls, min_size):
+    for url in urls:
+        for attempt in range(2):
             try:
                 print(f"Descargando {url} (intento {attempt + 1})", flush=True)
-                req = urllib.request.Request(url, headers={"User-Agent": UA})
-                with urllib.request.urlopen(req, timeout=120) as r:
-                    data = r.read()
-                if len(data) > 10_000_000:
-                    print(f"  ok: {len(data) / 1e6:.1f} MB", flush=True)
-                    return data
-                print(f"  muy pequeño ({len(data)} bytes)")
+                return fetch(url, min_size)
             except Exception as e:
-                print(f"  falló: {e}")
-                time.sleep(10 * (attempt + 1))
-    raise SystemExit("No se pudo descargar el catálogo de Gutenberg de ninguna fuente")
+                print(f"  falló: {e}", flush=True)
+                if "503" not in str(e) and "lento" not in str(e):
+                    break
+                time.sleep(15)
+    return None
 
 
 def nice_name(n):
@@ -117,9 +141,47 @@ def parse(xml_bytes):
     return int(m.group(1)), title, ", ".join(authors[:2]), langs, downloads, mask, summary
 
 
+def from_csv(data, by_lang):
+    """Plan B: la hoja CSV oficial (no trae descargas ni resúmenes)."""
+    import csv
+    text = gzip.decompress(data).decode("utf-8", "replace")
+    n = 0
+    for row in csv.DictReader(io.StringIO(text)):
+        if row.get("Type") != "Text":
+            continue
+        tags = (row.get("Subjects", "") + " " + row.get("Bookshelves", "")).lower()
+        mask = 0
+        for i, (_, words) in enumerate(TOPICS):
+            if any(w in tags for w in words):
+                mask |= 1 << i
+        authors = [nice_name(re.sub(r",\s*-?\d{3,4}\??-?\d{0,4}\??\s*$", "", a.strip())) for a in row.get("Authors", "").split(";") if a.strip()]
+        title = re.sub(r"\s*[\r\n]+\s*", " — ", row.get("Title", "").strip())
+        # Sin descargas: los que están en más estantes temáticos suelen ser los clásicos
+        score = len([b for b in row.get("Bookshelves", "").split(";") if b.strip()])
+        for lang in [l.strip() for l in row.get("Language", "").split(";")]:
+            if lang in LANGS:
+                by_lang[lang].append([int(row["Text#"]), title, ", ".join(authors[:2]), score, mask, ""])
+        n += 1
+    return n
+
+
 def main():
-    data = download()
     by_lang = defaultdict(list)
+    n = 0
+    data = download(SOURCES, 10_000_000)
+    if data is None:
+        print("No se pudo bajar el RDF; uso la hoja CSV", flush=True)
+        csv_data = download(CSV_SOURCES, 1_000_000)
+        if csv_data is None:
+            raise SystemExit("No se pudo descargar el catálogo de Gutenberg de ninguna fuente")
+        n = from_csv(csv_data, by_lang)
+    else:
+        n = parse_tar(data, by_lang)
+    print(f"{n} libros de texto en EPUB", flush=True)
+    write(by_lang)
+
+
+def parse_tar(data, by_lang):
     n = 0
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:bz2") as tar:
         for member in tar:
@@ -139,7 +201,10 @@ def main():
             for lang in langs:
                 if lang in LANGS:
                     by_lang[lang].append([pid, title, author, downloads, mask, summary])
-    print(f"{n} libros de texto en EPUB", flush=True)
+    return n
+
+
+def write(by_lang):
     stamp = time.strftime("%Y-%m-%d")
     index = {"generated": stamp, "topics": [t for t, _ in TOPICS], "langs": {}}
     for lang in LANGS:

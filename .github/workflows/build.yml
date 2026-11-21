@@ -108,6 +108,8 @@ jobs:
 
       - name: Publicar capturas de la prueba
         if: always()
+        # Las tres pruebas publican a la vez; si GitHub choca al crear la versión, no es un fallo de la app.
+        continue-on-error: true
         uses: softprops/action-gh-release@v2
         with:
           tag_name: prueba-${{ github.run_number }}
