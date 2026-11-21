@@ -78,6 +78,7 @@ sealed class Screen {
     data class Taller(val id: String) : Screen()
     data object Settings : Screen()
     data class Catalog(val url: String, val name: String) : Screen()
+    data class Shelf(val lang: String, val kind: String, val value: String, val title: String) : Screen()
 }
 
 /** Acciones que cualquier pantalla puede pedir. */
@@ -206,6 +207,7 @@ fun ZerkaloRoot(onReady: () -> Unit) {
                                 is Screen.Taller -> TallerScreen(s.id)
                                 Screen.Settings -> SettingsScreen()
                                 is Screen.Catalog -> CatalogScreen(s.url, s.name)
+                                is Screen.Shelf -> ShelfScreen(s.lang, s.kind, s.value, s.title)
                             }
                         }
                     }
