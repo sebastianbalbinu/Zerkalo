@@ -75,6 +75,7 @@ import com.sebas.zerkalo.ui.ZIcon
 import com.sebas.zerkalo.ui.ZSwitch
 import com.sebas.zerkalo.ui.ZSlider
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
@@ -586,7 +587,7 @@ private fun BrightnessEdge(ui: ReaderUi, act: ReaderActions, modifier: Modifier)
     Box(
         modifier.width(26.dp).fillMaxHeight(0.72f)
             .onSizeChanged { height = it.height.toFloat().coerceAtLeast(1f) }
-            .pointerInput(Unit) { androidx.compose.foundation.gestures.detectTapGestures { act.turn(-1) } }
+            .pointerInput(Unit) { detectTapGestures { act.turn(-1) } }
             .pointerInput(Unit) {
                 detectVerticalDragGestures(
                     onDragStart = { live = ui.settings.brightness.takeIf { it >= 0f } ?: 0.65f },

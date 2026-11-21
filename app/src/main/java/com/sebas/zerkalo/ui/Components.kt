@@ -1,5 +1,9 @@
 package com.sebas.zerkalo.ui
 
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.drag
+
 import androidx.compose.foundation.layout.offset
 
 import androidx.compose.ui.input.pointer.pointerInput
@@ -105,10 +109,10 @@ fun ZSlider(
     androidx.compose.foundation.layout.BoxWithConstraints(
         modifier.fillMaxWidth().height(36.dp).pointerInput(range) {
             fun set(x: Float) = change(range.start + (x / size.width).coerceIn(0f, 1f) * span)
-            androidx.compose.foundation.gestures.awaitEachGesture {
-                val down = androidx.compose.foundation.gestures.awaitFirstDown()
+            awaitEachGesture {
+                val down = awaitFirstDown()
                 set(down.position.x); down.consume()
-                androidx.compose.foundation.gestures.drag(down.id) { set(it.position.x); it.consume() }
+                drag(down.id) { set(it.position.x); it.consume() }
                 finished?.invoke()
             }
         },
