@@ -43,6 +43,8 @@ data class ReaderSettings(
     val mmTop: Float = 1.5f,
     val mmBottom: Float = 2f,
     val respectCamera: Boolean = true, // el margen de arriba empieza debajo de la cámara (si no, desde el borde)
+    val customInkLight: Int = 0xFF3A3350.toInt(), // tinta propia para papeles claros (Crema, Sepia)
+    val continuous: Boolean = false,   // desplazamiento continuo: todo el libro seguido, como en Books
 )
 
 data class OpdsCatalog(val name: String, val url: String)
@@ -80,6 +82,7 @@ object Prefs {
             veil = sp.getFloat("rVeil", 0f), info = sp.getBoolean("rInfo", true),
             mmLeft = sp.getFloat("rMmL", 4f), mmRight = sp.getFloat("rMmR", 4f), mmTop = sp.getFloat("rMmT", 1.5f), mmBottom = sp.getFloat("rMmB", 2f),
             respectCamera = sp.getBoolean("rCam", true),
+            customInkLight = sp.getInt("rInkL", 0xFF3A3350.toInt()), continuous = sp.getBoolean("rCont", false),
         )
         inks.value = runCatching {
             val a = JSONArray(sp.getString("inks", null) ?: "")
@@ -105,7 +108,8 @@ object Prefs {
             .putBoolean("rFull", r.fullscreen).putInt("rVMargin", r.vMargin)
             .putFloat("rAutoSpeed", r.autoSpeed).putFloat("rAutoPage", r.autoPage)
             .putInt("rLayout", r.layout).putInt("rMarkStyle", r.markStyle).putFloat("rVeil", r.veil).putBoolean("rInfo", r.info)
-            .putFloat("rMmL", r.mmLeft).putFloat("rMmR", r.mmRight).putFloat("rMmT", r.mmTop).putFloat("rMmB", r.mmBottom).putBoolean("rCam", r.respectCamera).apply()
+            .putFloat("rMmL", r.mmLeft).putFloat("rMmR", r.mmRight).putFloat("rMmT", r.mmTop).putFloat("rMmB", r.mmBottom).putBoolean("rCam", r.respectCamera)
+            .putInt("rInkL", r.customInkLight).putBoolean("rCont", r.continuous).apply()
     }
 
     fun setCatalogs(list: List<OpdsCatalog>) {

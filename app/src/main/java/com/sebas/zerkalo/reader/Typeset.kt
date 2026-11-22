@@ -22,12 +22,12 @@ import com.sebas.zerkalo.data.ReaderSettings
 data class PagePad(val top: Float = 0f, val bottom: Float = 0f, val paper: Int = 0)
 
 object Typeset {
-    fun script(r: ReaderSettings, lang: String, pad: PagePad = PagePad()): String {
+    fun script(r: ReaderSettings, lang: String, pad: PagePad = PagePad(), nonce: Long = 0): String {
         val justify = r.justify && !r.dyslexia
         val c = pad.paper
         val rgb = "${(c shr 16) and 255},${(c shr 8) and 255},${c and 255}"
         val opts = """{"mode":${r.layout},"justify":$justify,"lang":"${lang.replace("\"", "")}","scroll":${r.scroll},""" +
-            """"padTop":${pad.top},"padBottom":${pad.bottom},"paper":"$rgb"}"""
+            """"padTop":${pad.top},"padBottom":${pad.bottom},"paper":"$rgb","n":$nonce}"""
         return JS.replace("__OPTS__", opts)
     }
 
@@ -36,6 +36,38 @@ var O = __OPTS__;
 var d = document, b = d.body;
 if (!b) return 'sin-cuerpo';
 window.__zkOpts = O;
+window.__zkEdges = function(top, bot, rgb){
+  var d = document, old = d.getElementById('zk-edges');
+  if (old) old.remove();
+  if (top <= 0 && bot <= 0) return;
+  var wrap = d.createElement('div'); wrap.id = 'zk-edges'; wrap.setAttribute('aria-hidden', 'true');
+  var blurs = [1, 2, 4, 8, 16], n = blurs.length;
+  function imp(css) { return css.split(';').filter(function(x){ return x.trim(); }).map(function(x){ return x + ' !important'; }).join(';'); }
+  function zone(isTop, h) {
+    var dir = isTop ? 'to bottom' : 'to top', pos = isTop ? 'top:0' : 'bottom:0';
+    for (var j = 0; j < n; j++) {
+      // Capa j: más desenfocada cuanto más alta; cubre desde el borde hasta (n-j)/n de la zona
+      var mid = Math.round((n - j - 1) / n * 100), end = Math.round((n - j) / n * 100);
+      var m = 'linear-gradient(' + dir + ',#000 ' + mid + '%,transparent ' + end + '%)';
+      var x = d.createElement('div');
+      x.style.cssText = imp('position:fixed;left:0;right:0;' + pos + ';height:' + h + 'px;pointer-events:none;z-index:2147483646;' +
+        'background:transparent;-webkit-backdrop-filter:blur(' + blurs[j] + 'px);backdrop-filter:blur(' + blurs[j] + 'px);' +
+        '-webkit-mask-image:' + m + ';mask-image:' + m + ';display:block;margin:0;padding:0');
+      wrap.appendChild(x);
+    }
+    // Un tinte suave del papel, como el vidrio del menú
+    var t = d.createElement('div');
+    t.style.cssText = imp('position:fixed;left:0;right:0;' + pos + ';height:' + h + 'px;pointer-events:none;z-index:2147483647;' +
+      'background:linear-gradient(' + dir + ',rgba(' + rgb + ',0.62),rgba(' + rgb + ',0.25) 55%,rgba(' + rgb + ',0));display:block;margin:0;padding:0');
+    wrap.appendChild(t);
+  }
+  if (top > 0) zone(true, top);
+  if (bot > 0) zone(false, bot);
+  d.documentElement.appendChild(wrap);
+};
+// Si nada cambió desde la última vez, no se vuelve a acomodar (así el texto no se mueve solo)
+if (window.__zkKey === JSON.stringify(O) && window.__zkDone) return 'igual';
+window.__zkKey = JSON.stringify(O);
 window.__zkRun = function(){
   var O = window.__zkOpts, d = document, b = d.body;
   if (!d.documentElement.lang && O.lang) d.documentElement.lang = O.lang;
@@ -65,20 +97,15 @@ window.__zkRun = function(){
   // 2) Estilos generales
   var st = d.getElementById('zk-type');
   if (!st) { st = d.createElement('style'); st.id = 'zk-type'; (d.head || d.documentElement).appendChild(st); }
-  // Desplazamiento: el texto usa toda la pantalla y se desenfoca suave hacia arriba y hacia abajo (como en Books)
+  // Desplazamiento: el texto usa toda la pantalla y se desenfoca de forma progresiva arriba y abajo
+  // (varias capas, cada una más desenfocada cerca del borde, como el menú de la app). El espacio del
+  // inicio y del final va en ::before/::after del cuerpo, que el motor del lector no anula.
   var edge = '';
   if (O.scroll) {
-    // El difuminado hacia el color del papel lo pone la app encima; aquí va el desenfoque (si el teléfono lo permite)
-    var tH = O.padTop + 14, bH = O.padBottom + 14;
-    edge = 'body{padding-top:' + O.padTop + 'px !important;padding-bottom:' + (O.padBottom + 24) + 'px !important}' +
-      '#zk-top,#zk-bot{position:fixed !important;left:0 !important;right:0 !important;z-index:2147483646 !important;pointer-events:none !important;' +
-      'background:transparent !important;-webkit-backdrop-filter:blur(6px) !important;backdrop-filter:blur(6px) !important;display:block !important}' +
-      '#zk-top{top:0 !important;height:' + tH + 'px !important;-webkit-mask-image:linear-gradient(#000 45%,transparent) !important;mask-image:linear-gradient(#000 45%,transparent) !important}' +
-      '#zk-bot{bottom:0 !important;height:' + bH + 'px !important;-webkit-mask-image:linear-gradient(transparent,#000 55%) !important;mask-image:linear-gradient(transparent,#000 55%) !important}';
-    ['zk-top', 'zk-bot'].forEach(function(id){ if (!d.getElementById(id)) { var x = d.createElement('div'); x.id = id; x.setAttribute('aria-hidden', 'true'); d.documentElement.appendChild(x); } });
-  } else {
-    ['zk-top', 'zk-bot'].forEach(function(id){ var x = d.getElementById(id); if (x) x.remove(); });
+    edge = 'body::before{content:"" !important;display:block !important;height:' + O.padTop + 'px !important}' +
+      'body::after{content:"" !important;display:block !important;height:' + (O.padBottom + 28) + 'px !important}';
   }
+  window.__zkEdges(O.scroll ? O.padTop + 10 : 0, O.scroll ? O.padBottom + 18 : 0, O.paper);
   if (O.mode === 3) { st.textContent = edge; return 'ninguna'; }
   var css = 'img,svg,video{max-width:100% !important;height:auto !important;object-fit:contain}img{max-height:92vh}' +
     'table{max-width:100% !important}pre{white-space:pre-wrap !important}';
@@ -228,6 +255,7 @@ window.__zkRun = function(){
   return 'ok';
 };
 var res = window.__zkRun();
+window.__zkDone = true;
 if (d.fonts && !window.__zkFonts) { window.__zkFonts = 1; d.fonts.ready.then(function(){ window.__zkRun(); }); }
 return res;
 })()"""
