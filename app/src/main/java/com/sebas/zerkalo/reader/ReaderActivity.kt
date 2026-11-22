@@ -419,7 +419,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                 val ctx = this@ReaderActivity
                 val italic = f.italic?.takeIf { FontFiles.has(ctx, it) }
                 val bold = f.bold?.takeIf { FontFiles.has(ctx, it) } ?: f.boldAlt?.takeIf { FontFiles.has(ctx, it) }
-                declareFont(f.css, "fonts/${f.regular}", italic?.let { "fonts/$it" }, bold?.let { "fonts/$it" })
+                val reg = FontFiles.regular(ctx, f) ?: f.regular
+                declareFont(f.css, "fonts/$reg", italic?.let { "fonts/$it" }, bold?.let { "fonts/$it" })
             }
         }
     }
