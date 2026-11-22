@@ -170,6 +170,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private var alignJob: Job? = null  // ajuste fino de la pareja, párrafo por párrafo
     private var lastTouch = 0L         // último toque o arrastre de la persona
     private var lastPageCheck = 0L     // última vez que se revisó si el narrador ya pasó de página
+    private var scrollPadTop = 0f      // en desplazamiento: espacio dentro de la página arriba (px de CSS)
+    private var scrollPadBottom = 0f
 
     // La misma obra en otro idioma
     private var pairBook: Book? = null
@@ -275,10 +277,20 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val r = ui.settings
         val i = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
         val dm = resources.displayMetrics
-        val em = 16f * dm.density * resources.configuration.fontScale * (r.size / 100f)
-        val top = i.top + (listOf(0.2f, 0.9f, 1.8f).getOrElse(r.margin) { 0.9f } * em).toInt()
-        val bottom = (listOf(0.35f, 1.1f, 2.1f).getOrElse(r.margin) { 1.1f } * em).toInt()
-        panes.setPadding(i.left, top, i.right, bottom)
+        // Milímetros reales de la pantalla (si el teléfono informa mal sus puntos por pulgada, se usa la densidad)
+        val xdpi = dm.xdpi.takeIf { it in 100f..900f } ?: dm.densityDpi.toFloat()
+        val ydpi = dm.ydpi.takeIf { it in 100f..900f } ?: dm.densityDpi.toFloat()
+        fun mmX(v: Float) = (v * xdpi / 25.4f).toInt()
+        fun mmY(v: Float) = (v * ydpi / 25.4f).toInt()
+        if (r.scroll) {
+            // Desplazamiento: el texto usa toda la pantalla y se desenfoca hacia los bordes (el margen va dentro de la página)
+            panes.setPadding(i.left + mmX(r.mmLeft), 0, i.right + mmX(r.mmRight), 0)
+            scrollPadTop = (i.top + mmY(r.mmTop)) / dm.density
+            scrollPadBottom = mmY(r.mmBottom) / dm.density
+        } else {
+            panes.setPadding(i.left + mmX(r.mmLeft), i.top + mmY(r.mmTop), i.right + mmX(r.mmRight), mmY(r.mmBottom))
+            scrollPadTop = 0f; scrollPadBottom = 0f
+        }
         // Dónde está la cámara, para poner la hora a un lado y el avance al otro
         ui.band = i.top / dm.density
         val cut = insets.displayCutout?.boundingRects?.firstOrNull { it.top <= 4 }
@@ -496,14 +508,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                     val vertical = abs(dy) > abs(dx) * 1.4f
                     val toNext = vertical && dy < 0 && (edge.contains("bottom") || edge.contains("both"))
                     val toPrev = vertical && dy > 0 && (edge.contains("top") || edge.contains("both"))
-                    ui.edgeReady = (toNext || toPrev) && abs(dy) > th
-                    ui.edgeHint = when {
-                        toNext && ui.edgeReady -> "Suelta para ir a: " + neighborTitle(nav, 1)
-                        toPrev && ui.edgeReady -> "Suelta para volver a: " + neighborTitle(nav, -1)
-                        toNext && abs(dy) > th * 0.25f -> "Sigue deslizando para el siguiente capítulo"
-                        toPrev && abs(dy) > th * 0.25f -> "Sigue deslizando para el capítulo anterior"
-                        else -> null
-                    }
+                    ui.edgeReady = (toNext || toPrev) && abs(dy) > th * 0.35f
+                    ui.edgeHint = null
                 }
                 DragEvent.Type.End -> {
                     val edge = dragEdge[nav].orEmpty()
@@ -511,8 +517,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                     val horizontal = abs(dx) > th * 1.3f && abs(dx) > abs(dy) * 2.2f
                     ui.edgeHint = null; ui.edgeReady = false
                     when {
-                        vertical && dy < -th && (edge.contains("bottom") || edge.contains("both")) -> chapterJump(nav, 1)
-                        vertical && dy > th && (edge.contains("top") || edge.contains("both")) -> chapterJump(nav, -1)
+                        vertical && dy < -th * 0.35f && (edge.contains("bottom") || edge.contains("both")) -> chapterJump(nav, 1)
+                        vertical && dy > th * 0.35f && (edge.contains("top") || edge.contains("both")) -> chapterJump(nav, -1)
                         horizontal -> chapterJump(nav, if (dx < 0) 1 else -1)
                     }
                 }
@@ -686,7 +692,11 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             return
         }
         lifecycleScope.launch {
+            // Lo que se lee con claridad está entre el desenfoque de arriba y el de abajo
+            val pt = scrollPadTop
+            val pb = maxOf(scrollPadBottom, 8f) * 1.6f
             val js = SCROLL_BY.replace("__D__", dir.toString()).replace("__S__", if (ui.settings.animate) "smooth" else "auto")
+                .replace("__PT__", pt.toString()).replace("__PB__", pb.toString())
             val r = runCatching { nav.evaluateJavascript(js) }.getOrNull().orEmpty()
             // Al final (o al inicio) del capítulo, se pasa al siguiente (o al anterior).
             if (r.contains("edge")) chapterJump(nav, dir)
@@ -855,9 +865,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
      * siga teniendo un largo cómodo (y los versos quepan) en vez de quedar con 4 palabras.
      */
     private fun pageMargins(r: ReaderSettings): Double {
-        val base = listOf(0.75, 1.15, 1.6).getOrElse(r.margin) { 1.15 }
-        if (r.size <= 100) return base
-        return (base * Math.pow(100.0 / r.size, 0.9)).coerceAtLeast(0.45)
+        // Los márgenes de los lados los pone Zerkalo en milímetros; Readium no agrega los suyos.
+        return 0.0
     }
 
     // ---------------- diagramación ----------------
@@ -872,25 +881,21 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val entry = nav.currentLocator.value
         val fresh = !force && nav === navigator
         lifecycleScope.launch {
-            // Capítulo nuevo: el papel lo cubre un instante mientras se acomoda, así el texto no "salta" a la vista
-            if (fresh) ui.chapterFade = true
-            try {
-                for ((i, wait) in listOf(0L, 240L, 700L).withIndex()) {
-                    delay(wait)
-                    val r = runCatching { nav.evaluateJavascript(Typeset.script(ui.settings, lang)) }.getOrNull()
-                    if (i == 0) Log.i("Zerkalo", "ZK_TYPESET $href $r")
-                    if (i == 1) {
-                        // Al entrar por el final (o a un punto guardado), volver a ese punto tras reacomodar
-                        val p = entry.locations.progression ?: 0.0
-                        val now = nav.currentLocator.value
-                        if (fresh && !ui.settings.scroll && p > 0.001 && now.href.toString() == href &&
-                            abs((now.locations.progression ?: 0.0) - p) > 0.0005
-                        ) nav.go(entry, animated = false)
-                        ui.chapterFade = false
-                    }
+            // Como en Books: el capítulo se acomoda apenas aparece, sin parpadeos ni papel encima.
+            // Las pasadas siguientes solo actúan si algo cambió (letras o imágenes que terminaron de cargar).
+            val pad = PagePad(scrollPadTop, scrollPadBottom, ui.palette.bg.toArgb())
+            for ((i, wait) in listOf(0L, 240L, 700L).withIndex()) {
+                if (wait > 0) delay(wait)
+                val r = runCatching { nav.evaluateJavascript(Typeset.script(ui.settings, lang, pad)) }.getOrNull()
+                if (i == 0) Log.i("Zerkalo", "ZK_TYPESET $href $r")
+                if (i == 1) {
+                    // Al entrar por el final (o a un punto guardado), volver a ese punto tras reacomodar
+                    val p = entry.locations.progression ?: 0.0
+                    val now = nav.currentLocator.value
+                    if (fresh && !ui.settings.scroll && p > 0.001 && now.href.toString() == href &&
+                        abs((now.locations.progression ?: 0.0) - p) > 0.0005
+                    ) nav.go(entry, animated = false)
                 }
-            } finally {
-                ui.chapterFade = false
             }
         }
     }
@@ -922,12 +927,20 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         ui.palette = paletteFor(r)
         if (old.brightness != r.brightness) applyBrightness(r.brightness)
         if (old.veil != r.veil) applyVeil()
-        if (old.margin != r.margin || old.size != r.size) applyMargins()
+        if (old.mmLeft != r.mmLeft || old.mmRight != r.mmRight || old.mmTop != r.mmTop || old.mmBottom != r.mmBottom || old.scroll != r.scroll) {
+            applyMargins()
+            if (old.copy(mmLeft = r.mmLeft, mmRight = r.mmRight, mmTop = r.mmTop, mmBottom = r.mmBottom) == r) {
+                // Solo cambiaron los márgenes: basta con volver a diagramar (para el espacio y el desenfoque del desplazamiento)
+                lifecycleScope.launch { delay(120); navigator?.let { typeset(it, force = true) }; pairNav?.let { typeset(it, force = true) } }
+                return
+            }
+        }
         if (ui.auto && (old.autoSpeed != r.autoSpeed || old.autoPage != r.autoPage || old.scroll != r.scroll)) startAuto()
         // Estos ajustes no necesitan rehacer las páginas.
         if (old.copy(
                 brightness = r.brightness, veil = r.veil, ruler = r.ruler, haptic = r.haptic, volumeKeys = r.volumeKeys, breaks = r.breaks, animate = r.animate,
                 fullscreen = r.fullscreen, vMargin = r.vMargin, autoSpeed = r.autoSpeed, autoPage = r.autoPage, info = r.info,
+                mmLeft = r.mmLeft, mmRight = r.mmRight, mmTop = r.mmTop, mmBottom = r.mmBottom,
             ) == r
         ) return
         applyPaper()
@@ -1367,7 +1380,8 @@ private const val AUTO_STOP = "(function(){ window.__zk = null; return 'off'; })
  * Devuelve "edge" si ya está al final o al inicio del capítulo.
  */
 private const val SCROLL_BY = """(function(){
-  var d = __D__, se = document.scrollingElement || document.documentElement, h = window.innerHeight, w = window.innerWidth;
+  var d = __D__, se = document.scrollingElement || document.documentElement, w = window.innerWidth;
+  var PT = __PT__, PB = __PB__, h = window.innerHeight - PT - PB;
   var lh = parseFloat(getComputedStyle(document.body).lineHeight) || 26;
   var max = se.scrollHeight - h;
   if (d > 0 && se.scrollTop >= max - 4) return 'edge';
@@ -1390,24 +1404,25 @@ private const val SCROLL_BY = """(function(){
     return null;
   }
   var delta, pad = Math.min(6, lh * 0.2);
+  // La zona clara va de PT a PT + h (arriba y abajo está el desenfoque)
   if (d > 0) {
-    var y = h - 2, L = null;
+    var y = PT + h - 2, L = null;
     for (var k = 0; k < 8 && !L; k++) { L = lineAt(y); y -= lh / 3; }
-    delta = L ? L.top - pad : h - 2 * lh;
+    delta = L ? L.top - PT - pad : h - 2 * lh;
     if (delta < h * 0.45) delta = h - 2 * lh;
   } else {
-    var y2 = 2, F = null;
+    var y2 = PT + 2, F = null;
     for (var j = 0; j < 8 && !F; j++) { F = lineAt(y2); y2 += lh / 3; }
-    delta = F ? -(h - F.bottom - pad) : -(h - 2 * lh);
+    delta = F ? -(PT + h - F.bottom - pad) : -(h - 2 * lh);
     if (-delta < h * 0.45) delta = -(h - 2 * lh);
   }
   window.scrollBy({ top: Math.round(delta), behavior: '__S__' });
   // Al terminar de moverse, si la primera línea quedó mordida arriba, se acomoda para verla entera.
   var fix = function(){
     window.removeEventListener('scrollend', fix);
-    var y = 1, F = null;
+    var y = PT + 1, F = null;
     for (var j = 0; j < 4 && !F; j++) { F = lineAt(y); y += lh / 3; }
-    if (F && F.top < -1 && F.bottom > 1) window.scrollBy({ top: Math.round(F.top - pad), behavior: 'auto' });
+    if (F && F.top < PT - 1 && F.bottom > PT + 1) window.scrollBy({ top: Math.round(F.top - PT - pad), behavior: 'auto' });
   };
   if ('onscrollend' in window && '__S__' === 'smooth') window.addEventListener('scrollend', fix); else setTimeout(fix, 60);
   return 'ok';

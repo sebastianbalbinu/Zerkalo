@@ -18,10 +18,16 @@ import com.sebas.zerkalo.data.ReaderSettings
  * Todo se hace con estilos en línea marcados con data-zk-*, así se puede deshacer y rehacer cuando
  * cambian los ajustes, sin tocar el texto (los subrayados guardados siguen en su sitio).
  */
+/** Desplazamiento: espacio dentro de la página arriba y abajo (px de CSS) y el color del papel para el desenfoque. */
+data class PagePad(val top: Float = 0f, val bottom: Float = 0f, val paper: Int = 0)
+
 object Typeset {
-    fun script(r: ReaderSettings, lang: String): String {
+    fun script(r: ReaderSettings, lang: String, pad: PagePad = PagePad()): String {
         val justify = r.justify && !r.dyslexia
-        val opts = """{"mode":${r.layout},"justify":$justify,"lang":"${lang.replace("\"", "")}"}"""
+        val c = pad.paper
+        val rgb = "${(c shr 16) and 255},${(c shr 8) and 255},${c and 255}"
+        val opts = """{"mode":${r.layout},"justify":$justify,"lang":"${lang.replace("\"", "")}","scroll":${r.scroll},""" +
+            """"padTop":${pad.top},"padBottom":${pad.bottom},"paper":"$rgb"}"""
         return JS.replace("__OPTS__", opts)
     }
 
@@ -59,12 +65,25 @@ window.__zkRun = function(){
   // 2) Estilos generales
   var st = d.getElementById('zk-type');
   if (!st) { st = d.createElement('style'); st.id = 'zk-type'; (d.head || d.documentElement).appendChild(st); }
-  if (O.mode === 3) { st.textContent = ''; return 'ninguna'; }
+  // Desplazamiento: el texto usa toda la pantalla y se desenfoca suave hacia arriba y hacia abajo (como en Books)
+  var edge = '';
+  if (O.scroll) {
+    edge = 'body{padding-top:' + O.padTop + 'px !important;padding-bottom:' + Math.max(O.padBottom, 8) + 'px !important}' +
+      '.zk-edge{position:fixed;left:0;right:0;z-index:2147483646;pointer-events:none;-webkit-backdrop-filter:blur(5px);backdrop-filter:blur(5px)}' +
+      '#zk-top{top:0;height:' + O.padTop + 'px;background:linear-gradient(rgba(' + O.paper + ',1) 35%,rgba(' + O.paper + ',0));' +
+      '-webkit-mask-image:linear-gradient(#000 30%,transparent);mask-image:linear-gradient(#000 30%,transparent)}' +
+      '#zk-bot{bottom:0;height:' + Math.max(O.padBottom, 8) * 1.6 + 'px;background:linear-gradient(rgba(' + O.paper + ',0),rgba(' + O.paper + ',1) 75%);' +
+      '-webkit-mask-image:linear-gradient(transparent,#000 70%);mask-image:linear-gradient(transparent,#000 70%)}';
+    ['zk-top', 'zk-bot'].forEach(function(id){ if (!d.getElementById(id)) { var x = d.createElement('div'); x.id = id; x.className = 'zk-edge'; b.appendChild(x); } });
+  } else {
+    ['zk-top', 'zk-bot'].forEach(function(id){ var x = d.getElementById(id); if (x) x.remove(); });
+  }
+  if (O.mode === 3) { st.textContent = edge; return 'ninguna'; }
   var css = 'img,svg,video{max-width:100% !important;height:auto !important;object-fit:contain}img{max-height:92vh}' +
     'table{max-width:100% !important}pre{white-space:pre-wrap !important}';
   if (O.mode === 1) css += 'h1,h2,h3,h4,h5,h6{break-after:avoid;break-inside:avoid;text-wrap:balance}' +
     'p{orphans:2;widows:2;text-wrap:pretty}';
-  st.textContent = css;
+  st.textContent = css + edge;
 
   // 3) Reconocer poemas
   var VCLS = /(^|[\s_-])(poem|poema|poemas|poesia|poetry|verse|verso|versos|stanza|estrofa|lg|linegroup|line-group|poetic|cancion|song|lyrics|copla|songtext)(\d*)([\s_-]|$)/i;
