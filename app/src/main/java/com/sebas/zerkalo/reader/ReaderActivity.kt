@@ -89,6 +89,9 @@ data class TocEntry(val title: String, val link: Link, val depth: Int)
 /** Colores de letra para papel oscuro. El último lo elige la persona. */
 val InkNames = listOf("Original", "Azul claro", "Blanco cálido", "Gris perla", "Ámbar suave", "Mío")
 val InkColors = listOf(0, 0xFFC7D8EA.toInt(), 0xFFEEE6D8.toInt(), 0xFFCFCBC5.toInt(), 0xFFD9C3A0.toInt(), 0)
+/** Tintas para papel claro (Crema y Sepia): oscuras y suaves, que se leen bien sobre papel. */
+val InkNamesLight = listOf("Original", "Café tinta", "Grafito", "Azul tinta", "Verde bosque", "Mía")
+val InkColorsLight = listOf(0, 0xFF4A3426.toInt(), 0xFF33363A.toInt(), 0xFF22344F.toInt(), 0xFF2E4434.toInt(), 0)
 
 /** Una palabra (o frase) que se está traduciendo. */
 data class Lookup(
@@ -171,6 +174,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private var alignJob: Job? = null  // ajuste fino de la pareja, párrafo por párrafo
     private var lastTouch = 0L         // último toque o arrastre de la persona
     private var lastPageCheck = 0L     // última vez que se revisó si el narrador ya pasó de página
+    private var cont: ContinuousView? = null  // modo continuo: todo el libro seguido (motor propio)
+    private var contLoc: Locator? = null      // dónde va la lectura en el modo continuo
     private var scrollPadTop = 0f      // en desplazamiento: espacio dentro de la página arriba (px de CSS)
     private var scrollPadBottom = 0f
 
@@ -198,6 +203,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         super.onCreate(null)
         book = Library.book(intent.getStringExtra("id")) ?: run { finish(); return }
         ui.settings = Prefs.reader.value
+        // La prueba automática abre el libro en modo continuo sin cambiar los ajustes guardados
+        if (intent.getBooleanExtra("continuo", false)) ui.settings = ui.settings.copy(scroll = true, continuous = true)
         ui.palette = paletteFor(ui.settings)
         ui.marks = Library.marks.value.filter { it.bookId == book.id }
         ui.minutesToday = Library.minutesToday()
@@ -284,7 +291,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         fun mmX(v: Float) = (v * xdpi / 25.4f).toInt()
         fun mmY(v: Float) = (v * ydpi / 25.4f).toInt()
         val cam = if (r.respectCamera) i.top else 0
-        if (r.scroll) {
+        if (r.scroll || r.continuous) {
             // Desplazamiento: el texto usa toda la pantalla; arriba y abajo, la zona del margen se difumina
             panes.setPadding(i.left + mmX(r.mmLeft), 0, i.right + mmX(r.mmRight), 0)
             scrollPadTop = (cam + mmY(r.mmTop)) / dm.density
@@ -301,6 +308,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val w = root.width.takeIf { it > 0 } ?: dm.widthPixels
         ui.camX = cut?.let { (it.exactCenterX() / w).coerceIn(0.15f, 0.85f) } ?: 0.5f
         ui.camHalf = (cut?.width()?.div(2f) ?: 0f) / dm.density
+        if (cont != null) contRefresh()
     }
 
     /**
@@ -324,6 +332,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         main.layoutParams = LinearLayout.LayoutParams(w, h, r)
         divider.layoutParams = if (landscape) LinearLayout.LayoutParams(wood, ViewGroup.LayoutParams.MATCH_PARENT) else LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, wood)
         pairContainer.layoutParams = LinearLayout.LayoutParams(w, h, 1f - r)
+        cont?.layoutParams = LinearLayout.LayoutParams(w, h, 1f)
     }
 
     private fun togglePairLink() {
@@ -358,6 +367,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         ui.lang = book.lang.ifBlank { pub.metadata.languages.firstOrNull().orEmpty() }.ifBlank { "en" }
         ui.toc = flatten(pub.tableOfContents, 0)
         val initial = book.locator?.let { runCatching { Locator.fromJSON(JSONObject(it)) }.getOrNull() }
+        if (ui.settings.continuous) { openContinuous(pub, initial); return }
         val factory = EpubNavigatorFactory(pub, EpubNavigatorFactory.Configuration(defaults = EpubDefaults(pageMargins = 1.2)))
         supportFragmentManager.fragmentFactory = factory.createFragmentFactory(
             initialLocator = initial,
@@ -388,6 +398,11 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             nav.currentLocator.value.let { onLocator(it, turn = false) }
         }
         lifecycleScope.launch { applyHighlights() }
+        afterOpen()
+    }
+
+    /** Lo que se hace al abrir, sea cual sea el modo: reloj, pausas, audio, aviso de listo. */
+    private fun afterOpen() {
         lifecycleScope.launch {
             var sinceBreak = 0L
             while (true) {
@@ -406,8 +421,137 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         ui.loading = false
         Log.i("Zerkalo", "ZK_READER_OK ${book.title}")
         refreshPairInfo()
-        if (ui.hasPair && Prefs.pairOn(book.id)) showPair(true)
+        if (cont == null && ui.hasPair && Prefs.pairOn(book.id)) showPair(true)
         lifecycleScope.launch { delay(1600); setControls(false) }
+    }
+
+    // ---------------- modo continuo ----------------
+    /** Abre el libro en el modo continuo: todo seguido, con su propio motor (ver Continuous.kt). */
+    private fun openContinuous(pub: Publication, initial: Locator?) {
+        lifecycleScope.launch { positions = runCatching { pub.positionsByReadingOrder() }.getOrDefault(emptyList()) }
+        val v = ContinuousView(this, pub, object : ContinuousView.Callbacks {
+            override fun onPosition(index: Int, progression: Double) {
+                val loc = locatorAt(index, progression) ?: return
+                val first = contLoc == null
+                contLoc = loc
+                onLocator(loc, turn = !first)
+            }
+            override fun onTap(fx: Float) {
+                lastTouch = System.currentTimeMillis()
+                when {
+                    ui.lookup != null -> ui.lookup = null
+                    fx < 0.28f -> contPage(-1)
+                    fx > 0.72f -> contPage(1)
+                    else -> setControls(!ui.controls)
+                }
+            }
+            override fun onLoaded(index: Int) { contTypeset() }
+            override fun onReady() { Log.i("Zerkalo", "ZK_CONT_OK ${book.title}") }
+        })
+        cont = v
+        mainContainer.visibility = View.GONE
+        panes.addView(v, 0)
+        layoutPanes(resources.configuration)
+        val idx = initial?.let { resourceIndex(pub, it) }?.takeIf { it >= 0 } ?: 0
+        v.start(idx, initial?.locations?.progression ?: 0.0, contCss(), contMarks())
+        afterOpen()
+    }
+
+    /** El punto del libro: capítulo [index] a [progression]; con la posición de página si ya se conocen. */
+    private fun locatorAt(index: Int, progression: Double): Locator? {
+        val pub = publication ?: return null
+        val list = positions.getOrNull(index)
+        val base = list?.getOrNull(((list.size - 1) * progression).toInt().coerceIn(0, (list.size - 1).coerceAtLeast(0)))
+            ?: pub.readingOrder.getOrNull(index)?.let { pub.locatorFromLink(it) } ?: return null
+        return base.copyWithLocations(progression = progression)
+    }
+
+    private fun contPage(dir: Int) {
+        if (ui.controls) setControls(false)
+        if (ui.settings.haptic) root.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+        cont?.page(dir)
+    }
+
+    private fun contGo(loc: Locator) {
+        val pub = publication ?: return
+        val i = resourceIndex(pub, loc).takeIf { it >= 0 } ?: return
+        cont?.go(i, loc.locations.progression ?: 0.0)
+        setControls(false)
+    }
+
+    /** Vuelve a diagramar todo lo pegado (al agregar un capítulo o cambiar un ajuste). */
+    private fun contTypeset() {
+        val v = cont ?: return
+        val pad = PagePad(scrollPadTop, scrollPadBottom, ui.palette.bg.toArgb())
+        v.evaluateJavascript(Typeset.script(ui.settings.copy(scroll = true), ui.lang, pad, System.nanoTime()), null)
+    }
+
+    /** Subrayados guardados, para mostrarlos en el modo continuo. */
+    private fun contMarks(): org.json.JSONArray {
+        val v = cont
+        val a = org.json.JSONArray()
+        for (m in ui.marks.filter { it.type == "hl" }) {
+            val loc = runCatching { Locator.fromJSON(JSONObject(m.locator)) }.getOrNull() ?: continue
+            val pub = publication ?: continue
+            val i = resourceIndex(pub, loc).takeIf { it >= 0 } ?: continue
+            val c = highlightColor(m.color)
+            a.put(
+                JSONObject().put("h", v?.urlOf(i) ?: (ContinuousView.BASE + pub.readingOrder[i].url().toString().substringBefore('#')))
+                    .put("t", loc.text.highlight ?: m.text).put("b", loc.text.before.orEmpty())
+                    .put("c", "rgba(${(c.red * 255).toInt()},${(c.green * 255).toInt()},${(c.blue * 255).toInt()},0.38)"),
+            )
+        }
+        return a
+    }
+
+    /** Letra, tamaño, colores y espacios del modo continuo (lo que en los otros modos hace Readium). */
+    private fun contCss(): String {
+        val r = ui.settings
+        val p = ui.palette
+        fun hex(c: androidx.compose.ui.graphics.Color) = String.format("#%06X", 0xFFFFFF and c.toArgb())
+        val f = ReaderFonts.getOrNull(r.font)
+        val faces = StringBuilder()
+        var fam: String? = null
+        if (f?.css != null) {
+            val reg = FontFiles.regular(this, f)
+            if (reg != null) {
+                fam = f.css
+                fun face(file: String?, style: String, weight: Int) {
+                    if (file != null && FontFiles.has(this, file)) faces.append("@font-face{font-family:'${f.css}';src:url('/__font/$file');font-style:$style;font-weight:$weight}")
+                }
+                face(reg, "normal", 400)
+                face(f.italic, "italic", 400)
+                face(f.bold?.takeIf { FontFiles.has(this, it) } ?: f.boldAlt, "normal", 700)
+            }
+        }
+        val override = r.layout != 0 && r.layout != 3
+        val justify = r.justify && !r.dyslexia
+        val sb = StringBuilder(faces)
+        sb.append(":root{--zk-pt:${scrollPadTop}px;--zk-pb:${scrollPadBottom + 18f}px}")
+        sb.append("html{font-size:${r.size}% !important;background:${hex(p.bg)} !important;-webkit-text-size-adjust:100% !important;overflow-anchor:auto}")
+        sb.append("body{margin:0 !important;padding:0 !important;background:${hex(p.bg)} !important;color:${hex(p.text)} !important;line-height:${r.lineHeight} !important;overflow-wrap:break-word")
+        if (fam != null) sb.append(";font-family:'$fam',serif !important")
+        sb.append("}")
+        sb.append("section.zk-ch *{color:inherit !important;background-color:transparent !important}")
+        sb.append("section.zk-ch img,section.zk-ch svg,section.zk-ch video{max-width:100% !important;height:auto !important}")
+        sb.append("section.zk-ch a{text-decoration:none !important;border-bottom:1px solid currentColor}")
+        sb.append("section.zk-ch + section.zk-ch{margin-top:2.6em !important}")
+        sb.append(".zk-body{margin:0 !important;padding:0 !important}")
+        if (override) {
+            if (fam != null) sb.append("section.zk-ch *:not(code):not(pre):not(kbd){font-family:inherit !important}")
+            sb.append("section.zk-ch p,section.zk-ch li,section.zk-ch div,section.zk-ch blockquote{line-height:inherit !important}")
+            sb.append("section.zk-ch p{text-align:${if (justify) "justify" else "left"} !important;hyphens:${if (justify) "auto" else "manual"} !important;-webkit-hyphens:${if (justify) "auto" else "manual"} !important}")
+            listOf(null, "0.6em", "1.2em").getOrNull(r.paragraph)?.let { sb.append("section.zk-ch p{margin-top:$it !important;margin-bottom:$it !important}") }
+        }
+        listOf(null, 0.06, 0.14).getOrNull(r.spacing)?.let { sb.append("section.zk-ch{letter-spacing:${it}em !important;word-spacing:${it * 2.5}em !important}") }
+        sb.append("::selection{background:rgba(196,67,42,0.28)}")
+        return sb.toString()
+    }
+
+    /** Cuando cambia un ajuste en el modo continuo: colores, letra, márgenes y diagramación. */
+    private fun contRefresh() {
+        cont?.applyCss(contCss())
+        lifecycleScope.launch { delay(60); contTypeset() }
     }
 
     @OptIn(ExperimentalReadiumApi::class)
@@ -481,7 +625,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                 x < 0.33f -> -1
                 x > 0.67f -> 1
                 // Con dos idiomas cada mitad es baja: el centro abre el menú y las páginas se pasan por los lados
-                ui.pairOn -> 0
+                ui.pairOn || ui.settings.scroll -> 0
                 y < 0.22f -> -1
                 y > 0.78f -> 1
                 else -> 0
@@ -504,7 +648,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                 DragEvent.Type.Start -> {
                     lastTouch = System.currentTimeMillis()
                     dragEdge[nav] = ""
-                    lifecycleScope.launch { dragEdge[nav] = runCatching { nav.evaluateJavascript(EDGE_STATE) }.getOrNull().orEmpty() }
+                    lifecycleScope.launch { dragEdge[nav] = runCatching { nav.evaluateJavascript(EDGE_START) }.getOrNull().orEmpty() }
                     if (ui.auto) stopAuto()
                 }
                 DragEvent.Type.Move -> {
@@ -521,9 +665,14 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                     val horizontal = abs(dx) > th * 1.3f && abs(dx) > abs(dy) * 2.2f
                     ui.edgeHint = null; ui.edgeReady = false
                     when {
-                        vertical && dy < -th * 0.35f && (edge.contains("bottom") || edge.contains("both")) -> chapterJump(nav, 1)
-                        vertical && dy > th * 0.35f && (edge.contains("top") || edge.contains("both")) -> chapterJump(nav, -1)
                         horizontal -> chapterJump(nav, if (dx < 0) 1 else -1)
+                        // ¿Ya estaba en el borde y el texto no se movió? Entonces sigue el capítulo (se pregunta al soltar,
+                        // así no depende de una respuesta que llegue tarde)
+                        vertical && abs(dy) > th * 0.35f -> lifecycleScope.launch {
+                            val e = runCatching { nav.evaluateJavascript(EDGE_END) }.getOrNull().orEmpty()
+                            if (dy < 0 && e.contains("bottom")) chapterJump(nav, 1)
+                            else if (dy > 0 && e.contains("top")) chapterJump(nav, -1)
+                        }
                     }
                 }
             }
@@ -688,7 +837,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     }
 
     /** Pasa página. En desplazamiento continuo avanza una pantalla dejando dos líneas de referencia. */
-    private fun turn(nav: EpubNavigatorFragment, dir: Int) {
+    private fun turn(nav: EpubNavigatorFragment?, dir: Int) {
+        if (nav == null) { contPage(dir); return }
         if (ui.controls) setControls(false)
         if (ui.settings.haptic) root.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
         if (!ui.settings.scroll) {
@@ -698,7 +848,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         lifecycleScope.launch {
             // Lo que se lee con claridad está entre el desenfoque de arriba y el de abajo
             val pt = scrollPadTop
-            val pb = scrollPadBottom + 10f
+            val pb = scrollPadBottom + 18f
             val js = SCROLL_BY.replace("__D__", dir.toString()).replace("__S__", if (ui.settings.animate) "smooth" else "auto")
                 .replace("__PT__", pt.toString()).replace("__PB__", pb.toString())
             val r = runCatching { nav.evaluateJavascript(js) }.getOrNull().orEmpty()
@@ -723,6 +873,9 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                 if (event.action == KeyEvent.ACTION_DOWN) turn(nav, dir)
                 return true
             }
+        } else if (cont != null && ui.sheet == null && ui.settings.volumeKeys && !ui.controls) {
+            val dir = when (event.keyCode) { KeyEvent.KEYCODE_VOLUME_DOWN -> 1; KeyEvent.KEYCODE_VOLUME_UP -> -1; else -> 0 }
+            if (dir != 0) { if (event.action == KeyEvent.ACTION_DOWN) contPage(dir); return true }
         }
         return super.dispatchKeyEvent(event)
     }
@@ -798,8 +951,13 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
     private fun paletteFor(r: ReaderSettings): Palette {
         var pal = basePalette(r)
-        if (pal.isDark && r.ink != 0) {
-            val argb = if (r.ink == 5) r.customInk else InkColors.getOrElse(r.ink) { 0 }
+        if (r.ink != 0) {
+            // Color de la letra en todos los papeles: tintas claras en los oscuros y tintas oscuras en los claros
+            val argb = when {
+                r.ink == 5 -> if (pal.isDark) r.customInk else r.customInkLight
+                pal.isDark -> InkColors.getOrElse(r.ink) { 0 }
+                else -> InkColorsLight.getOrElse(r.ink) { 0 }
+            }
             if (argb != 0) {
                 val ink = androidx.compose.ui.graphics.Color(argb)
                 pal = pal.copy(text = ink, text2 = ink.copy(alpha = 0.72f))
@@ -890,7 +1048,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             val pad = PagePad(scrollPadTop, scrollPadBottom, ui.palette.bg.toArgb())
             for ((i, wait) in listOf(0L, 240L, 700L).withIndex()) {
                 if (wait > 0) delay(wait)
-                val r = runCatching { nav.evaluateJavascript(Typeset.script(ui.settings, lang, pad)) }.getOrNull()
+                val r = runCatching { nav.evaluateJavascript(Typeset.script(ui.settings, lang, pad, if (force && i == 0) System.nanoTime() else 0)) }.getOrNull()
                 if (i == 0) Log.i("Zerkalo", "ZK_TYPESET $href $r")
                 if (i == 1) {
                     // Al entrar por el final (o a un punto guardado), volver a ese punto tras reacomodar
@@ -927,8 +1085,16 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     fun updateSettings(r: ReaderSettings) {
         Prefs.setReader(r)
         val old = ui.settings
+        // Entrar o salir del modo continuo cambia de motor: se vuelve a abrir el lector en el mismo punto
+        if (old.continuous != r.continuous) { ui.settings = r; recreate(); return }
         ui.settings = r
         ui.palette = paletteFor(r)
+        if (cont != null) {
+            if (old.brightness != r.brightness) applyBrightness(r.brightness)
+            if (old.veil != r.veil) applyVeil()
+            applyPaper(); applyMargins(); contRefresh()
+            return
+        }
         if (old.brightness != r.brightness) applyBrightness(r.brightness)
         if (old.veil != r.veil) applyVeil()
         if (old.mmLeft != r.mmLeft || old.mmRight != r.mmRight || old.mmTop != r.mmTop || old.mmBottom != r.mmBottom || old.scroll != r.scroll || old.respectCamera != r.respectCamera) {
@@ -973,6 +1139,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
     private fun refreshMarks() {
         ui.marks = Library.marks.value.filter { it.bookId == book.id }
+        cont?.setMarks(contMarks())
+        contLoc?.let { onLocator(it, turn = false) }
         navigator?.currentLocator?.value?.let { onLocator(it, turn = false) }
         lifecycleScope.launch { applyHighlights() }
     }
@@ -1035,8 +1203,12 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private val actions = ReaderActions(
         close = { finish() },
         toggleShiori = { toggleShiori() },
-        go = { navigator?.go(it, animated = false); setControls(false) },
-        goLink = { navigator?.go(it, animated = false); setControls(false) },
+        go = { if (cont != null) contGo(it) else { navigator?.go(it, animated = false); setControls(false) } },
+        goLink = { l ->
+            val c = cont
+            if (c != null) { c.goHref(ContinuousView.BASE + l.url().toString()); setControls(false) }
+            else { navigator?.go(l, animated = false); setControls(false) }
+        },
         settings = { updateSettings(it) },
         removeMark = { Library.removeMark(it.id); ui.activeMark = null; refreshMarks() },
         saveNote = { loc, note -> saveHighlight(loc, 1, note); ui.noteFor = null },
@@ -1059,8 +1231,9 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         setInks = { Prefs.setInks(it) },
         highlightWith = { c -> Prefs.lastInk = c },
         openInks = { ui.activeMark = null; ui.sheet = "inks" },
-        turn = { d -> navigator?.let { turn(it, d) } },
-        toggleStudy = {
+        turn = { d -> turn(navigator, d) },
+        toggleStudy = toggle@{
+            if (cont != null) { ui.say("Traducir tocando llega pronto al modo continuo"); return@toggle }
             ui.studyTap = !ui.studyTap; Prefs.studyTap = ui.studyTap
             ui.say(if (ui.studyTap) "Toca una palabra para traducirla" else "Modo estudio apagado")
             if (ui.studyTap) setControls(false)
@@ -1081,7 +1254,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     )
 
     private fun toggleShiori() {
-        val loc = navigator?.currentLocator?.value ?: return
+        val loc = navigator?.currentLocator?.value ?: contLoc ?: return
         val pos = loc.locations.position
         val existing = ui.marks.firstOrNull { it.type == "shiori" && pos != null && posOf(it) == pos }
         if (existing != null) {
@@ -1104,6 +1277,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val all = positions.flatten()
         if (all.isEmpty()) return
         val target = all[((all.size - 1) * f.coerceIn(0f, 1f)).toInt()]
+        if (cont != null) { contGo(target); return }
         navigator?.go(target, animated = false)
     }
 
@@ -1430,6 +1604,18 @@ private const val SCROLL_BY = """(function(){
   };
   if ('onscrollend' in window && '__S__' === 'smooth') window.addEventListener('scrollend', fix); else setTimeout(fix, 60);
   return 'ok';
+})()"""
+
+/** Al empezar a deslizar: se anota dónde estaba el texto. */
+private const val EDGE_START = """(function(){ var se = document.scrollingElement || document.documentElement; window.__zkSt = se.scrollTop; return 'ok'; })()"""
+
+/** Al soltar: "bottom" o "top" solo si el texto ya estaba en ese borde y no se movió con el gesto. */
+private const val EDGE_END = """(function(){
+  var se = document.scrollingElement || document.documentElement, h = window.innerHeight, max = se.scrollHeight - h;
+  var still = (typeof window.__zkSt !== 'number') || Math.abs(se.scrollTop - window.__zkSt) < 6;
+  if (!still) return 'moved';
+  var t = se.scrollTop <= 6, b = se.scrollTop >= max - 6;
+  return (t && b) ? 'top bottom' : t ? 'top' : b ? 'bottom' : 'none';
 })()"""
 
 /** Párrafos del capítulo que cuentan para alinear dos ediciones. */

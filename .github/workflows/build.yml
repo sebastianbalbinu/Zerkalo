@@ -129,7 +129,7 @@ jobs:
       - name: Renombrar capturas
         if: always()
         run: |
-          for f in shot1.png shot2.png shot3.png shot4.png logcat.txt metricas.txt; do [ -f "$f" ] && mv "$f" "api${{ matrix.api }}-$f"; done; ls
+          for f in shot1.png shot2.png shot3.png shot4.png shot5.png logcat.txt metricas.txt; do [ -f "$f" ] && mv "$f" "api${{ matrix.api }}-$f"; done; ls
 
       - name: Publicar capturas de la prueba
         if: always()
@@ -145,6 +145,7 @@ jobs:
             api${{ matrix.api }}-shot2.png
             api${{ matrix.api }}-shot3.png
             api${{ matrix.api }}-shot4.png
+            api${{ matrix.api }}-shot5.png
             api${{ matrix.api }}-logcat.txt
             api${{ matrix.api }}-metricas.txt
 

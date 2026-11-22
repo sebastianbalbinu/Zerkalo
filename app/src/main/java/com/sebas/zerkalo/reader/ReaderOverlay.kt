@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -130,19 +131,6 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
         // Cinta del shiori en la esquina, como un marcapáginas de tela.
         AnimatedVisibility(ui.bookmarked, Modifier.align(Alignment.TopEnd).padding(end = 28.dp), enter = slideInVertically { -it }, exit = slideOutVertically { -it }) {
             Box(Modifier.size(14.dp, 54.dp).background(p.accent))
-        }
-
-        // Desplazamiento: el texto se difumina hacia el papel arriba y abajo (nunca una línea cortada en seco)
-        if (ui.settings.scroll && (ui.fadeTop > 0f || ui.fadeBottom > 0f)) {
-            val tail = 14f
-            Box(
-                Modifier.align(Alignment.TopCenter).fillMaxWidth().height((ui.fadeTop + tail).dp)
-                    .background(Brush.verticalGradient(0f to p.bg, (ui.fadeTop / (ui.fadeTop + tail)) * 0.55f to p.bg.copy(alpha = 0.92f), 1f to p.bg.copy(alpha = 0f))),
-            )
-            Box(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().height((ui.fadeBottom + tail).dp)
-                    .background(Brush.verticalGradient(0f to p.bg.copy(alpha = 0f), (tail / (ui.fadeBottom + tail)) to p.bg.copy(alpha = 0.92f), 1f to p.bg)),
-            )
         }
 
         // Hora y avance junto a la cámara, en la franja de arriba (así el texto llega hasta abajo)
@@ -780,6 +768,7 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                     }
                     ZSwitch(s.justify) { act.settings(s.copy(justify = it)) }
                 }
+                InkPicker(ui, act)
                 Label("Espacio entre párrafos")
                 Segmented(listOf("Como el libro", "Separados", "Aireados"), s.paragraph, { act.settings(s.copy(paragraph = it)) })
                 Label("Espacio entre letras", "más amplio ayuda con la dislexia")
@@ -832,7 +821,18 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                     style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp),
                 )
                 Label("Pasar página")
-                Segmented(listOf("Páginas", "Desplazamiento"), if (s.scroll) 1 else 0, { act.settings(s.copy(scroll = it == 1)) })
+                Segmented(
+                    listOf("Páginas", "Desplazamiento", "Continuo"), if (s.continuous) 2 else if (s.scroll) 1 else 0,
+                    { act.settings(s.copy(scroll = it >= 1, continuous = it == 2)) },
+                )
+                Text(
+                    when {
+                        s.continuous -> "Todo el libro seguido, como en Books: bajas y encuentras todo. Por ahora, traducir tocando, dos idiomas y subrayar nuevo funcionan en Páginas y Desplazamiento."
+                        s.scroll -> "Capítulo por capítulo; al final del capítulo, sigue deslizando."
+                        else -> "Como un libro de papel: una página a la vez."
+                    },
+                    style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp),
+                )
                 SwitchRow("Animación al pasar página", "Apágala si prefieres un cambio instantáneo", s.animate) { act.settings(ui.settings.copy(animate = it)) }
                 SwitchRow("Hora y avance junto a la cámara", "Se ven arriba mientras lees", s.info) { act.settings(ui.settings.copy(info = it)) }
             }
@@ -1012,41 +1012,55 @@ private fun LightSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                 ) { Text(name, style = Type.ui, color = if (on) p.bg else p.text) }
             }
         }
-        if (ui.palette.isDark) {
-            Label("Color de la letra")
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(InkNames.size) { i ->
-                    val c = when (i) { 0 -> null; 5 -> Color(s.customInk); else -> Color(InkColors[i]) }
-                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(64.dp).clickable { act.settings(s.copy(ink = i)) }) {
-                        Box(
-                            Modifier.size(44.dp).clip(CircleShape).background(p.bg)
-                                .then(if (i == s.ink) Modifier.background(p.accent.copy(alpha = 0.25f)) else Modifier),
-                            contentAlignment = Alignment.Center,
-                        ) { Text("Aa", fontFamily = Fonts.literata, fontSize = 17.sp, color = c ?: originalInk(s)) }
-                        Text(InkNames[i], style = Type.uiSmall.copy(fontSize = 11.sp), color = if (i == s.ink) p.accent else p.text2, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
-                    }
-                }
-            }
-            if (s.ink == 5) {
-                // Color propio: tono y claridad; la saturación se mantiene suave para no cansar la vista.
-                val hsv = remember(s.customInk) { FloatArray(3).also { android.graphics.Color.colorToHSV(s.customInk, it) } }
-                var hue by remember { mutableFloatStateOf(hsv[0]) }
-                var light by remember { mutableFloatStateOf(hsv[2]) }
-                fun push() = act.settings(ui.settings.copy(customInk = android.graphics.Color.HSVToColor(floatArrayOf(hue, 0.22f, light))))
-                Label("Tono")
-                Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(Brush.horizontalGradient((0..6).map { Color.hsv(it * 60f, 0.35f, 0.9f) })))
-                ZSlider(value = hue, onChange = { hue = it }, onFinished = { push() }, range = 0f..359f)
-                Label("Claridad")
-                ZSlider(value = light, onChange = { light = it }, onFinished = { push() }, range = 0.55f..1f)
-            }
-        }
     }
 }
 
-private fun originalInk(s: com.sebas.zerkalo.data.ReaderSettings): Color = when (s.paper) {
-    2 -> Color(0xFFE9CDA4)
-    4 -> Color(0xFFDAD6CF)
+private fun originalInk(s: com.sebas.zerkalo.data.ReaderSettings, dark: Boolean): Color = when {
+    !dark && s.paper == 3 -> Color(0xFF3B2A1A)
+    !dark -> Color(0xFF2E231D)
+    s.paper == 2 -> Color(0xFFE9CDA4)
+    s.paper == 4 -> Color(0xFFDAD6CF)
     else -> Color(0xFFF0E6D4)
+}
+
+/** Color de la letra, en todos los papeles (claras para papel oscuro, oscuras para papel claro). */
+@Composable
+private fun InkPicker(ui: ReaderUi, act: ReaderActions) {
+    val p = LocalPalette.current
+    val s = ui.settings
+    val dark = ui.palette.isDark
+    val names = if (dark) InkNames else InkNamesLight
+    val colors = if (dark) InkColors else InkColorsLight
+    val custom = if (dark) s.customInk else s.customInkLight
+    Label("Color de la letra", if (dark) "para papel oscuro" else "para papel claro")
+    LazyRow(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        items(names.size) { i ->
+            val c = when (i) { 0 -> null; 5 -> Color(custom); else -> Color(colors[i]) }
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.width(64.dp).clickable { act.settings(ui.settings.copy(ink = i)) }) {
+                Box(
+                    Modifier.size(44.dp).clip(CircleShape).background(ui.palette.bg)
+                        .then(if (i == s.ink) Modifier.border(2.dp, p.accent, CircleShape) else Modifier),
+                    contentAlignment = Alignment.Center,
+                ) { Text("Aa", fontFamily = Fonts.literata, fontSize = 17.sp, color = c ?: originalInk(s, dark)) }
+                Text(names[i], style = Type.uiSmall.copy(fontSize = 11.sp), color = if (i == s.ink) p.accent else p.text2, maxLines = 1, modifier = Modifier.padding(top = 4.dp))
+            }
+        }
+    }
+    if (s.ink == 5) {
+        // Color propio: tono y claridad; la saturación se mantiene suave para no cansar la vista.
+        val hsv = remember(custom, dark) { FloatArray(3).also { android.graphics.Color.colorToHSV(custom, it) } }
+        var hue by remember(dark) { mutableFloatStateOf(hsv[0]) }
+        var light by remember(dark) { mutableFloatStateOf(hsv[2]) }
+        fun push() {
+            val argb = android.graphics.Color.HSVToColor(floatArrayOf(hue, if (dark) 0.22f else 0.4f, light))
+            act.settings(if (dark) ui.settings.copy(customInk = argb) else ui.settings.copy(customInkLight = argb))
+        }
+        Label("Tono")
+        Box(Modifier.fillMaxWidth().height(10.dp).clip(RoundedCornerShape(5.dp)).background(Brush.horizontalGradient((0..6).map { Color.hsv(it * 60f, 0.35f, 0.9f) })))
+        ZSlider(value = hue, onChange = { hue = it }, onFinished = { push() }, range = 0f..359f)
+        Label("Claridad")
+        ZSlider(value = light, onChange = { light = it }, onFinished = { push() }, range = if (dark) 0.55f..1f else 0.12f..0.45f)
+    }
 }
 
 @Composable

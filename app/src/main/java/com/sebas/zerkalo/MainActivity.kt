@@ -65,6 +65,7 @@ class MainActivity : ComponentActivity() {
     /** EPUB abierto o compartido desde otra app (WhatsApp, Drive, Archivos…). */
     private fun handleIntent(intent: Intent?) {
         intent ?: return
+        AppEvents.testContinuous = intent.getBooleanExtra("zerkalo.continuo", false)
         intent.getStringExtra("zerkalo.abrir")?.let { AppEvents.openBook.value = it; intent.removeExtra("zerkalo.abrir") }
         if (intent.hasExtra("zerkalo.tab")) { AppEvents.tab.value = intent.getIntExtra("zerkalo.tab", 0); intent.removeExtra("zerkalo.tab") }
         val uri: Uri? = when (intent.action) {
