@@ -104,6 +104,7 @@ data class Lookup(
     val status: String? = null,
     val error: String? = null,
     val saved: Boolean = false,
+    val carded: Boolean = false, // ya se hizo tarjeta con esta palabra
     val locator: String = "",
 )
 
@@ -124,6 +125,8 @@ class ReaderUi {
     var activeMark by mutableStateOf<Mark?>(null)
     var noteFor by mutableStateOf<Locator?>(null)
     var finishedNow by mutableStateOf(false)
+    var finishedStamp by mutableStateOf<com.sebas.zerkalo.data.Stamps.BookStamp?>(null) // el sello del libro recién terminado
+    var cardDraft by mutableStateOf<CardDraft?>(null) // tarjeta que se está haciendo
     var sheet by mutableStateOf<String?>(null) // "toc" | "type"
     var toast by mutableStateOf<Pair<String, Long>?>(null)
     var studyTap by mutableStateOf(false)
@@ -921,6 +924,11 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         if (turn && pos != null && last != null && pos >= last && !book.finished && Library.book(book.id)?.finished != true) {
             Library.update(book.id) { it.copy(finishedAt = now, progress = 1.0) }
             ui.finishedNow = true
+            // Su sello: se decide ahora (con la portada que tiene) si sale de cera
+            lifecycleScope.launch {
+                com.sebas.zerkalo.data.Stamps.settle(Library.books.value)
+                ui.finishedStamp = com.sebas.zerkalo.data.Stamps.bookStamps(Library.books.value).lastOrNull { it.book.id == book.id }
+            }
         }
     }
 
@@ -1170,7 +1178,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             menu.add(Menu.NONE, 101, 0, "Subrayar")
             menu.add(Menu.NONE, 102, 1, "Nota")
             menu.add(Menu.NONE, 104, 2, "Traducir")
-            menu.add(Menu.NONE, 103, 3, "Copiar")
+            menu.add(Menu.NONE, 105, 3, "Tarjeta")
+            menu.add(Menu.NONE, 103, 4, "Copiar")
             return true
         }
         override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
@@ -1186,6 +1195,13 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                     nav.clearSelection()
                     val t = sel.locator.text.highlight?.trim().orEmpty()
                     if (t.isNotEmpty()) startLookup(t, sel.locator.text.before.orEmpty().takeLast(160) + t + sel.locator.text.after.orEmpty().take(160), lang, sel.locator.toJSON().toString())
+                }
+                105 -> lifecycleScope.launch {
+                    val nav = listOfNotNull(navigator, pairNav).firstOrNull { it.currentSelection() != null } ?: return@launch
+                    val sel = nav.currentSelection() ?: return@launch
+                    nav.clearSelection()
+                    val t = sel.locator.text.highlight?.trim().orEmpty()
+                    if (t.isNotEmpty()) ui.cardDraft = CardDraft(t, sel.locator.toJSON().toString(), null)
                 }
                 103 -> lifecycleScope.launch {
                     val t = navigator?.currentSelection()?.locator?.text?.highlight.orEmpty()
@@ -1242,6 +1258,9 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         retarget = { to -> Prefs.translateTo = to; ui.lookup?.let { startLookup(it.text, it.sentence, it.from, it.locator) } },
         translateSentence = { translateSentence() },
         saveWord = { saveWord() },
+        wordCard = { wordCard() },
+        saveCard = { d, f, b, k -> saveCard(d, f, b, k) },
+        cardFromMark = { m -> ui.activeMark = null; ui.cardDraft = CardDraft(m.text, m.locator, m.id) },
         speak = { t, lang -> speak(t, lang) },
         pairCandidates = { Library.books.value.filter { it.id != book.id }.sortedWith(compareByDescending<Book> { it.author.isNotBlank() && it.author == book.author }.thenByDescending { it.lang.isNotBlank() && it.lang != book.lang }.thenByDescending { it.lastOpened }) },
         setPair = { other -> setPair(other) },
@@ -1315,6 +1334,47 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             val t = runCatching { Traductor.translate(l.sentence, l.from, l.to) }.getOrElse { "No se pudo traducir la frase." }
             ui.lookup = ui.lookup?.copy(sentenceTranslation = t)
         }
+    }
+
+    /**
+     * Guarda una tarjeta hecha al subrayar: el pasaje queda subrayado (si no lo estaba) y la tarjeta
+     * apunta a ese subrayado. Solo se hace tarjeta cuando la persona lo pide.
+     */
+    private fun saveCard(d: CardDraft, front: String, back: String, kind: String) {
+        val markId = d.markId ?: run {
+            val loc = runCatching { Locator.fromJSON(JSONObject(d.locator)) }.getOrNull()
+            val m = Mark(
+                id = "h" + System.currentTimeMillis().toString(36), bookId = book.id, type = "hl", locator = d.locator,
+                text = d.text, color = Prefs.lastInk, chapter = ui.chapter,
+                progress = loc?.locations?.totalProgression ?: ui.progress.toDouble(),
+            )
+            Library.putMark(m); refreshMarks(); m.id
+        }
+        com.sebas.zerkalo.data.Cards.add(
+            com.sebas.zerkalo.data.Card(
+                id = "c" + System.currentTimeMillis().toString(36), bookId = book.id, markId = markId, kind = kind,
+                front = front, back = back,
+            ),
+        )
+        ui.cardDraft = null
+        ui.say("Tarjeta guardada: la verás en Estudio")
+    }
+
+    /** Tarjeta de una palabra traducida: la palabra en su frase por delante, la traducción por detrás. */
+    private fun wordCard() {
+        val l = ui.lookup ?: return
+        val tr = l.translation ?: return
+        if (!l.saved) saveWord()
+        val mark = Library.marks.value.lastOrNull { it.bookId == book.id && it.type == "word" && it.text == l.text }
+        if (mark != null && com.sebas.zerkalo.data.Cards.hasFor(mark.id)) { ui.say("Esa palabra ya tiene tarjeta"); return }
+        com.sebas.zerkalo.data.Cards.add(
+            com.sebas.zerkalo.data.Card(
+                id = "c" + System.currentTimeMillis().toString(36), bookId = book.id, markId = mark?.id, kind = "word",
+                front = l.text, back = tr, context = l.sentence,
+            ),
+        )
+        ui.lookup = ui.lookup?.copy(saved = true, carded = true)
+        ui.say("Tarjeta guardada: la verás en Estudio")
     }
 
     private fun saveWord() {
@@ -1511,6 +1571,9 @@ class ReaderActions(
     val retarget: (String) -> Unit,
     val translateSentence: () -> Unit,
     val saveWord: () -> Unit,
+    val wordCard: () -> Unit,
+    val saveCard: (CardDraft, String, String, String) -> Unit,
+    val cardFromMark: (Mark) -> Unit,
     val speak: (String, String) -> Unit,
     val pairCandidates: () -> List<Book>,
     val setPair: (Book?) -> Unit,
@@ -1605,6 +1668,9 @@ private const val SCROLL_BY = """(function(){
   if ('onscrollend' in window && '__S__' === 'smooth') window.addEventListener('scrollend', fix); else setTimeout(fix, 60);
   return 'ok';
 })()"""
+
+/** Una tarjeta a medio hacer: el texto subrayado, su ubicación y el subrayado si ya existía. */
+data class CardDraft(val text: String, val locator: String, val markId: String?)
 
 /** Al empezar a deslizar: se anota dónde estaba el texto. */
 private const val EDGE_START = """(function(){ var se = document.scrollingElement || document.documentElement; window.__zkSt = se.scrollTop; return 'ok'; })()"""

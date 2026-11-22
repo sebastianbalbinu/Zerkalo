@@ -88,12 +88,13 @@ fun NotasScreen(haze: HazeState) {
             item(key = "head") {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.Bottom) {
                     Column(Modifier.weight(1f)) {
-                        Caption("Subrayados, palabras y resúmenes")
-                        Text("Notas", style = Type.display, color = p.text, modifier = Modifier.padding(top = 4.dp))
+                        Caption("Tarjetas, subrayados y palabras")
+                        Text("Estudio", style = Type.display, color = p.text, modifier = Modifier.padding(top = 4.dp))
                     }
                     CircleButton("gear", { a.open(Screen.Settings) })
                 }
             }
+            item(key = "repaso") { StudyBox(Modifier.padding(start = 16.dp, end = 16.dp, top = 18.dp)) }
             item(key = "stats") {
                 Row(Modifier.padding(start = 16.dp, end = 16.dp, top = 18.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                     Stat("Esta semana", if (week < 60) "$week min" else "${week / 60} h ${week % 60}", Modifier.weight(1f))
@@ -129,19 +130,21 @@ fun NotasScreen(haze: HazeState) {
             }
 
             if (done.isNotEmpty() && query.isBlank()) {
-                item(key = "done-t") { SectionTitle("Terminados", "un sello por libro", modifier = Modifier.padding(top = 30.dp)) }
+                item(key = "done-t") { SectionTitle("Terminados", "su sello está en Sellos", modifier = Modifier.padding(top = 30.dp)) }
                 item(key = "done") {
+                    val stamps = remember(books) { com.sebas.zerkalo.data.Stamps.bookStamps(books).reversed() }
                     LazyRow(contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-                        items(done, key = { it.id }) { b ->
-                            Column(Modifier.width(96.dp).clickable { a.open(Screen.BookDetail(b.id)) }, horizontalAlignment = Alignment.CenterHorizontally) {
-                                Seal(b.title.take(38), 84.dp, listOf(-4f, 3f, -2f, 4f, -3f)[(b.id.hashCode() and 0xff) % 5], fontSize = if (b.title.length > 22) 10.5f else if (b.title.length > 12) 11.5f else 13.5f)
+                        items(stamps, key = { it.book.id }) { s ->
+                            Column(Modifier.width(96.dp).clickable { a.goTab(4) }, horizontalAlignment = Alignment.CenterHorizontally) {
+                                Hanko(s.kanji, 76.dp, ink = s.ink, wax = s.wax, tilt = listOf(-4f, 3f, -2f, 4f, -3f)[(s.book.id.hashCode() and 0xff) % 5], seed = s.book.id.hashCode())
+                                Text(s.book.title, style = Type.uiSmall.copy(fontSize = 11.sp), color = p.text2, maxLines = 2, overflow = TextOverflow.Ellipsis, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp))
                             }
                         }
                     }
                 }
             }
         }
-        CollapsingTop("Notas", ScrollMemory.notas, Modifier.align(Alignment.TopCenter))
+        CollapsingTop("Estudio", ScrollMemory.notas, Modifier.align(Alignment.TopCenter))
         ProgressiveEdge(haze, top = false, height = 150.dp, modifier = Modifier.align(Alignment.BottomCenter))
     }
 

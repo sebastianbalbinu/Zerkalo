@@ -82,6 +82,9 @@ sealed class Screen {
     data object Settings : Screen()
     data class Catalog(val url: String, val name: String) : Screen()
     data class Shelf(val lang: String, val kind: String, val value: String, val title: String) : Screen()
+    /** Repaso de tarjetas: [practice] = práctica libre (no cambia fechas); [introOnly] = solo la explicación. */
+    data class Review(val practice: Boolean = false, val introOnly: Boolean = false) : Screen()
+    data object CardList : Screen()
 }
 
 /** Acciones que cualquier pantalla puede pedir. */
@@ -115,7 +118,7 @@ fun openReader(ctx: Context, book: Book) {
     ctx.startActivity(Intent(ctx, ReaderActivity::class.java).putExtra("id", book.id).putExtra("continuo", AppEvents.testContinuous))
 }
 
-private val TABS = listOf("home" to "Biblioteca", "tansu" to "Tansu", "escuchar" to "Escuchar", "notas" to "Notas")
+private val TABS = listOf("home" to "Biblioteca", "tansu" to "Tansu", "escuchar" to "Escuchar", "notas" to "Estudio", "sellos" to "Sellos")
 
 @Composable
 fun ZerkaloRoot(onReady: () -> Unit) {
@@ -209,7 +212,8 @@ fun ZerkaloRoot(onReady: () -> Unit) {
                     0 -> LibraryScreen(haze, onReady)
                     1 -> TansuScreen(haze)
                     2 -> EscucharScreen(haze)
-                    else -> NotasScreen(haze)
+                    3 -> NotasScreen(haze)
+                    else -> SellosScreen(haze)
                 }
             }
             // Reproductor pequeño mientras suena un audiolibro
@@ -233,6 +237,8 @@ fun ZerkaloRoot(onReady: () -> Unit) {
                                 Screen.Settings -> SettingsScreen()
                                 is Screen.Catalog -> CatalogScreen(s.url, s.name)
                                 is Screen.Shelf -> ShelfScreen(s.lang, s.kind, s.value, s.title)
+                                is Screen.Review -> ReviewScreen(s.practice, s.introOnly)
+                                Screen.CardList -> CardListScreen()
                             }
                         }
                     }
