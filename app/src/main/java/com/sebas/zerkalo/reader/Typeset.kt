@@ -19,7 +19,7 @@ import com.sebas.zerkalo.data.ReaderSettings
  * cambian los ajustes, sin tocar el texto (los subrayados guardados siguen en su sitio).
  */
 /** Desplazamiento: espacio dentro de la página arriba y abajo (px de CSS) y el color del papel para el desenfoque. */
-data class PagePad(val top: Float = 0f, val bottom: Float = 0f, val paper: Int = 0)
+data class PagePad(val top: Float = 0f, val bottom: Float = 0f, val paper: Int = 0, val left: Float = 0f, val right: Float = 0f)
 
 object Typeset {
     fun script(r: ReaderSettings, lang: String, pad: PagePad = PagePad(), nonce: Long = 0): String {
@@ -27,7 +27,7 @@ object Typeset {
         val c = pad.paper
         val rgb = "${(c shr 16) and 255},${(c shr 8) and 255},${c and 255}"
         val opts = """{"mode":${r.layout},"justify":$justify,"lang":"${lang.replace("\"", "")}","scroll":${r.scroll},""" +
-            """"padTop":${pad.top},"padBottom":${pad.bottom},"paper":"$rgb","n":$nonce}"""
+            """"padTop":${pad.top},"padBottom":${pad.bottom},"padLeft":${pad.left},"padRight":${pad.right},"paper":"$rgb","n":$nonce}"""
         return JS.replace("__OPTS__", opts)
     }
 
@@ -104,6 +104,10 @@ window.__zkRun = function(){
   if (O.scroll) {
     edge = 'body::before{content:"" !important;display:block !important;height:' + O.padTop + 'px !important}' +
       'body::after{content:"" !important;display:block !important;height:' + (O.padBottom + 28) + 'px !important}';
+  }
+  // Los márgenes de los lados van dentro de la página: así el desenfoque llega de borde a borde
+  if (O.scroll && (O.padLeft > 0 || O.padRight > 0)) {
+    set(b, 'padding-left', O.padLeft + 'px'); set(b, 'padding-right', O.padRight + 'px'); set(b, 'box-sizing', 'border-box');
   }
   window.__zkEdges(O.scroll ? O.padTop + 10 : 0, O.scroll ? O.padBottom + 18 : 0, O.paper);
   if (O.mode === 3) { st.textContent = edge; return 'ninguna'; }
