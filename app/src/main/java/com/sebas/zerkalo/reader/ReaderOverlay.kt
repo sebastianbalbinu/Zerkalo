@@ -132,6 +132,19 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
             Box(Modifier.size(14.dp, 54.dp).background(p.accent))
         }
 
+        // Desplazamiento: el texto se difumina hacia el papel arriba y abajo (nunca una línea cortada en seco)
+        if (ui.settings.scroll && (ui.fadeTop > 0f || ui.fadeBottom > 0f)) {
+            val tail = 14f
+            Box(
+                Modifier.align(Alignment.TopCenter).fillMaxWidth().height((ui.fadeTop + tail).dp)
+                    .background(Brush.verticalGradient(0f to p.bg, (ui.fadeTop / (ui.fadeTop + tail)) * 0.55f to p.bg.copy(alpha = 0.92f), 1f to p.bg.copy(alpha = 0f))),
+            )
+            Box(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().height((ui.fadeBottom + tail).dp)
+                    .background(Brush.verticalGradient(0f to p.bg.copy(alpha = 0f), (tail / (ui.fadeBottom + tail)) to p.bg.copy(alpha = 0.92f), 1f to p.bg)),
+            )
+        }
+
         // Hora y avance junto a la cámara, en la franja de arriba (así el texto llega hasta abajo)
         AnimatedVisibility(!ui.controls && ui.settings.info, Modifier.align(Alignment.TopCenter), enter = fadeIn(tween(400)), exit = fadeOut(tween(150))) {
             val info = Type.uiSmall.copy(fontSize = 11.sp)
@@ -809,8 +822,13 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                 MmRow("Derecha", s.mmRight) { act.settings(ui.settings.copy(mmRight = it)) }
                 MmRow("Arriba", s.mmTop) { act.settings(ui.settings.copy(mmTop = it)) }
                 MmRow("Abajo", s.mmBottom) { act.settings(ui.settings.copy(mmBottom = it)) }
+                SwitchRow(
+                    "Respetar la cámara",
+                    if (s.respectCamera) "El margen de arriba empieza debajo de la cámara" else "El texto sube hasta el borde de la pantalla; la hora queda encima",
+                    s.respectCamera,
+                ) { act.settings(ui.settings.copy(respectCamera = it)) }
                 Text(
-                    "Arriba se cuenta desde la franja de la cámara (donde van la hora y el avance). En desplazamiento, el texto pasa por debajo con un desenfoque suave.",
+                    "En desplazamiento, el margen de arriba y el de abajo son la zona donde el texto se difumina al pasar.",
                     style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp),
                 )
                 Label("Pasar página")
