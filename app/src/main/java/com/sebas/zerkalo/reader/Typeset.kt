@@ -68,13 +68,14 @@ window.__zkRun = function(){
   // Desplazamiento: el texto usa toda la pantalla y se desenfoca suave hacia arriba y hacia abajo (como en Books)
   var edge = '';
   if (O.scroll) {
-    edge = 'body{padding-top:' + O.padTop + 'px !important;padding-bottom:' + Math.max(O.padBottom, 8) + 'px !important}' +
-      '.zk-edge{position:fixed;left:0;right:0;z-index:2147483646;pointer-events:none;-webkit-backdrop-filter:blur(5px);backdrop-filter:blur(5px)}' +
-      '#zk-top{top:0;height:' + O.padTop + 'px;background:linear-gradient(rgba(' + O.paper + ',1) 35%,rgba(' + O.paper + ',0));' +
-      '-webkit-mask-image:linear-gradient(#000 30%,transparent);mask-image:linear-gradient(#000 30%,transparent)}' +
-      '#zk-bot{bottom:0;height:' + Math.max(O.padBottom, 8) * 1.6 + 'px;background:linear-gradient(rgba(' + O.paper + ',0),rgba(' + O.paper + ',1) 75%);' +
-      '-webkit-mask-image:linear-gradient(transparent,#000 70%);mask-image:linear-gradient(transparent,#000 70%)}';
-    ['zk-top', 'zk-bot'].forEach(function(id){ if (!d.getElementById(id)) { var x = d.createElement('div'); x.id = id; x.className = 'zk-edge'; b.appendChild(x); } });
+    // El difuminado hacia el color del papel lo pone la app encima; aquí va el desenfoque (si el teléfono lo permite)
+    var tH = O.padTop + 14, bH = O.padBottom + 14;
+    edge = 'body{padding-top:' + O.padTop + 'px !important;padding-bottom:' + (O.padBottom + 24) + 'px !important}' +
+      '#zk-top,#zk-bot{position:fixed !important;left:0 !important;right:0 !important;z-index:2147483646 !important;pointer-events:none !important;' +
+      'background:transparent !important;-webkit-backdrop-filter:blur(6px) !important;backdrop-filter:blur(6px) !important;display:block !important}' +
+      '#zk-top{top:0 !important;height:' + tH + 'px !important;-webkit-mask-image:linear-gradient(#000 45%,transparent) !important;mask-image:linear-gradient(#000 45%,transparent) !important}' +
+      '#zk-bot{bottom:0 !important;height:' + bH + 'px !important;-webkit-mask-image:linear-gradient(transparent,#000 55%) !important;mask-image:linear-gradient(transparent,#000 55%) !important}';
+    ['zk-top', 'zk-bot'].forEach(function(id){ if (!d.getElementById(id)) { var x = d.createElement('div'); x.id = id; x.setAttribute('aria-hidden', 'true'); d.documentElement.appendChild(x); } });
   } else {
     ['zk-top', 'zk-bot'].forEach(function(id){ var x = d.getElementById(id); if (x) x.remove(); });
   }

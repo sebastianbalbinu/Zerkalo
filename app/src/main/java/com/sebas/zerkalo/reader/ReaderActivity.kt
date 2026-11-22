@@ -135,7 +135,8 @@ class ReaderUi {
     var camX by mutableFloatStateOf(0.5f)   // centro de la cámara (0 izquierda, 1 derecha)
     var camHalf by mutableFloatStateOf(0f)  // medio ancho de la cámara, en dp
     var typeTab by mutableIntStateOf(0)     // pestaña abierta en las opciones de lectura
-    var chapterFade by mutableStateOf(false) // papel encima mientras el capítulo nuevo se acomoda
+    var fadeTop by mutableFloatStateOf(0f)    // desplazamiento: alto (dp) de la zona difuminada de arriba
+    var fadeBottom by mutableFloatStateOf(0f) // y de abajo
     var pairSwap by mutableStateOf(false)       // la pareja va arriba (o a la izquierda)
     var pairRatio by mutableIntStateOf(50)      // % de la pantalla para el libro principal
     var lang by mutableStateOf("")
@@ -282,14 +283,17 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val ydpi = dm.ydpi.takeIf { it in 100f..900f } ?: dm.densityDpi.toFloat()
         fun mmX(v: Float) = (v * xdpi / 25.4f).toInt()
         fun mmY(v: Float) = (v * ydpi / 25.4f).toInt()
+        val cam = if (r.respectCamera) i.top else 0
         if (r.scroll) {
-            // Desplazamiento: el texto usa toda la pantalla y se desenfoca hacia los bordes (el margen va dentro de la página)
+            // Desplazamiento: el texto usa toda la pantalla; arriba y abajo, la zona del margen se difumina
             panes.setPadding(i.left + mmX(r.mmLeft), 0, i.right + mmX(r.mmRight), 0)
-            scrollPadTop = (i.top + mmY(r.mmTop)) / dm.density
+            scrollPadTop = (cam + mmY(r.mmTop)) / dm.density
             scrollPadBottom = mmY(r.mmBottom) / dm.density
+            ui.fadeTop = scrollPadTop; ui.fadeBottom = scrollPadBottom
         } else {
-            panes.setPadding(i.left + mmX(r.mmLeft), i.top + mmY(r.mmTop), i.right + mmX(r.mmRight), mmY(r.mmBottom))
+            panes.setPadding(i.left + mmX(r.mmLeft), cam + mmY(r.mmTop), i.right + mmX(r.mmRight), mmY(r.mmBottom))
             scrollPadTop = 0f; scrollPadBottom = 0f
+            ui.fadeTop = 0f; ui.fadeBottom = 0f
         }
         // Dónde está la cámara, para poner la hora a un lado y el avance al otro
         ui.band = i.top / dm.density
@@ -694,7 +698,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         lifecycleScope.launch {
             // Lo que se lee con claridad está entre el desenfoque de arriba y el de abajo
             val pt = scrollPadTop
-            val pb = maxOf(scrollPadBottom, 8f) * 1.6f
+            val pb = scrollPadBottom + 10f
             val js = SCROLL_BY.replace("__D__", dir.toString()).replace("__S__", if (ui.settings.animate) "smooth" else "auto")
                 .replace("__PT__", pt.toString()).replace("__PB__", pb.toString())
             val r = runCatching { nav.evaluateJavascript(js) }.getOrNull().orEmpty()
@@ -927,9 +931,9 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         ui.palette = paletteFor(r)
         if (old.brightness != r.brightness) applyBrightness(r.brightness)
         if (old.veil != r.veil) applyVeil()
-        if (old.mmLeft != r.mmLeft || old.mmRight != r.mmRight || old.mmTop != r.mmTop || old.mmBottom != r.mmBottom || old.scroll != r.scroll) {
+        if (old.mmLeft != r.mmLeft || old.mmRight != r.mmRight || old.mmTop != r.mmTop || old.mmBottom != r.mmBottom || old.scroll != r.scroll || old.respectCamera != r.respectCamera) {
             applyMargins()
-            if (old.copy(mmLeft = r.mmLeft, mmRight = r.mmRight, mmTop = r.mmTop, mmBottom = r.mmBottom) == r) {
+            if (old.copy(mmLeft = r.mmLeft, mmRight = r.mmRight, mmTop = r.mmTop, mmBottom = r.mmBottom, respectCamera = r.respectCamera) == r) {
                 // Solo cambiaron los márgenes: basta con volver a diagramar (para el espacio y el desenfoque del desplazamiento)
                 lifecycleScope.launch { delay(120); navigator?.let { typeset(it, force = true) }; pairNav?.let { typeset(it, force = true) } }
                 return
@@ -940,7 +944,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         if (old.copy(
                 brightness = r.brightness, veil = r.veil, ruler = r.ruler, haptic = r.haptic, volumeKeys = r.volumeKeys, breaks = r.breaks, animate = r.animate,
                 fullscreen = r.fullscreen, vMargin = r.vMargin, autoSpeed = r.autoSpeed, autoPage = r.autoPage, info = r.info,
-                mmLeft = r.mmLeft, mmRight = r.mmRight, mmTop = r.mmTop, mmBottom = r.mmBottom,
+                mmLeft = r.mmLeft, mmRight = r.mmRight, mmTop = r.mmTop, mmBottom = r.mmBottom, respectCamera = r.respectCamera,
             ) == r
         ) return
         applyPaper()
