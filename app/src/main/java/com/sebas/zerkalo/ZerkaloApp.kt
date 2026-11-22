@@ -19,6 +19,8 @@ class ZerkaloApp : Application(), ImageLoaderFactory {
         Prefs.init(this)
         Library.init(this)
         runCatching { Library.dedupe() }.onSuccess { if (it > 0) android.util.Log.i("Zerkalo", "Repetidos quitados: $it") }
+        com.sebas.zerkalo.data.Cards.init(this)
+        com.sebas.zerkalo.data.Stamps.init(this)
         Catalogs.init(this)
         com.sebas.zerkalo.data.AudioStore.init(this)
         com.sebas.zerkalo.data.Explore.init(this)

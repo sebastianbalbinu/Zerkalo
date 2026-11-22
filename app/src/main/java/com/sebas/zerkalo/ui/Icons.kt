@@ -59,6 +59,7 @@ object Ic {
         "speaker" to "M4 9.5h3.5L12 5.5v13l-4.5-4H4zM15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11",
         "swap" to "M7 4.5L4 7.5l3 3M4 7.5h12.5M17 13.5l3 3-3 3M20 16.5H7.5",
         "notas" to rr(4.5f, 3.5f, 15f, 17f, 2f) + "M8.5 8.5h7M8.5 12h7M8.5 15.5h4",
+        "sellos" to rr(5f, 12.5f, 14f, 6.5f, 1.5f) + "M9.5 12.5V9a2.5 2.5 0 0 1 5 0v3.5M3.5 21h17",
     )
 
     private val cache = HashMap<String, ImageVector>()

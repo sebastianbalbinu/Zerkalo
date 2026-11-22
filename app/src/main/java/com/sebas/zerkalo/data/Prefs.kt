@@ -131,6 +131,16 @@ object Prefs {
         set(v) { sp.edit().putString("trTo", v).apply() }
 
     /** Tocar una palabra la traduce. */
+    /** Ya vio la explicación de las tarjetas (la primera vez que repasa). */
+    var cardsIntroSeen: Boolean
+        get() = sp.getBoolean("cardsIntro", false)
+        set(v) { sp.edit().putBoolean("cardsIntro", v).apply() }
+
+    /** Marcó "No volver a mostrar" en la primera hoja del libro de sellos. */
+    var stampsIntroHidden: Boolean
+        get() = sp.getBoolean("stampsIntroHidden", false)
+        set(v) { sp.edit().putBoolean("stampsIntroHidden", v).apply() }
+
     var studyTap: Boolean
         get() = sp.getBoolean("studyTap", false)
         set(v) { sp.edit().putBoolean("studyTap", v).apply() }

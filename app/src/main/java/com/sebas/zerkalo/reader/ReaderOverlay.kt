@@ -297,7 +297,8 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
     }
     ui.activeMark?.let { MarkSheet(it, act) { ui.activeMark = null } }
     ui.noteFor?.let { NoteSheet(it, act) { ui.noteFor = null } }
-    if (ui.finishedNow) FinishedSheet { ui.finishedNow = false }
+    if (ui.finishedNow) FinishedSheet(ui.finishedStamp) { ui.finishedNow = false }
+    ui.cardDraft?.let { CardSheet(it, act) { ui.cardDraft = null } }
 }
 
 private fun fmt(m: Int) = if (m < 60) "$m min" else "${m / 60} h ${m % 60}"
@@ -507,8 +508,13 @@ private fun LookupCard(l: Lookup, act: ReaderActions) {
         if (l.translation != null) {
             Row(Modifier.padding(top = 12.dp, end = 8.dp)) {
                 PillButton(
-                    if (l.saved) "Guardada en Notas" else "Guardar palabra", act.saveWord, Modifier.fillMaxWidth(),
+                    if (l.saved) "Guardada" else "Guardar palabra", act.saveWord, Modifier.weight(1f),
                     ghost = l.saved, icon = if (l.saved) "check" else "plus",
+                )
+                Spacer(Modifier.width(8.dp))
+                PillButton(
+                    if (l.carded) "Tarjeta lista" else "Hacer tarjeta", { if (!l.carded) act.wordCard() }, Modifier.weight(1f),
+                    ghost = true, icon = if (l.carded) "check" else "notas",
                 )
             }
         }
@@ -1111,6 +1117,11 @@ private fun MarkSheet(m: Mark, act: ReaderActions, onClose: () -> Unit) {
             Spacer(Modifier.width(10.dp))
             PillButton("Quitar", { act.removeMark(m) }, Modifier.weight(1f), ghost = true, icon = "trash")
         }
+        val hasCard = remember(m.id) { com.sebas.zerkalo.data.Cards.hasFor(m.id) }
+        PillButton(
+            if (hasCard) "Ya tiene tarjeta" else "Hacer tarjeta para estudiarlo", { if (!hasCard) act.cardFromMark(m) },
+            Modifier.fillMaxWidth().padding(top = 10.dp), ghost = true, icon = if (hasCard) "check" else "notas",
+        )
     }
 }
 
@@ -1130,14 +1141,63 @@ private fun NoteSheet(loc: Locator, act: ReaderActions, onClose: () -> Unit) {
     }
 }
 
+/** Hacer una tarjeta: tú escribes la pregunta (o eliges una sugerida); la respuesta es lo que subrayaste. */
 @Composable
-private fun FinishedSheet(onClose: () -> Unit) {
+private fun CardSheet(d: CardDraft, act: ReaderActions, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    val options = remember(d.text) { com.sebas.zerkalo.data.Suggest.options(d.text) }
+    var front by remember { mutableStateOf("") }
+    var back by remember { mutableStateOf(d.text) }
+    var kind by remember { mutableStateOf("hl") }
+    Sheet(onClose) {
+        Column(Modifier.heightIn(max = 620.dp).verticalScroll(rememberScrollState())) {
+            Text("Nueva tarjeta", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+            Text(
+                "Al repasar verás la pregunta, intentarás recordar y luego verás la respuesta. Así se recuerda de verdad.",
+                style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp),
+            )
+            Label("Pregunta · la escribes tú")
+            Box(Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(RoundedCornerShape(16.dp)).background(p.card.copy(alpha = 0.6f)).padding(14.dp)) {
+                if (front.isEmpty()) Text("¿Qué quieres recordar de esto?", style = Type.body, color = p.text2)
+                BasicTextField(front, { front = it; kind = "hl"; back = d.text }, textStyle = Type.body.copy(color = p.text), cursorBrush = SolidColor(p.accent), modifier = Modifier.fillMaxWidth())
+            }
+            if (options.isNotEmpty()) {
+                Label("¿No sabes qué preguntar? Toca una")
+                options.forEach { o ->
+                    Column(
+                        Modifier.fillMaxWidth().padding(top = 6.dp).clip(RoundedCornerShape(14.dp))
+                            .background(if (front == o.front) p.accent.copy(alpha = 0.14f) else p.card.copy(alpha = 0.45f))
+                            .clickable { front = o.front; back = o.back; kind = o.kind }.padding(horizontal = 14.dp, vertical = 10.dp),
+                    ) {
+                        Text(o.label, style = Type.uiSmall.copy(fontSize = 11.sp), color = p.accent)
+                        Text(o.front, style = Type.ui, color = p.text, maxLines = 3, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+            }
+            Label(if (kind == "cloze") "Respuesta · la palabra oculta" else "Respuesta · lo que subrayaste")
+            Text(back, style = Type.body.copy(fontSize = 15.sp), color = p.text, modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(p.card.copy(alpha = 0.45f)).padding(14.dp))
+            Spacer(Modifier.height(14.dp))
+            PillButton("Guardar tarjeta", { if (front.isNotBlank()) act.saveCard(d, front.trim(), back, kind) }, Modifier.fillMaxWidth(), enabled = front.isNotBlank())
+        }
+    }
+}
+
+@Composable
+private fun FinishedSheet(stamp: com.sebas.zerkalo.data.Stamps.BookStamp?, onClose: () -> Unit) {
     val p = LocalPalette.current
     Sheet(onClose) {
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-            Seal("読了", 104.dp, -4f, fontSize = 22f)
+            if (stamp != null) com.sebas.zerkalo.ui.Hanko(stamp.kanji, 112.dp, ink = stamp.ink, wax = stamp.wax, tilt = -4f, seed = stamp.book.id.hashCode())
+            else Seal("読了", 104.dp, -4f, fontSize = 22f)
             Text("Terminaste el libro", style = Type.title, color = p.text, modifier = Modifier.padding(top = 18.dp))
-            Text("Su sello quedó en tus Notas.", style = Type.ui, color = p.text2, modifier = Modifier.padding(top = 6.dp, bottom = 18.dp))
+            Text(
+                when {
+                    stamp == null -> "Su sello quedó en tu libro de sellos."
+                    stamp.wax != null -> "¡Sello de cera! Salió con los colores de su portada. Está en tu libro de sellos (libro nº ${stamp.n})."
+                    else -> "${stamp.kanji} ${stamp.genre} · libro nº ${stamp.n}. Su sello quedó en tu libro de sellos."
+                },
+                style = Type.ui, color = p.text2, textAlign = TextAlign.Center, modifier = Modifier.padding(top = 6.dp, bottom = 18.dp),
+            )
             PillButton("Gracias", onClose, Modifier.fillMaxWidth())
         }
     }
