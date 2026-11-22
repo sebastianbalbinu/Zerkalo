@@ -118,12 +118,6 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
             return@Box
         }
 
-        // Capítulo nuevo: el papel cubre el texto un instante mientras se acomoda y luego se desvanece
-        val fade by androidx.compose.animation.core.animateFloatAsState(
-            if (ui.chapterFade) 1f else 0f, androidx.compose.animation.core.tween(if (ui.chapterFade) 0 else 240), label = "capitulo",
-        )
-        if (fade > 0.01f) Box(Modifier.fillMaxSize().background(p.bg.copy(alpha = fade)))
-
         // Regla de lectura: atenúa todo menos la franja que estás leyendo.
         if (ui.settings.ruler && !ui.controls) ReadingRuler(ui)
 
@@ -802,11 +796,22 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                     },
                     style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp),
                 )
-                Label("Márgenes", "se ajustan al tamaño de la letra")
-                Segmented(listOf("Estrechos", "Normales", "Amplios"), s.margin, { act.settings(s.copy(margin = it)) })
+                Label("Márgenes", "en milímetros")
+                // Atajos que llenan los cuatro valores; luego se afina cada lado
+                val presets = listOf(Triple("Estrechos", 2.5f, 0.8f), Triple("Normales", 4f, 1.5f), Triple("Amplios", 7f, 4f))
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    items(presets) { (name, side, tb) ->
+                        val on = s.mmLeft == side && s.mmRight == side && s.mmTop == tb && s.mmBottom == tb
+                        SmallPill(name, on) { act.settings(ui.settings.copy(mmLeft = side, mmRight = side, mmTop = tb, mmBottom = tb)) }
+                    }
+                }
+                MmRow("Izquierda", s.mmLeft) { act.settings(ui.settings.copy(mmLeft = it)) }
+                MmRow("Derecha", s.mmRight) { act.settings(ui.settings.copy(mmRight = it)) }
+                MmRow("Arriba", s.mmTop) { act.settings(ui.settings.copy(mmTop = it)) }
+                MmRow("Abajo", s.mmBottom) { act.settings(ui.settings.copy(mmBottom = it)) }
                 Text(
-                    if (s.margin == 0) "El texto empieza junto a la cámara y llega hasta abajo de la pantalla." else "Más aire alrededor del texto, en proporción a la letra.",
-                    style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp),
+                    "Arriba se cuenta desde la franja de la cámara (donde van la hora y el avance). En desplazamiento, el texto pasa por debajo con un desenfoque suave.",
+                    style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp),
                 )
                 Label("Pasar página")
                 Segmented(listOf("Páginas", "Desplazamiento"), if (s.scroll) 1 else 0, { act.settings(s.copy(scroll = it == 1)) })
@@ -840,6 +845,25 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
             }
         }
       }
+    }
+}
+
+/** Un margen en milímetros: − valor +, de medio en medio milímetro. */
+@Composable
+private fun MmRow(name: String, value: Float, onChange: (Float) -> Unit) {
+    val p = LocalPalette.current
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(name, style = Type.ui, color = p.text, modifier = Modifier.weight(1f))
+        Box(Modifier.size(38.dp).clip(CircleShape).background(p.card.copy(alpha = 0.7f)).clickable { onChange((value - 0.5f).coerceAtLeast(0f)) }, contentAlignment = Alignment.Center) {
+            ZIcon("minus", p.text, 16.dp)
+        }
+        Text(
+            (if (value % 1f == 0f) "${value.toInt()}" else "$value").replace('.', ',') + " mm",
+            style = Type.ui, color = p.text, textAlign = TextAlign.Center, modifier = Modifier.width(76.dp),
+        )
+        Box(Modifier.size(38.dp).clip(CircleShape).background(p.card.copy(alpha = 0.7f)).clickable { onChange((value + 0.5f).coerceAtMost(25f)) }, contentAlignment = Alignment.Center) {
+            ZIcon("plus", p.text, 16.dp)
+        }
     }
 }
 

@@ -37,6 +37,11 @@ data class ReaderSettings(
     val markStyle: Int = 0,      // subrayado: 0 marcador, 1 lápiz, 2 ondulado
     val veil: Float = 0f,        // velo que atenúa la página sin tocar el brillo, 0..0.85
     val info: Boolean = true,    // hora y avance junto a la cámara
+    // Márgenes en milímetros, como en Moon+ Reader (arriba se suma la franja de la cámara)
+    val mmLeft: Float = 4f,
+    val mmRight: Float = 4f,
+    val mmTop: Float = 1.5f,
+    val mmBottom: Float = 2f,
 )
 
 data class OpdsCatalog(val name: String, val url: String)
@@ -72,6 +77,7 @@ object Prefs {
             autoSpeed = sp.getFloat("rAutoSpeed", 30f), autoPage = sp.getFloat("rAutoPage", 40f),
             layout = sp.getInt("rLayout", 1), markStyle = sp.getInt("rMarkStyle", 0),
             veil = sp.getFloat("rVeil", 0f), info = sp.getBoolean("rInfo", true),
+            mmLeft = sp.getFloat("rMmL", 4f), mmRight = sp.getFloat("rMmR", 4f), mmTop = sp.getFloat("rMmT", 1.5f), mmBottom = sp.getFloat("rMmB", 2f),
         )
         inks.value = runCatching {
             val a = JSONArray(sp.getString("inks", null) ?: "")
@@ -96,7 +102,8 @@ object Prefs {
             .putBoolean("rBreaks", r.breaks).putBoolean("rDys", r.dyslexia)
             .putBoolean("rFull", r.fullscreen).putInt("rVMargin", r.vMargin)
             .putFloat("rAutoSpeed", r.autoSpeed).putFloat("rAutoPage", r.autoPage)
-            .putInt("rLayout", r.layout).putInt("rMarkStyle", r.markStyle).putFloat("rVeil", r.veil).putBoolean("rInfo", r.info).apply()
+            .putInt("rLayout", r.layout).putInt("rMarkStyle", r.markStyle).putFloat("rVeil", r.veil).putBoolean("rInfo", r.info)
+            .putFloat("rMmL", r.mmLeft).putFloat("rMmR", r.mmRight).putFloat("rMmT", r.mmTop).putFloat("rMmB", r.mmBottom).apply()
     }
 
     fun setCatalogs(list: List<OpdsCatalog>) {
