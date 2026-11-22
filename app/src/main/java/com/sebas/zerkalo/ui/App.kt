@@ -144,7 +144,8 @@ fun ZerkaloRoot(onReady: () -> Unit) {
     LaunchedEffect(Unit) {
         if (!Prefs.welcomed && Library.books.value.isEmpty()) {
             Prefs.welcomed = true
-            withContext(Dispatchers.IO) {
+            // Sin cancelar: si la pantalla se vuelve a crear a mitad de camino, el libro igual termina de llegar.
+            withContext(Dispatchers.IO + kotlinx.coroutines.NonCancellable) {
                 val dest = File(Library.booksDir, "bienvenida.epub")
                 ctx.assets.open("bienvenida.epub").use { inp -> dest.outputStream().use { inp.copyTo(it) } }
                 Importer.fromFile(app.readium, dest, "bienvenida", key = "zerkalo:bienvenida", source = "Zerkalo")

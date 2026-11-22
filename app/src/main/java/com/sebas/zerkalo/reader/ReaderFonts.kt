@@ -18,14 +18,15 @@ data class ReaderFont(
     val bold: String? = null,
     val note: String = "",
     val boldAlt: String? = null, // negrita de respaldo si [bold] no vino en esta compilación
+    val regularAlt: String? = null, // letra normal de respaldo si [regular] no vino en esta compilación
 )
 
 val ReaderFonts: List<ReaderFont> = listOf(
     // Negrita real: Literata y Garamond la toman de su versión completa (variable); si no está, la de antes.
-    ReaderFont("Literata", "Literata", true, "literata_400_normal.ttf", "literata_400_italic.ttf", "literata_v.ttf", "Hecha para leer libros en pantalla", boldAlt = "literata_500_normal.ttf"),
+    ReaderFont("Literata", "Literata", true, "literata_v.ttf", "literata_400_italic.ttf", "literata_v.ttf", "Hecha para leer libros en pantalla", boldAlt = "literata_500_normal.ttf", regularAlt = "literata_400_normal.ttf"),
     // Mincho y Gótica no tienen cursiva: se usa una cursiva hermana de verdad en vez de inclinar la letra.
     ReaderFont("Mincho", "Shippori Mincho", true, "shippori_mincho_400_normal.ttf", "eb_garamond_400_italic.ttf", "shippori_mincho_600_normal.ttf", "Elegante, de inspiración japonesa"),
-    ReaderFont("Garamond", "EB Garamond", true, "eb_garamond_400_normal.ttf", "eb_garamond_400_italic.ttf", "garamond_v.ttf", "Clásica de libro impreso"),
+    ReaderFont("Garamond", "EB Garamond", true, "garamond_v.ttf", "eb_garamond_400_italic.ttf", "garamond_v.ttf", "Clásica de libro impreso", regularAlt = "eb_garamond_400_normal.ttf"),
     ReaderFont("Gótica", "Zen Kaku Gothic New", false, "zen_kaku_gothic_new_400_normal.ttf", "notosans_i.ttf", "zen_kaku_gothic_new_700_normal.ttf", "Sencilla y limpia"),
     ReaderFont("Original", null, true, note = "La que trae el libro"),
     // Sin serifa, elegidas por legibilidad comprobada en pantalla
@@ -59,22 +60,26 @@ object FontFiles {
         return file != null && file in files
     }
 
+    /** El archivo de la letra normal que de verdad vino en la app (la completa o la de respaldo). */
+    fun regular(ctx: Context, f: ReaderFont): String? = f.regular?.takeIf { has(ctx, it) } ?: f.regularAlt?.takeIf { has(ctx, it) }
+
     /** Si la letra trae versalitas propias (las anota la compilación en fonts/versalitas.txt). */
     fun hasSmallCaps(ctx: Context, i: Int): Boolean {
         val set = smallCaps ?: runCatching { ctx.assets.open("fonts/versalitas.txt").bufferedReader().readLines().map { it.trim() }.toSet() }
             .getOrDefault(emptySet()).also { smallCaps = it }
-        return ReaderFonts.getOrNull(i)?.regular in set
+        return ReaderFonts.getOrNull(i)?.let { regular(ctx, it) } in set
     }
 
     /** Solo se ofrecen las fuentes que de verdad vienen dentro de la app. */
     fun available(ctx: Context): List<Int> {
         val files = present ?: (ctx.assets.list("fonts")?.toSet() ?: emptySet()).also { present = it }
-        return ReaderFonts.indices.filter { i -> ReaderFonts[i].regular.let { it == null || it in files } }
+        return ReaderFonts.indices.filter { i -> val f = ReaderFonts[i]; f.regular == null || f.regular in files || f.regularAlt in files }
     }
 
     fun preview(ctx: Context, i: Int): FontFamily = previews.getOrPut(i) {
         val f = ReaderFonts[i]
-        val reg = f.regular ?: return@getOrPut FontFamily.Serif
+        if (f.regular == null) return@getOrPut FontFamily.Serif
+        val reg = regular(ctx, f) ?: return@getOrPut FontFamily.Default
         runCatching {
             val list = mutableListOf(Font("fonts/$reg", ctx.assets))
             f.italic?.let { list += Font("fonts/$it", ctx.assets, style = FontStyle.Italic) }
