@@ -181,6 +181,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private var contLoc: Locator? = null      // dónde va la lectura en el modo continuo
     private var scrollPadTop = 0f      // en desplazamiento: espacio dentro de la página arriba (px de CSS)
     private var scrollPadBottom = 0f
+    private var scrollPadLeft = 0f     // en desplazamiento: márgenes de los lados dentro de la página (px de CSS)
+    private var scrollPadRight = 0f
 
     // La misma obra en otro idioma
     private var pairBook: Book? = null
@@ -296,13 +298,16 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val cam = if (r.respectCamera) i.top else 0
         if (r.scroll || r.continuous) {
             // Desplazamiento: el texto usa toda la pantalla; arriba y abajo, la zona del margen se difumina
-            panes.setPadding(i.left + mmX(r.mmLeft), 0, i.right + mmX(r.mmRight), 0)
+            // Los márgenes de los lados van dentro de la página, para que el desenfoque cubra todo el ancho
+            panes.setPadding(0, 0, 0, 0)
+            scrollPadLeft = (i.left + mmX(r.mmLeft)) / dm.density
+            scrollPadRight = (i.right + mmX(r.mmRight)) / dm.density
             scrollPadTop = (cam + mmY(r.mmTop)) / dm.density
             scrollPadBottom = mmY(r.mmBottom) / dm.density
             ui.fadeTop = scrollPadTop; ui.fadeBottom = scrollPadBottom
         } else {
             panes.setPadding(i.left + mmX(r.mmLeft), cam + mmY(r.mmTop), i.right + mmX(r.mmRight), mmY(r.mmBottom))
-            scrollPadTop = 0f; scrollPadBottom = 0f
+            scrollPadTop = 0f; scrollPadBottom = 0f; scrollPadLeft = 0f; scrollPadRight = 0f
             ui.fadeTop = 0f; ui.fadeBottom = 0f
         }
         // Dónde está la cámara, para poner la hora a un lado y el avance al otro
@@ -485,7 +490,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     /** Vuelve a diagramar todo lo pegado (al agregar un capítulo o cambiar un ajuste). */
     private fun contTypeset() {
         val v = cont ?: return
-        val pad = PagePad(scrollPadTop, scrollPadBottom, ui.palette.bg.toArgb())
+        val pad = PagePad(scrollPadTop, scrollPadBottom, ui.palette.bg.toArgb(), scrollPadLeft, scrollPadRight)
         v.evaluateJavascript(Typeset.script(ui.settings.copy(scroll = true), ui.lang, pad, System.nanoTime()), null)
     }
 
@@ -532,7 +537,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val sb = StringBuilder(faces)
         sb.append(":root{--zk-pt:${scrollPadTop}px;--zk-pb:${scrollPadBottom + 18f}px}")
         sb.append("html{font-size:${r.size}% !important;background:${hex(p.bg)} !important;-webkit-text-size-adjust:100% !important;overflow-anchor:auto}")
-        sb.append("body{margin:0 !important;padding:0 !important;background:${hex(p.bg)} !important;color:${hex(p.text)} !important;line-height:${r.lineHeight} !important;overflow-wrap:break-word")
+        sb.append("body{margin:0 !important;padding:0 ${scrollPadRight}px 0 ${scrollPadLeft}px !important;box-sizing:border-box !important;background:${hex(p.bg)} !important;color:${hex(p.text)} !important;line-height:${r.lineHeight} !important;overflow-wrap:break-word")
         if (fam != null) sb.append(";font-family:'$fam',serif !important")
         sb.append("}")
         sb.append("section.zk-ch *{color:inherit !important;background-color:transparent !important}")
@@ -1053,7 +1058,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         lifecycleScope.launch {
             // Como en Books: el capítulo se acomoda apenas aparece, sin parpadeos ni papel encima.
             // Las pasadas siguientes solo actúan si algo cambió (letras o imágenes que terminaron de cargar).
-            val pad = PagePad(scrollPadTop, scrollPadBottom, ui.palette.bg.toArgb())
+            val pad = PagePad(scrollPadTop, scrollPadBottom, ui.palette.bg.toArgb(), scrollPadLeft, scrollPadRight)
             for ((i, wait) in listOf(0L, 240L, 700L).withIndex()) {
                 if (wait > 0) delay(wait)
                 val r = runCatching { nav.evaluateJavascript(Typeset.script(ui.settings, lang, pad, if (force && i == 0) System.nanoTime() else 0)) }.getOrNull()

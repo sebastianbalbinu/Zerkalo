@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -63,22 +64,26 @@ private val PaperInk = Color(0xFF2E231D)
 private val PaperSoft = Color(0xFF6E5E50)
 private val Vermilion = Color(0xFFA3402A)
 
+private sealed class Entry {
+    abstract val at: Long
+    data class B(val s: Stamps.BookStamp) : Entry() { override val at get() = s.book.finishedAt }
+    data class S(val s: Stamps.Special) : Entry() { override val at get() = s.at ?: 0L }
+}
+
 private sealed class SPage {
-    data object Intro : SPage()
     data object Welcome : SPage()
-    data class Books(val month: String, val items: List<Stamps.BookStamp>) : SPage()
     data object NoBooks : SPage()
-    data object Kanji : SPage()
-    data object Inks : SPage()
-    data object Wax : SPage()
-    data object Specials : SPage()
+    data class Month(val month: String, val items: List<Entry>) : SPage()
 }
 
 private val dayFmt = SimpleDateFormat("d MMM yyyy", Locale("es"))
+private val shortFmt = SimpleDateFormat("d MMM", Locale("es"))
 private val longFmt = SimpleDateFormat("d 'de' MMMM 'de' yyyy", Locale("es"))
 private val monthFmt = SimpleDateFormat("LLLL yyyy", Locale("es"))
 
-/** El libro de sellos: un pasaporte de lectura que se hojea página por página. */
+private val GUIDE_TABS = listOf("Qué son", "Kanji", "Tintas", "Cera", "Especiales")
+
+/** El libro de sellos: solo sellos, en orden de fecha. Las explicaciones viven en la Guía. */
 @Composable
 fun SellosScreen(haze: HazeState) {
     val p = LocalPalette.current
@@ -88,7 +93,7 @@ fun SellosScreen(haze: HazeState) {
     val cards by Cards.cards.collectAsState()
     val version by Stamps.version.collectAsState()
     val haptic = LocalHapticFeedback.current
-    var showIntro by remember { mutableStateOf(!Prefs.stampsIntroHidden) }
+    var guide by remember { mutableStateOf(if (Prefs.stampsIntroHidden) -1 else 0) } // pestaña abierta de la Guía, -1 cerrada
     var detail by remember { mutableStateOf<Any?>(null) }
 
     LaunchedEffect(books) { Stamps.settle(books) }
@@ -101,46 +106,90 @@ fun SellosScreen(haze: HazeState) {
         }
     }
 
-    val pages = remember(stamps, showIntro) {
+    val pages = remember(stamps, specials) {
+        val entries = (stamps.map { Entry.B(it) } + specials.filter { it.at != null && it.id != "bienvenida" }.map { Entry.S(it) }).sortedBy { it.at }
         buildList {
-            if (showIntro) add(SPage.Intro)
             add(SPage.Welcome)
             if (stamps.isEmpty()) add(SPage.NoBooks)
-            stamps.groupBy { monthFmt.format(Date(it.book.finishedAt)) }.forEach { (m, xs) -> xs.chunked(4).forEach { add(SPage.Books(m, it)) } }
-            add(SPage.Kanji); add(SPage.Inks); add(SPage.Wax); add(SPage.Specials)
+            entries.groupBy { monthFmt.format(Date(it.at)) }.forEach { (m, xs) -> xs.chunked(4).forEach { add(SPage.Month(m, it)) } }
         }
     }
-    val pager = rememberPagerState { pages.size }
-    val scope = rememberCoroutineScope()
+    // Se abre en tu último sello
+    val pager = rememberPagerState(initialPage = pages.lastIndex) { pages.size }
+    LaunchedEffect(pages.size) { pager.scrollToPage(pages.lastIndex) }
 
     Box(Modifier.fillMaxSize().hazeSource(haze)) {
         Column(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.statusBars)) {
-            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 16.dp, top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
                     Caption("Pasaporte de lectura")
                     Text("Sellos", style = Type.display, color = p.text)
                 }
-                Text("${pager.currentPage + 1} de ${pages.size}", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(end = 6.dp))
-                CircleButton("more", { showIntro = true; scope.launch { pager.scrollToPage(0) } }, size = 40.dp, desc = "Qué son los sellos")
+                PillButton("Guía", { guide = 0 }, ghost = true)
+            }
+            // Resumen de un vistazo; cada cuadrito abre su parte de la Guía
+            val have = stamps.map { it.kanji }.toSet()
+            val ink = Stamps.inkFor(stamps.size.coerceAtLeast(1))
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Stat("${Stamps.KANJI.count { it.second in have }}/${Stamps.KANJI.size}", "kanji", null, Modifier.weight(1f)) { guide = 1 }
+                Stat(ink.kanji, "tu tinta", Color(ink.light), Modifier.weight(1f)) { guide = 2 }
+                Stat("${stamps.count { it.wax != null }}", "de cera", null, Modifier.weight(1f)) { guide = 3 }
+                Stat("${specials.count { it.at != null }}/${specials.size}", "especiales", null, Modifier.weight(1f)) { guide = 4 }
             }
             HorizontalPager(pager, Modifier.weight(1f).fillMaxWidth(), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 18.dp), pageSpacing = 12.dp) { i ->
                 PassportPage(i, pages.size) {
                     when (val pg = pages[i]) {
-                        SPage.Intro -> IntroSheet { hide -> if (hide) Prefs.stampsIntroHidden = true; showIntro = false }
                         SPage.Welcome -> WelcomePage()
                         SPage.NoBooks -> NoBooksPage()
-                        is SPage.Books -> BooksPage(pg) { detail = it }
-                        SPage.Kanji -> KanjiPage(stamps)
-                        SPage.Inks -> InksPage(stamps.size)
-                        SPage.Wax -> WaxPage(stamps.filter { it.wax != null }) { detail = it }
-                        SPage.Specials -> SpecialsPage(specials) { detail = it }
+                        is SPage.Month -> MonthPage(pg) { detail = it }
                     }
                 }
             }
             Spacer(Modifier.height(104.dp))
         }
     }
+    if (guide >= 0) GuideSheet(guide, stamps, specials, { guide = it }, { detail = it }) { Prefs.stampsIntroHidden = true; guide = -1 }
     detail?.let { d -> StampDetail(d) { detail = null } }
+}
+
+@Composable
+private fun Stat(big: String, small: String, color: Color?, modifier: Modifier, onClick: () -> Unit) {
+    val p = LocalPalette.current
+    Column(
+        modifier.clip(RoundedCornerShape(14.dp)).background(p.card.copy(alpha = 0.6f)).clickable(onClick = onClick).padding(vertical = 9.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(big, style = Type.title.copy(fontSize = 17.sp), color = color ?: p.text, maxLines = 1)
+        Text(small, style = Type.uiSmall.copy(fontSize = 11.sp), color = p.text2, maxLines = 1)
+    }
+}
+
+/** La Guía: todas las explicaciones en una hoja aparte, con pestañas. */
+@Composable
+private fun GuideSheet(tab: Int, stamps: List<Stamps.BookStamp>, specials: List<Stamps.Special>, onTab: (Int) -> Unit, onTap: (Any) -> Unit, onClose: () -> Unit) {
+    ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = Paper) {
+        Column(Modifier.fillMaxWidth().padding(horizontal = 22.dp)) {
+            Text("Guía de sellos", style = Type.title.copy(fontSize = 21.sp), color = PaperInk)
+            Row(Modifier.padding(top = 10.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                GUIDE_TABS.forEachIndexed { i, t ->
+                    Text(
+                        t, style = Type.uiSmall, color = if (i == tab) Paper else PaperSoft,
+                        modifier = Modifier.clip(RoundedCornerShape(14.dp)).background(if (i == tab) PaperInk else Color(0x14000000))
+                            .clickable { onTab(i) }.padding(horizontal = 12.dp, vertical = 7.dp),
+                    )
+                }
+            }
+            Column(Modifier.padding(top = 8.dp, bottom = 32.dp).verticalScroll(rememberScrollState())) {
+                when (tab) {
+                    0 -> IntroSheet(onClose)
+                    1 -> KanjiPage(stamps)
+                    2 -> InksPage(stamps.size)
+                    3 -> WaxPage(stamps.filter { it.wax != null }, onTap)
+                    else -> SpecialsPage(specials, onTap)
+                }
+            }
+        }
+    }
 }
 
 /** Una hoja del pasaporte: papel crema con filete rojo y número de página. */
@@ -153,7 +202,7 @@ private fun PassportPage(i: Int, n: Int, content: @Composable () -> Unit) {
     ) {
         Box(Modifier.fillMaxSize().padding(start = 16.dp, end = 10.dp, top = 10.dp, bottom = 10.dp).border(1.dp, Vermilion.copy(alpha = 0.3f), RoundedCornerShape(4.dp)))
         Column(Modifier.fillMaxSize().padding(start = 30.dp, end = 24.dp, top = 24.dp, bottom = 34.dp).verticalScroll(rememberScrollState())) { content() }
-        Text("— ${i + 1} —", style = Type.uiSmall.copy(fontSize = 11.sp), color = PaperSoft.copy(alpha = 0.7f), modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp))
+        Text("— ${i + 1} de $n —", style = Type.uiSmall.copy(fontSize = 11.sp), color = PaperSoft.copy(alpha = 0.7f), modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 16.dp))
     }
 }
 
@@ -167,32 +216,19 @@ private fun PTitle(t: String) = Text(t, style = Type.title.copy(fontSize = 23.sp
 private fun PText(t: String, top: Int = 8) = Text(t, style = Type.ui.copy(lineHeight = 20.sp), color = PaperSoft, modifier = Modifier.padding(top = top.dp))
 
 @Composable
-private fun IntroSheet(onDone: (Boolean) -> Unit) {
-    var hide by remember { mutableStateOf(Prefs.stampsIntroHidden) }
-    Kicker("Zerkalo · 鏡")
+private fun IntroSheet(onDone: () -> Unit) {
     PTitle("Tu libro de sellos")
-    PText("En Japón, un hanko es un sello de tinta roja que vale como firma. Y existe el goshuinchō: un librito donde la gente colecciona el sello de cada templo que visita, con el día escrito a mano. Cada sello es el recuerdo de un lugar al que llegaste.", 12)
+    PText("En Japón, un hanko es un sello de tinta roja que vale como firma. Y existe el goshuinchō: un librito donde la gente colecciona el sello de cada templo que visita, con el día escrito a mano. Cada sello es el recuerdo de un lugar al que llegaste.", 10)
     PText("Aquí, cada libro que terminas es un lugar al que llegaste. Zerkalo le pone su sello a tu pasaporte, con el nombre del libro y la fecha.")
     Text("Cómo se ganan", style = Type.title.copy(fontSize = 17.sp), color = PaperInk, modifier = Modifier.padding(top = 16.dp))
-    PText("· Termina un libro: su sello lleva el kanji de su género (物 novela, 詩 poesía, 論 ensayo…). Hay 26 por coleccionar.", 6)
+    PText("· Termina un libro: su sello lleva el kanji de su género (物 novela, 詩 poesía, 論 ensayo…).", 6)
     PText("· Tu tinta cambia con cuántos libros llevas: bermellón, índigo, negra, púrpura y oro.", 4)
     PText("· A veces sale un sello de cera, mezclado con los colores de la portada del libro. Es raro e irrepetible.", 4)
     PText("· Los sellos especiales celebran momentos: tu primer libro, otro idioma, una racha… algunos son sorpresa.", 4)
-    PText("Pasa la página para ver tu primer sello.", 12)
-    Row(
-        Modifier.padding(top = 16.dp).clip(RoundedCornerShape(10.dp)).clickable { hide = !hide }.padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            Modifier.size(20.dp).clip(RoundedCornerShape(5.dp)).border(1.5.dp, PaperSoft, RoundedCornerShape(5.dp)).background(if (hide) Vermilion else Color.Transparent),
-            contentAlignment = Alignment.Center,
-        ) { if (hide) ZIcon("check", Color.White, 13.dp) }
-        Text("No volver a mostrar esta hoja", style = Type.ui, color = PaperSoft, modifier = Modifier.padding(start = 10.dp))
-    }
-    if (hide) Text(
-        "Listo: el pasaporte abrirá en tus sellos. Esta hoja sigue en el botón ⋯ de arriba.",
-        style = Type.uiSmall, color = Vermilion,
-        modifier = Modifier.padding(top = 6.dp).clip(RoundedCornerShape(8.dp)).clickable { onDone(true) }.padding(vertical = 4.dp),
+    PText("Esta guía siempre está en el botón «Guía», arriba a la derecha.", 12)
+    Text(
+        "Entendido", style = Type.ui, color = Paper, textAlign = TextAlign.Center,
+        modifier = Modifier.padding(top = 16.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(PaperInk).clickable { onDone() }.padding(vertical = 12.dp),
     )
 }
 
@@ -220,23 +256,30 @@ private fun NoBooksPage() {
 }
 
 @Composable
-private fun BooksPage(pg: SPage.Books, onTap: (Any) -> Unit) {
+private fun MonthPage(pg: SPage.Month, onTap: (Any) -> Unit) {
     Kicker(pg.month)
     pg.items.chunked(2).forEach { row ->
         Row(Modifier.fillMaxWidth().padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            row.forEach { s ->
-                Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { onTap(s) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Hanko(s.kanji, 104.dp, ink = s.ink, wax = s.wax, tilt = listOf(-4f, 3f, -2f, 4f, -3f)[(s.book.id.hashCode() and 0xff) % 5], seed = s.book.id.hashCode())
-                    Text(s.book.title, style = Type.body.copy(fontSize = 14.sp), color = PaperInk, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
-                    Text(
-                        listOf(s.book.author, dayFmt.format(Date(s.book.finishedAt))).filter { it.isNotBlank() }.joinToString(" · "),
-                        style = Type.uiSmall.copy(fontSize = 11.sp), color = PaperSoft, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
-                    )
-                    Text("${s.kanji} ${s.genre} · nº ${s.n}", style = Type.uiSmall.copy(fontSize = 11.sp), color = PaperSoft, textAlign = TextAlign.Center)
-                    if (s.wax != null) Text(
-                        "SELLO DE CERA", style = Type.uiSmall.copy(fontSize = 9.sp, letterSpacing = 1.sp), color = Paper,
-                        modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(6.dp)).background(PaperInk).padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
+            row.forEach { e ->
+                Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { onTap(if (e is Entry.B) e.s else (e as Entry.S).s) }.padding(4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    when (e) {
+                        is Entry.B -> {
+                            val s = e.s
+                            Hanko(s.kanji, 104.dp, ink = s.ink, wax = s.wax, tilt = listOf(-4f, 3f, -2f, 4f, -3f)[(s.book.id.hashCode() and 0xff) % 5], seed = s.book.id.hashCode())
+                            Text(s.book.title, style = Type.body.copy(fontSize = 14.sp), color = PaperInk, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+                            Text(
+                                listOf(s.book.author, shortFmt.format(Date(s.book.finishedAt))).filter { it.isNotBlank() }.joinToString(" · "),
+                                style = Type.uiSmall.copy(fontSize = 11.sp), color = PaperSoft, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(if (s.wax != null) "sello de cera · nº ${s.n}" else "${s.kanji} ${s.genre} · nº ${s.n}", style = Type.uiSmall.copy(fontSize = 11.sp), color = PaperSoft, textAlign = TextAlign.Center)
+                        }
+                        is Entry.S -> {
+                            val s = e.s
+                            Box(Modifier.height(104.dp), contentAlignment = Alignment.Center) { Hanko(s.kanji, 74.dp, tilt = listOf(-3f, 2f, -1f)[s.id.length % 3], seed = s.id.hashCode()) }
+                            Text(s.name, style = Type.body.copy(fontSize = 14.sp), color = PaperInk, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp))
+                            Text("especial · " + shortFmt.format(Date(s.at ?: 0L)), style = Type.uiSmall.copy(fontSize = 11.sp), color = PaperSoft, textAlign = TextAlign.Center)
+                        }
+                    }
                 }
             }
             if (row.size == 1) Spacer(Modifier.weight(1f))
