@@ -3,326 +3,307 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Zerkalo 鏡 · un lector de libros con cuidado de imprenta</title>
-<meta name="description" content="Zerkalo es un lector de libros EPUB para Android, diagramado con el cuidado de un libro impreso. Descárgalo gratis.">
-<meta property="og:title" content="Zerkalo 鏡 · lector de libros para Android">
-<meta property="og:description" content="Un lector de libros diagramado con cuidado de imprenta. Gratis.">
+<title>Zerkalo 鏡 · Un espejo de palabras</title>
+<meta name="description" content="Zerkalo es un lector de libros para Android creado por una sola persona, con una diagramación editorial respaldada por la investigación sobre lectura. Gratis y sin anuncios.">
+<meta property="og:title" content="Zerkalo 鏡 · Un espejo de palabras">
+<meta property="og:description" content="Un lector de libros para Android, hecho con amor y con el cuidado de un libro impreso.">
+<meta property="og:image" content="https://sebastianbalbinu.github.io/Zerkalo/img/madera.webp">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@600;700&text=%E9%8F%A1%E7%89%A9%E8%A9%A9%E8%AB%96%E6%98%9F%E5%A4%9C%E6%9C%B1%E8%97%8D%E5%A2%A8%E7%B4%AB%E9%87%91%E9%81%93%E5%88%A4%E4%BC%91%E8%A9%B1%E5%8F%B2%E6%97%85%E8%AC%8E%E5%BF%83%E5%88%9D%E8%AA%9E&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@600;700&text=%E9%8F%A1%E7%89%A9%E8%A9%A9%E6%98%9F%E5%A4%9C%E6%9C%B1%E8%97%8D%E5%A2%A8%E7%B4%AB%E9%87%91%E9%96%93%E7%B0%A1%E7%B4%A0%E6%94%B9%E5%96%84&display=swap" rel="stylesheet">
 <style>
 @font-face{font-family:Literata;src:url(fonts/literata_400_normal.ttf);font-weight:400}
 @font-face{font-family:Literata;src:url(fonts/literata_400_italic.ttf);font-style:italic}
 @font-face{font-family:Literata;src:url(fonts/literata_500_normal.ttf);font-weight:500 700}
 @font-face{font-family:Zen;src:url(fonts/zen_kaku_gothic_new_400_normal.ttf);font-weight:400}
 @font-face{font-family:Zen;src:url(fonts/zen_kaku_gothic_new_700_normal.ttf);font-weight:700}
-:root{--paper:#f4ecdc;--bg:#f7f2e9;--ink:#2e231d;--soft:#6e5e50;--line:#e2d6c3;--ver:#a3402a;--card:#efe5d4}
+:root{--paper:#f4ecdc;--sheet:#f7f1e6;--ink:#2e231d;--soft:#6e5e50;--line:#e2d6c3;--ver:#a3402a;--card:#efe5d4;--cream:#f1e6d2}
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--ink);font:400 17px/1.6 Literata,Georgia,serif}
+body{margin:0;color:var(--ink);font:400 17px/1.62 Literata,Georgia,serif;background:#2a1d16 url(img/madera.webp) center top/900px auto repeat}
 .kj{font-family:'Noto Serif JP','Noto Serif CJK JP','Hiragino Mincho ProN',serif;font-weight:700}
-.ui{font-family:Zen,system-ui,sans-serif}
 a{color:var(--ver)}
-.wrap{max-width:980px;margin:0 auto;padding:0 22px}
 .cap{font:400 12px/1.4 Zen,system-ui,sans-serif;letter-spacing:.22em;text-transform:uppercase;color:var(--ver)}
 h1,h2,h3{font-weight:500;letter-spacing:-.01em;margin:0}
-h2{font-size:clamp(28px,5vw,40px);line-height:1.15;margin-top:8px}
-h3{font-size:20px;margin-top:4px}
+h2{font-size:clamp(27px,5vw,38px);line-height:1.15;margin-top:8px}
 p{margin:.7em 0;color:#3d3128}
 .soft{color:var(--soft)}
-section{padding:72px 0;border-top:1px solid var(--line)}
-.two{display:grid;grid-template-columns:1.05fr .95fr;gap:46px;align-items:center}
-.two.rev{grid-template-columns:.95fr 1.05fr}
-.two.rev > :first-child{order:2}
-@media(max-width:760px){.two,.two.rev{grid-template-columns:1fr;gap:30px}.two.rev > :first-child{order:0}}
-
-/* sello */
 .hanko{display:inline-flex;align-items:center;justify-content:center;color:var(--paper);background:linear-gradient(160deg,#b84a31,#8f3522);border-radius:12%;position:relative;box-shadow:inset 0 0 0 3px rgba(244,236,220,.22)}
 .hanko::after{content:"";position:absolute;inset:7%;border:1.5px solid rgba(244,236,220,.55);border-radius:8%}
-
-/* portada */
-header{padding:40px 0 70px;position:relative;overflow:hidden}
-.nav{display:flex;align-items:center;gap:12px;font:400 14px Zen,system-ui,sans-serif;color:var(--soft)}
+header{padding:34px 22px 56px;max-width:1000px;margin:0 auto;color:var(--cream)}
+.nav{display:flex;align-items:center;gap:12px;font:400 14px Zen,system-ui,sans-serif;color:#d8c7ae}
 .nav .hanko{width:34px;height:34px;font-size:20px}
-.nav b{color:var(--ink);font:500 18px Literata,serif}
-.hero{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center;margin-top:46px}
+.nav b{color:var(--cream);font:500 18px Literata,serif}
+.hero{display:grid;grid-template-columns:1.1fr .9fr;gap:40px;align-items:center;margin-top:44px}
 @media(max-width:760px){.hero{grid-template-columns:1fr}}
-.hero h1{font-size:clamp(44px,9vw,78px);line-height:1;letter-spacing:-.02em}
-.hero .lead{font-size:clamp(19px,2.6vw,23px);line-height:1.5;color:#3d3128;margin:22px 0 28px}
-.btn{display:inline-flex;align-items:center;gap:12px;background:var(--ink);color:var(--paper);text-decoration:none;font:700 16px Zen,system-ui,sans-serif;padding:16px 26px;border-radius:40px;box-shadow:0 10px 24px rgba(46,35,29,.22)}
-.btn small{font-weight:400;opacity:.75}
-.btn.ghost{background:transparent;color:var(--ink);box-shadow:none;border:1px solid var(--line)}
-.meta{font:400 13px Zen,system-ui,sans-serif;color:var(--soft);margin-top:14px}
-
-/* teléfono */
-.phone{width:min(300px,78vw);aspect-ratio:9/19;margin:0 auto;border-radius:40px;background:#1d1714;padding:9px;box-shadow:0 30px 60px rgba(46,35,29,.28),0 0 0 1px #000}
+.hero .cap{color:#e3a58f}
+.hero h1{font-size:clamp(42px,8.5vw,74px);line-height:1.02;letter-spacing:-.02em;color:var(--cream);text-shadow:0 2px 18px rgba(0,0,0,.35)}
+.hero .lead{font-size:clamp(18px,2.5vw,22px);line-height:1.55;color:#eadfcb;margin:22px 0 28px}
+.btn{display:inline-flex;align-items:center;gap:12px;background:var(--cream);color:var(--ink);text-decoration:none;font:700 16px Zen,system-ui,sans-serif;padding:16px 26px;border-radius:40px;box-shadow:0 12px 28px rgba(0,0,0,.35)}
+.btn small{font-weight:400;opacity:.7}
+.btn.dark{background:var(--ink);color:var(--paper)}
+.meta{font:400 13px Zen,system-ui,sans-serif;color:#cdbca3;margin-top:14px}
+.meta a{color:#f0c3b0}
+main{max-width:1000px;margin:0 auto;padding:0 14px 40px}
+.sheet{background:var(--sheet);border-radius:6px 18px 18px 6px;box-shadow:0 26px 60px rgba(0,0,0,.42);padding:clamp(26px,5vw,56px);margin-bottom:26px;position:relative;background-image:linear-gradient(90deg,rgba(0,0,0,.09),transparent 46px)}
+.two{display:grid;grid-template-columns:1.05fr .95fr;gap:44px;align-items:center}
+.two.rev > :first-child{order:2}
+@media(max-width:760px){.two{grid-template-columns:1fr;gap:30px}.two.rev > :first-child{order:0}}
+.quote{font:italic 400 clamp(20px,3vw,25px)/1.45 Literata,serif;color:var(--ink);border-left:3px solid var(--ver);padding-left:20px;margin:26px 0 6px}
+.phone{width:min(290px,76vw);aspect-ratio:9/19;margin:0 auto;border-radius:40px;background:#1d1714;padding:9px;box-shadow:0 30px 60px rgba(0,0,0,.45),0 0 0 1px #000}
 .scr{width:100%;height:100%;border-radius:32px;overflow:hidden;position:relative;background:var(--paper)}
 .cam{position:absolute;top:10px;left:50%;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:#111;z-index:5}
 .status{position:absolute;top:8px;left:0;right:0;display:flex;justify-content:center;gap:58px;font:400 10px Zen,sans-serif;color:#8a7a6a;z-index:4}
 .page{position:absolute;inset:34px 17px 0;font:400 12.4px/1.62 Literata,serif;color:#2e231d;text-align:justify;hyphens:auto;-webkit-hyphens:auto}
-.page h4{font:600 20px/1.2 Literata,serif;text-align:center;letter-spacing:.06em;margin:22px 0 18px}
-.page p{margin:0;text-indent:1.5em;color:#2e231d}
+.page h4{font:600 19px/1.2 Literata,serif;text-align:center;letter-spacing:.06em;margin:22px 0 18px}
+.page p{margin:0;text-indent:1.5em;color:inherit}
 .page p.first{text-indent:0}
 .page .sc{font-variant:small-caps;letter-spacing:.04em}
-.page .verse{margin:10px 0 10px 1.6em;text-align:left;font-style:italic}
 .blur{position:absolute;left:0;right:0;bottom:0;height:54px;backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);background:linear-gradient(to top,rgba(244,236,220,.85),rgba(244,236,220,0));-webkit-mask-image:linear-gradient(to top,#000 40%,transparent);mask-image:linear-gradient(to top,#000 40%,transparent)}
-
-/* comparación */
-.cmp{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:30px}
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:26px}
 @media(max-width:620px){.cmp{grid-template-columns:1fr}}
-.sheet{background:#fffdf8;border:1px solid var(--line);border-radius:14px;padding:20px 20px 22px;box-shadow:0 6px 18px rgba(46,35,29,.06)}
-.sheet .tag{font:700 11px Zen,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--soft)}
-.sheet.good .tag{color:var(--ver)}
-.bad .txt{font:400 15px/1.35 Georgia,serif;text-align:left;margin-top:10px}
+.box{background:#fffdf8;border:1px solid var(--line);border-radius:14px;padding:20px}
+.box .tag{font:700 11px Zen,sans-serif;letter-spacing:.14em;text-transform:uppercase;color:var(--soft)}
+.box.good .tag{color:var(--ver)}
+.bad .txt{font:400 15px/1.3 Georgia,serif;text-align:left;margin-top:10px}
 .bad .txt p{margin:0 0 .9em}
 .good .txt{font:400 15px/1.62 Literata,serif;text-align:justify;hyphens:auto;-webkit-hyphens:auto;margin-top:10px}
 .good .txt p{margin:0;text-indent:1.4em}
 .good .txt p:first-child{text-indent:0}
 .notes{font:400 13px/1.5 Zen,sans-serif;color:var(--soft);margin-top:12px;padding-left:16px}
-.notes li{margin:3px 0}
-
-/* lista de cuidados */
-.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:30px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:26px}
 @media(max-width:760px){.grid{grid-template-columns:1fr 1fr}}
 @media(max-width:460px){.grid{grid-template-columns:1fr}}
 .item{background:var(--card);border-radius:16px;padding:16px 18px}
 .item b{display:block;font:500 16px Literata,serif;margin-bottom:4px}
 .item span{font:400 13.5px/1.5 Zen,sans-serif;color:#5a4a3c}
-
-/* sellos */
-.pass{background:var(--paper);border-radius:6px 18px 18px 6px;box-shadow:0 18px 40px rgba(46,35,29,.18);padding:26px;position:relative;background-image:linear-gradient(90deg,rgba(0,0,0,.12),transparent 40px)}
+.study{display:grid;gap:12px;margin-top:22px}
+.study div{display:grid;grid-template-columns:70px 1fr;gap:14px;align-items:start;border-top:1px solid var(--line);padding-top:12px}
+.study b{font:500 24px/1.1 Literata,serif;color:var(--ver)}
+.study span{font:400 14.5px/1.55 Zen,sans-serif;color:#4a3c31}
+.study i{display:block;font:italic 400 12.5px Literata,serif;color:var(--soft);margin-top:4px}
+.ideas{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:24px}
+@media(max-width:700px){.ideas{grid-template-columns:1fr}}
+.idea{text-align:center;background:var(--card);border-radius:18px;padding:20px 16px}
+.idea .hanko{width:70px;height:70px;font-size:28px;margin-bottom:10px;line-height:1}
+.idea b{display:block;font:500 17px Literata,serif}
+.idea span{font:400 13.5px/1.5 Zen,sans-serif;color:#5a4a3c}
+.pass{background:var(--paper);border-radius:6px 18px 18px 6px;box-shadow:0 14px 34px rgba(46,35,29,.18);padding:24px;position:relative;background-image:linear-gradient(90deg,rgba(0,0,0,.1),transparent 40px)}
 .pass::before{content:"";position:absolute;inset:12px 12px 12px 18px;border:1px solid rgba(163,64,42,.3);border-radius:4px;pointer-events:none}
-.pgrid{display:grid;grid-template-columns:1fr 1fr;gap:20px 12px;margin-top:14px;text-align:center}
-.pgrid .hanko{width:88px;height:88px;font-size:50px}
+.pgrid{display:grid;grid-template-columns:1fr 1fr;gap:18px 12px;margin-top:12px;text-align:center}
+.pgrid .hanko{width:84px;height:84px;font-size:48px}
 .pgrid .t{font:400 14px Literata,serif;margin-top:8px}
 .pgrid .m{font:400 11px Zen,sans-serif;color:var(--soft)}
-.inks{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap}
+.inks{display:flex;gap:10px;margin-top:18px;flex-wrap:wrap}
 .inks div{text-align:center;font:400 11px/1.3 Zen,sans-serif;color:var(--soft)}
-.inks .hanko{width:50px;height:50px;font-size:28px;margin-bottom:5px}
-
-/* tarjeta de estudio */
-.study{background:#fffdf8;border-radius:24px;padding:24px;box-shadow:0 14px 34px rgba(46,35,29,.12);max-width:360px;margin:0 auto}
-.study .q{font:500 20px/1.35 Literata,serif;margin:12px 0 18px}
-.study .a{border-top:1px solid var(--line);padding-top:14px;font:400 15px/1.5 Literata,serif}
-.ans{display:flex;gap:10px;margin-top:18px}
-.ans div{flex:1;text-align:center;border-radius:16px;padding:11px 6px;font:700 13px Zen,sans-serif;background:var(--card)}
-.ans div small{display:block;font-weight:400;font-size:11px;opacity:.7}
-.ans .y{background:var(--ink);color:var(--paper)}
-
-/* instalar */
-.steps{counter-reset:s;display:grid;gap:14px;margin-top:26px}
+.inks .hanko{width:48px;height:48px;font-size:26px;margin-bottom:5px}
+.nums{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:24px}
+@media(max-width:620px){.nums{grid-template-columns:1fr 1fr}}
+.num{background:var(--card);border-radius:16px;padding:16px;text-align:center}
+.num b{display:block;font:500 32px/1.1 Literata,serif;color:var(--ver)}
+.num span{font:400 12.5px/1.4 Zen,sans-serif;color:#5a4a3c}
+.steps{counter-reset:s;display:grid;gap:12px;margin-top:22px}
 .step{display:grid;grid-template-columns:44px 1fr;gap:14px;align-items:start;background:var(--card);border-radius:16px;padding:16px}
 .step::before{counter-increment:s;content:counter(s);width:44px;height:44px;border-radius:12%;display:flex;align-items:center;justify-content:center;background:var(--ver);color:var(--paper);font:500 20px Literata,serif}
 .step b{font:500 17px Literata,serif}
 .step p{margin:2px 0 0;font:400 14px/1.5 Zen,sans-serif;color:#5a4a3c}
-
-/* ayuda */
-.ask{background:var(--ink);color:var(--paper);border-radius:28px;padding:clamp(26px,5vw,48px)}
+.ask{background:var(--ink);color:var(--paper);border-radius:6px 18px 18px 6px;padding:clamp(26px,5vw,52px);box-shadow:0 26px 60px rgba(0,0,0,.42);margin-bottom:26px}
 .ask h2{color:var(--paper)}
 .ask p,.ask li{color:#e6dccb}
 .ask .cap{color:#e3a58f}
 .ask ol{padding-left:20px;margin:18px 0 0}
 .ask li{margin:10px 0;font-size:16px}
 .ask li b{color:var(--paper);font-weight:500}
-footer{padding:40px 0 60px;text-align:center;font:400 13px Zen,sans-serif;color:var(--soft)}
+footer{padding:20px 0 70px;text-align:center;font:400 13px Zen,sans-serif;color:#cdbca3}
+footer a{color:#f0c3b0}
 </style>
 </head>
 <body>
 
 <header>
-  <div class="wrap">
-    <div class="nav"><span class="hanko kj">鏡</span><b>Zerkalo</b><span>· lector de libros para Android</span></div>
-    <div class="hero">
-      <div>
-        <div class="cap">Gratis · sin anuncios · sin cuentas</div>
-        <h1>Leer con cuidado de imprenta.</h1>
-        <p class="lead">Zerkalo es un lector de libros EPUB que trata cada página como la trataría una buena diagramadora: medida de línea cómoda, justificado con partición de palabras, versalitas de verdad, sin viudas ni huérfanas.</p>
-        <a class="btn" href="https://github.com/sebastianbalbinu/Zerkalo/releases/latest/download/Zerkalo.apk">Descargar para Android <small>APK · 35 MB</small></a>
-        <div class="meta">Android 8 o más nuevo · siempre la última versión probada · <a href="#instalar">cómo instalar</a></div>
-      </div>
-      <div class="phone"><div class="scr">
-        <div class="cam"></div>
-        <div class="status"><span>12:13</span><span>1 %</span></div>
-        <div class="page">
-          <h4>CAPÍTULO I</h4>
-          <p class="first"><span class="sc">Aquella mañana</span> la ciudad amaneció envuelta en una niebla tan espesa que los tranvías avanzaban despacio, tocando la campana en cada esquina como si pidieran permiso.</p>
-          <p>Elena bajó la escalera con el libro bajo el brazo. Lo había empezado tres veces y tres veces lo había dejado, no por aburrido, sino porque cada página le pedía detenerse a mirar por la ventana.</p>
-          <p>En la panadería de la esquina el aire olía a pan y a lluvia. Pidió un café, abrió el libro donde lo había marcado con un boleto viejo y, por primera vez, no levantó la vista.</p>
-          <p>Afuera la niebla empezaba a levantarse.</p>
-        </div>
-        <div class="blur"></div>
-      </div></div>
+  <div class="nav"><span class="hanko kj">鏡</span><b>Zerkalo</b><span>· lector de libros para Android</span></div>
+  <div class="hero">
+    <div>
+      <div class="cap">Gratis · sin anuncios · sin cuentas</div>
+      <h1>Un espejo de palabras.</h1>
+      <p class="lead">Zerkalo es un lector de libros para Android creado por una sola persona, con un propósito sencillo: leer mejor, leer más y devolverle a la lectura su lugar en la vida cotidiana.</p>
+      <a class="btn" href="https://github.com/sebastianbalbinu/Zerkalo/releases/latest/download/Zerkalo.apk">Descargar para Android <small>APK · 35 MB</small></a>
+      <div class="meta">Android 8 o posterior · <a href="#instalar">Cómo instalar</a></div>
     </div>
+    <div class="phone"><div class="scr">
+      <div class="cam"></div>
+      <div class="status"><span>12:13</span><span>1 %</span></div>
+      <div class="page">
+        <h4>CAPÍTULO I</h4>
+        <p class="first"><span class="sc">Aquella mañana</span> la ciudad amaneció envuelta en una niebla tan espesa que los tranvías avanzaban despacio, tocando la campana en cada esquina como si pidieran permiso.</p>
+        <p>Elena bajó la escalera con el libro bajo el brazo. Lo había empezado tres veces y tres veces lo había dejado, no por aburrido, sino porque cada página le pedía detenerse a mirar por la ventana.</p>
+        <p>En la panadería de la esquina el aire olía a pan y a lluvia. Pidió un café, abrió el libro donde lo había marcado con un boleto viejo y, por primera vez, no levantó la vista.</p>
+        <p>Afuera la niebla empezaba a levantarse.</p>
+      </div>
+      <div class="blur"></div>
+    </div></div>
   </div>
 </header>
 
-<section>
-  <div class="wrap two">
+<main>
+
+<section class="sheet">
+  <div class="cap">El propósito</div>
+  <h2>Nace de una necesidad; crece por convicción.</h2>
+  <p>Zerkalo comenzó como una búsqueda personal: mejorar la calidad y la velocidad de la propia lectura en el teléfono. En el camino se convirtió en un propósito más amplio: promover la lectura como un hábito personal básico, al alcance de cualquiera.</p>
+  <p>El EPUB, el formato más común de los libros digitales, suele mostrarse tal como viene del archivo: líneas demasiado largas, interlineado estrecho, márgenes descuidados. Son detalles pequeños que cansan la vista y, casi sin notarlo, nos alejan de los libros. Zerkalo vuelve a diagramar cada página con criterios editoriales respaldados por la investigación sobre lectura, para que leer en una pantalla se sienta como abrir un libro bien hecho, y para que haya más libros disponibles para más personas.</p>
+  <div class="quote">«Está hecho con mucho amor. Ojalá quien lo encuentre lo disfrute y me ayude a saber cómo mejorarlo.»</div>
+</section>
+
+<section class="sheet">
+  <div class="two">
     <div>
-      <div class="cap">La idea</div>
-      <h2>Un espejo donde uno se encuentra.</h2>
-      <p><i>Zerkalo</i> quiere decir «espejo» en ruso, y <span class="kj">鏡</span> <i>kagami</i> en japonés. La idea es sencilla: que el libro sea el protagonista y la app desaparezca.</p>
-      <p>Casi todos los lectores de libros digitales muestran el texto como sale del archivo: con los estilos que puso cada editorial, a veces buenos y a veces descuidados. Zerkalo, en cambio, vuelve a diagramar cada capítulo con reglas de oficio, para que cualquier libro se lea como un libro bien hecho.</p>
-      <p class="soft">El estilo visual toma prestado del Japón: papel crema, tinta bermellón, sellos <i>hanko</i> y mucho espacio en blanco.</p>
+      <div class="cap">El nombre</div>
+      <h2>Zerkalo significa «espejo».</h2>
+      <p>El nombre viene de <i>El espejo</i> (<i>Zérkalo</i>, 1975), de Andréi Tarkovski: una película tejida con recuerdos, poemas e imágenes en la que el espectador termina por reconocerse.</p>
+      <p>Así entiende Zerkalo la lectura: como <b>un espejo de palabras que refleja el alma</b>. Cada libro nos devuelve algo de quienes somos; por eso merece leerse con calma y con cuidado.</p>
+      <p class="soft">En japonés, espejo se escribe <span class="kj">鏡</span> (<i>kagami</i>). Ese es el sello de la aplicación.</p>
     </div>
-    <div style="text-align:center"><span class="hanko kj" style="width:min(240px,60vw);height:min(240px,60vw);font-size:min(140px,35vw);transform:rotate(-4deg)">鏡</span></div>
+    <div style="text-align:center"><span class="hanko kj" style="width:min(220px,58vw);height:min(220px,58vw);font-size:min(128px,34vw);transform:rotate(-4deg)">鏡</span></div>
   </div>
 </section>
 
-<section>
-  <div class="wrap">
-    <div class="cap">Diagramación</div>
-    <h2>El mismo texto, tratado con oficio.</h2>
-    <p style="max-width:640px">Primero, como suelen venir muchos EPUB. Después, lo que hace Zerkalo con el modo «Zerkalo» (también se puede elegir «Original», «Mía» o «Ninguna»).</p>
-    <div class="cmp">
-      <div class="sheet bad">
-        <div class="tag">Como viene el archivo</div>
-        <div class="txt">
-          <p>Una tormenta avanzaba hacia el norte. Negros nubarrones cubrían el bosque de gimnospermas gigantes mientras los estratocúmulos se elevaban a nueve kilómetros de altura.</p>
-          <p>Los relámpagos rasgaban el horizonte.</p>
-        </div>
-        <ul class="notes"><li>Bandera irregular a la derecha</li><li>Interlineado apretado</li><li>Espacio entre párrafos en vez de sangría</li><li>Línea suelta al final</li></ul>
+<section class="sheet">
+  <div class="cap">La diagramación</div>
+  <h2>El mismo texto, tratado con oficio.</h2>
+  <p>Cada capítulo se recompone con reglas de imprenta. Primero, un párrafo tal como suele llegar en un EPUB; después, el mismo párrafo en Zerkalo.</p>
+  <div class="cmp">
+    <div class="box bad">
+      <div class="tag">Como llega el archivo</div>
+      <div class="txt">
+        <p>Una tormenta avanzaba hacia el norte. Negros nubarrones cubrían el bosque de árboles gigantes mientras las nubes se elevaban a nueve kilómetros de altura.</p>
+        <p>Los relámpagos rasgaban el horizonte.</p>
       </div>
-      <div class="sheet good">
-        <div class="tag">Con Zerkalo</div>
-        <div class="txt">
-          <p>Una tormenta avanzaba hacia el norte. Negros nubarrones cubrían el bosque de gimnospermas gigantes mientras los estratocúmulos se elevaban a nueve kilómetros de altura.</p>
-          <p>Los relámpagos rasgaban el horizonte.</p>
-        </div>
-        <ul class="notes"><li>Justificado con partición según el idioma</li><li>Interlineado amplio</li><li>Sangría de párrafo</li><li>Párrafos que no dejan líneas sueltas</li></ul>
+      <ul class="notes"><li>Margen derecho irregular</li><li>Interlineado estrecho</li><li>Espacio entre párrafos en lugar de sangría</li></ul>
+    </div>
+    <div class="box good">
+      <div class="tag">En Zerkalo</div>
+      <div class="txt">
+        <p>Una tormenta avanzaba hacia el norte. Negros nubarrones cubrían el bosque de árboles gigantes mientras las nubes se elevaban a nueve kilómetros de altura.</p>
+        <p>Los relámpagos rasgaban el horizonte.</p>
       </div>
+      <ul class="notes"><li>Justificado con partición silábica según el idioma</li><li>Interlineado amplio</li><li>Sangría de primera línea</li></ul>
     </div>
-    <div class="grid">
-      <div class="item"><b>Medida de línea</b><span>Alrededor de 66 caracteres por línea, lo que recomiendan los estudios de lectura. En tabletas no se estira de lado a lado.</span></div>
-      <div class="item"><b>Viudas y huérfanas</b><span>Ningún párrafo deja una línea sola arriba o abajo de la página. Los títulos no quedan solos al pie.</span></div>
-      <div class="item"><b>Versalitas y cursivas reales</b><span>Usa las versalitas y negritas dibujadas en la fuente, no las falsas que fabrica el teléfono.</span></div>
-      <div class="item"><b>Poesía</b><span>Reconoce los poemas y los deja sin justificar, con sus sangrías, para que el verso respire.</span></div>
-      <div class="item"><b>Márgenes en milímetros</b><span>Cada lado se ajusta en milímetros reales de pantalla, y se puede elegir si respetan la cámara.</span></div>
-      <div class="item"><b>Fuentes de libro</b><span>Literata, EB Garamond, Shippori Mincho y más, con su peso, interletrado y modo para dislexia.</span></div>
-    </div>
+  </div>
+
+  <h3 style="font:500 21px Literata,serif;margin-top:34px">Lo que dice la investigación</h3>
+  <p class="soft" style="margin-top:4px">Las decisiones de diseño no responden al gusto, sino a lo que se sabe sobre cómo leemos.</p>
+  <div class="study">
+    <div><b>45–75</b><span>caracteres por línea es la medida que permite leer de corrido sin fatiga; en torno a 66 se considera la ideal. Zerkalo mantiene sus líneas dentro de ese rango, también en tabletas.<i>Robert Bringhurst, <span style="font-style:normal">Los elementos del estilo tipográfico</span></i></span></div>
+    <div><b>Línea</b><span>En pantalla, la longitud de la línea y el espacio entre líneas influyen en la velocidad y la comodidad de lectura. Por eso el interlineado es generoso y los márgenes se ajustan en milímetros reales.<i>Mary C. Dyson, revisión sobre la disposición del texto en pantalla (2004)</i></span></div>
+    <div><b>Repaso</b><span>Recordar activamente y repasar a intervalos crecientes están entre las técnicas de estudio con mayor respaldo científico. En ellas se basa el modo Estudio.<i>Dunlosky y colaboradores, <span style="font-style:normal">Improving Students' Learning</span> (2013)</i></span></div>
+  </div>
+
+  <div class="grid">
+    <div class="item"><b>Viudas y huérfanas</b><span>Ningún párrafo deja una línea suelta al comienzo o al final de la página, y ningún título queda solo al pie.</span></div>
+    <div class="item"><b>Versalitas y cursivas reales</b><span>Se usan las que la fuente trae dibujadas, no las imitaciones que genera el teléfono.</span></div>
+    <div class="item"><b>Poesía</b><span>Los poemas se reconocen y conservan sus versos y sangrías.</span></div>
+    <div class="item"><b>Márgenes en milímetros</b><span>Cada lado se ajusta por separado, con la opción de respetar o ignorar la cámara.</span></div>
+    <div class="item"><b>Tipografías de libro</b><span>Literata, EB Garamond, Shippori Mincho y otras, además de un modo para dislexia.</span></div>
+    <div class="item"><b>Modos de lectura</b><span>Por páginas, en desplazamiento o el libro completo como un solo rollo, con un desenfoque suave en los bordes.</span></div>
   </div>
 </section>
 
-<section>
-  <div class="wrap two rev">
-    <div>
-      <div class="cap">Modos de lectura</div>
-      <h2>Páginas, desplazamiento o todo el libro seguido.</h2>
-      <p>Se puede leer pasando páginas, como un libro de papel, o deslizando. En el modo continuo, el libro entero es un solo rollo: los capítulos se encadenan sin saltos y el texto se desvanece arriba y abajo con un desenfoque suave.</p>
-      <p>Hay varios papeles (Crema, Sepia, Gris, Nogal, Negro), uno que cambia según la hora, un velo para leer de noche sin tocar el brillo y la hora con el avance escondidos junto a la cámara.</p>
-    </div>
-    <div class="phone"><div class="scr" style="background:#2b2420">
-      <div class="cam"></div>
-      <div class="status" style="color:#8f8172"><span>23:40</span><span>48 %</span></div>
-      <div class="page" style="color:#e5d8c4">
-        <h4 style="color:#efe3cf">II</h4>
-        <p class="first" style="color:#e5d8c4"><span class="sc">El faro</span> llevaba años apagado, pero todas las noches alguien subía la escalera de caracol y se sentaba arriba a mirar el mar.</p>
-        <div class="verse" style="color:#d7c9b3">La luz no vuelve,<br>&nbsp;&nbsp;pero el que espera<br>aprende a ver en lo oscuro.</div>
-        <p style="color:#e5d8c4">Nadie en el pueblo sabía quién era. Algunos decían que un pescador viejo; otros, que una muchacha que escribía cartas que nunca enviaba.</p>
-        <p style="color:#e5d8c4">Lo único seguro era el rastro de arena en los escalones.</p>
-        <p style="color:#e5d8c4">Una noche de tormenta, Tomás decidió esperar al pie de la torre. Se llevó una manta, un termo de café y la paciencia de quien no tiene a dónde ir.</p>
-        <p style="color:#e5d8c4">Pasada la medianoche oyó pasos en la arena, lentos y seguros, como de alguien que conoce el camino de memoria. Contuvo el aliento y no se movió.</p>
-        <p style="color:#e5d8c4">La figura se detuvo frente a la puerta, sacó una llave antigua y, antes de entrar, miró hacia donde él estaba escondido, como si lo hubiera sabido siempre.</p>
-      </div>
-      <div class="blur" style="background:linear-gradient(to top,rgba(43,36,32,.9),rgba(43,36,32,0))"></div>
-    </div></div>
+<section class="sheet">
+  <div class="cap">El espíritu japonés</div>
+  <h2>Menos ruido, más libro.</h2>
+  <p>La estética de Zerkalo se inspira en la filosofía japonesa: papel crema, tinta bermellón, sellos <i>hanko</i> y una relación respetuosa con el espacio en blanco. Tres ideas guían su diseño:</p>
+  <div class="ideas">
+    <div class="idea"><span class="hanko kj">間</span><b>Ma</b><span>El vacío también comunica. Márgenes e interlineado dejan respirar al texto.</span></div>
+    <div class="idea"><span class="hanko kj">簡素</span><b>Kanso</b><span>Sencillez: quitar lo que sobra para que solo quede el libro.</span></div>
+    <div class="idea"><span class="hanko kj">改善</span><b>Kaizen</b><span>Mejorar un poco cada día. Cada versión pule algo, y la opinión de quien lee forma parte de ello.</span></div>
   </div>
 </section>
 
-<section>
-  <div class="wrap">
-    <div class="cap">Más allá de leer</div>
-    <h2>Lo que también trae.</h2>
-    <div class="grid">
-      <div class="item"><b>Dos idiomas a la vez</b><span>Un libro y su traducción lado a lado, «casados» párrafo con párrafo. Traducir una palabra o una frase con un toque.</span></div>
-      <div class="item"><b>Escuchar</b><span>Audiolibros libres en varios idiomas, que retoman el capítulo donde ibas y se pueden escuchar mientras se lee.</span></div>
-      <div class="item"><b>Biblioteca y Tansu</b><span>Estantes por género, autor e idioma, favoritos y portadas alternativas (o la que uno elija).</span></div>
-      <div class="item"><b>Subrayados a mano</b><span>Marcador, lápiz u ondulado, con colores con nombre: Importante, Idea, Cita, Duda.</span></div>
-      <div class="item"><b>Catálogos de libros libres</b><span>Libros de dominio público y acceso abierto, y cualquier EPUB propio desde Archivos, Drive o WhatsApp.</span></div>
-      <div class="item"><b>Todo en tu teléfono</b><span>Sin cuentas ni anuncios. Los libros, notas y sellos viven en el teléfono.</span></div>
-    </div>
-  </div>
-</section>
-
-<section>
-  <div class="wrap two">
-    <div>
-      <div class="cap">Estudio</div>
-      <h2>Recordar lo que vale la pena.</h2>
-      <p>Cuando algo merece recordarse, se toca «Tarjeta» y Zerkalo sugiere una pregunta. Después las repasa en el momento justo antes de olvidarlas: primero al día siguiente, luego a los 3, 7, 16 y 35 días.</p>
-      <p>El repaso tiene un final claro («Terminaste lo de hoy») y una racha amable que permite días de descanso. Entre tarjeta y tarjeta, a veces vuelve una frase que subrayaste hace tiempo.</p>
-    </div>
-    <div class="study">
-      <div class="cap">Pregunta</div>
-      <div class="q">¿Qué es la memoria según el capítulo 2?</div>
-      <div class="a">Un caminito en el pasto: si no se pisa, el pasto lo tapa.</div>
-      <div class="ans"><div>No me acordé<small>vuelve mañana</small></div><div class="y">Me acordé<small>vuelve en 7 días</small></div></div>
-    </div>
-  </div>
-</section>
-
-<section>
-  <div class="wrap two rev">
+<section class="sheet">
+  <div class="two rev">
     <div>
       <div class="cap">Sellos</div>
       <h2>Un pasaporte de lectura.</h2>
-      <p>En Japón existe el <i>goshuinchō</i>: un librito donde la gente colecciona el sello de cada templo que visita, con la fecha escrita a mano. En Zerkalo, cada libro terminado es un lugar al que llegaste, y recibe su sello <i>hanko</i>.</p>
-      <p>El kanji depende del género (<span class="kj">物</span> novela, <span class="kj">詩</span> poesía, <span class="kj">星</span> ciencia ficción…). La tinta cambia con los años de lectura, y muy de vez en cuando sale un sello de cera hecho con los colores de la portada.</p>
+      <p>En Japón existe el <i>goshuinchō</i>, un cuaderno donde los viajeros reúnen el sello de cada templo que visitan, con su fecha. En Zerkalo, cada libro terminado es un lugar al que se llega, y recibe su sello <i>hanko</i>.</p>
+      <p>El kanji corresponde al género (<span class="kj">物</span> novela, <span class="kj">詩</span> poesía, <span class="kj">星</span> ciencia ficción…) y la tinta cambia con el camino recorrido. No hay rachas que castiguen ni recompensas vacías: solo la memoria de lo leído.</p>
       <div class="inks">
-        <div><span class="hanko kj">朱</span><br>Bermellón<br>1–99</div>
-        <div><span class="hanko kj" style="background:linear-gradient(160deg,#36507f,#22365a)">藍</span><br>Índigo<br>100</div>
-        <div><span class="hanko kj" style="background:linear-gradient(160deg,#3a3633,#171514)">墨</span><br>Negra<br>200</div>
-        <div><span class="hanko kj" style="background:linear-gradient(160deg,#6b3a7c,#45214f)">紫</span><br>Púrpura<br>500</div>
-        <div><span class="hanko kj" style="background:linear-gradient(135deg,#8a6a20,#f0d27a 50%,#8a6a20)">金</span><br>Oro<br>1000</div>
+        <div><span class="hanko kj">朱</span><br>Bermellón</div>
+        <div><span class="hanko kj" style="background:linear-gradient(160deg,#36507f,#22365a)">藍</span><br>Índigo</div>
+        <div><span class="hanko kj" style="background:linear-gradient(160deg,#3a3633,#171514)">墨</span><br>Negra</div>
+        <div><span class="hanko kj" style="background:linear-gradient(160deg,#6b3a7c,#45214f)">紫</span><br>Púrpura</div>
+        <div><span class="hanko kj" style="background:linear-gradient(135deg,#8a6a20,#f0d27a 50%,#8a6a20)">金</span><br>Oro</div>
       </div>
     </div>
     <div class="pass">
       <div class="cap">Noviembre 2026</div>
       <div class="pgrid">
-        <div><span class="hanko kj" style="transform:rotate(-4deg)">星</span><div class="t">Hyperion</div><div class="m">Dan Simmons · 20 nov<br>星 ciencia ficción · nº 3</div></div>
-        <div><span class="hanko kj" style="transform:rotate(3deg);width:70px;height:70px;font-size:38px;margin:9px 0">夜</span><div class="t">Lector nocturno</div><div class="m">especial · 18 nov</div></div>
-        <div><span class="hanko kj" style="transform:rotate(-2deg);background:linear-gradient(135deg,#2a4b7c,#c9a24a 55%,#6b2a3a)">物</span><div class="t">Pedro Páramo</div><div class="m">Juan Rulfo · 12 nov<br>sello de cera · nº 2</div></div>
-        <div><span class="hanko kj" style="transform:rotate(4deg)">詩</span><div class="t">Veinte poemas</div><div class="m">Neruda · 3 nov<br>詩 poesía · nº 1</div></div>
+        <div><span class="hanko kj" style="transform:rotate(-4deg)">星</span><div class="t">Hyperion</div><div class="m">Dan Simmons · nº 3</div></div>
+        <div><span class="hanko kj" style="transform:rotate(3deg);width:66px;height:66px;font-size:36px;margin:9px 0">夜</span><div class="t">Lector nocturno</div><div class="m">sello especial</div></div>
+        <div><span class="hanko kj" style="transform:rotate(-2deg);background:linear-gradient(135deg,#2a4b7c,#c9a24a 55%,#6b2a3a)">物</span><div class="t">Pedro Páramo</div><div class="m">sello de cera · nº 2</div></div>
+        <div><span class="hanko kj" style="transform:rotate(4deg)">詩</span><div class="t">Veinte poemas</div><div class="m">Neruda · nº 1</div></div>
       </div>
     </div>
   </div>
 </section>
 
-<section id="instalar">
-  <div class="wrap">
-    <div class="cap">Instalar</div>
-    <h2>Tres pasos.</h2>
-    <p style="max-width:640px">Zerkalo todavía no está en la Play Store, así que se instala directo. Cada versión pasa pruebas automáticas en Android 14, 15 y 16 antes de publicarse.</p>
-    <div class="steps">
-      <div class="step"><div><b>Descarga el archivo</b><p>Toca «Descargar para Android». Si Chrome pregunta, elige «Descargar de todos modos».</p></div></div>
-      <div class="step"><div><b>Ábrelo</b><p>Toca la descarga terminada. La primera vez, Android pide permiso para «instalar apps de fuentes desconocidas» desde Chrome: actívalo y vuelve atrás.</p></div></div>
-      <div class="step"><div><b>Instala y abre</b><p>Toca «Instalar». Zerkalo trae un libro de bienvenida para empezar. Para actualizar, se descarga de nuevo desde esta página.</p></div></div>
-    </div>
-    <p style="margin-top:28px"><a class="btn" href="https://github.com/sebastianbalbinu/Zerkalo/releases/latest/download/Zerkalo.apk">Descargar Zerkalo</a></p>
+<section class="sheet">
+  <div class="cap">Más allá de la lectura</div>
+  <h2>Lo que también ofrece.</h2>
+  <div class="grid">
+    <div class="item"><b>Libro y audiolibro</b><span>Audiolibros libres de LibriVox unidos a su texto: cuando el narrador comienza un capítulo, el libro lo acompaña. Si falta el texto, la aplicación lo consigue.</span></div>
+    <div class="item"><b>Dos idiomas a la vez</b><span>Un libro y su traducción lado a lado, párrafo por párrafo, y traducción de palabras con un toque.</span></div>
+    <div class="item"><b>Estudio</b><span>Tarjetas de lo que vale la pena recordar, repasadas justo antes de olvidarlas, con un final claro cada día.</span></div>
+    <div class="item"><b>Libros libres</b><span>Miles de obras de dominio público, además de cualquier EPUB propio desde Archivos, Drive o WhatsApp.</span></div>
+    <div class="item"><b>Un buscador comprensivo</b><span>Encuentra lo que buscas aunque haya errores de escritura o escribas «20000» en lugar de «veinte mil».</span></div>
+    <div class="item"><b>Todo en tu teléfono</b><span>Sin cuentas ni anuncios. Libros, notas y sellos permanecen contigo.</span></div>
   </div>
 </section>
 
-<section>
-  <div class="wrap">
-    <div class="ask">
-      <div class="cap">Para quien sabe de diagramación</div>
-      <h2>¿Me ayudas a mejorarla?</h2>
-      <p>Zerkalo está hecho por una persona, sin equipo editorial. Si has diagramado libros, revistas o periódicos, tu ojo vale oro. Estas son las preguntas que más me importan:</p>
-      <ol>
-        <li><b>Márgenes de la pantalla.</b> Hoy son 4 mm a los lados, 1,5 mm arriba y 2 mm abajo. ¿Cómo los ajustarías para una pantalla de teléfono?</li>
-        <li><b>Interlineado y cuerpo.</b> ¿Qué relación entre tamaño de letra e interlineado te parece cómoda para leer horas?</li>
-        <li><b>Inicio de capítulo.</b> ¿Cómo debería verse: espacio antes del título, capitular, versalitas en las primeras palabras?</li>
-        <li><b>Sangría o espacio entre párrafos.</b> ¿Siempre sangría? ¿Cuánta?</li>
-        <li><b>Justificado en columnas angostas.</b> Con pocas palabras por línea salen «ríos» de espacio. ¿Prefieres bandera a la izquierda en ese caso?</li>
-        <li><b>Lo que no se ve bien.</b> Cualquier cosa que te moleste a la vista, aunque no sepas cómo arreglarla.</li>
-      </ol>
-      <p style="margin-top:20px">Una captura de pantalla con un comentario basta. Gracias de corazón.</p>
-    </div>
+<section class="sheet">
+  <div class="cap">El trabajo detrás</div>
+  <h2>Versión tras versión.</h2>
+  <p>Detrás de Zerkalo no hay una empresa ni un equipo: hay una persona que la construye con paciencia, en sus ratos libres. Cada cambio se prueba antes de llegar a tu teléfono: la aplicación se instala sola en tres versiones de Android, abre un libro, pasa páginas y registra la pantalla. Si algo falla, esa versión no se publica.</p>
+  <div class="nums">
+    <div class="num"><b>60+</b><span>versiones publicadas</span></div>
+    <div class="num"><b>3</b><span>versiones de Android en cada prueba</span></div>
+    <div class="num"><b>0</b><span>anuncios y cuentas</span></div>
+    <div class="num"><b>1</b><span>persona, con mucho amor</span></div>
   </div>
 </section>
+
+<section class="sheet" id="instalar">
+  <div class="cap">Instalación</div>
+  <h2>Tres pasos.</h2>
+  <p>Zerkalo aún no está en Google Play, así que se instala directamente desde esta página.</p>
+  <div class="steps">
+    <div class="step"><div><b>Descarga el archivo</b><p>Toca «Descargar Zerkalo». Si el navegador lo pregunta, elige «Descargar de todos modos».</p></div></div>
+    <div class="step"><div><b>Ábrelo</b><p>Toca la descarga terminada. La primera vez, Android pedirá permiso para instalar aplicaciones desde el navegador: actívalo y vuelve atrás.</p></div></div>
+    <div class="step"><div><b>Instala y lee</b><p>Toca «Instalar». La aplicación incluye un libro de bienvenida. Para actualizarla, basta con volver a descargarla desde aquí.</p></div></div>
+  </div>
+  <p style="margin-top:24px"><a class="btn dark" href="https://github.com/sebastianbalbinu/Zerkalo/releases/latest/download/Zerkalo.apk">Descargar Zerkalo</a></p>
+  <p class="soft" style="font:400 13px/1.5 Zen,sans-serif">¿Tu teléfono es antiguo o de gama básica y no la instala? Prueba la <a href="https://github.com/sebastianbalbinu/Zerkalo/releases/latest/download/Zerkalo-armv7.apk">versión para teléfonos de 32 bits</a>.</p>
+</section>
+
+<section class="ask">
+  <div class="cap">Construyámosla juntos</div>
+  <h2>Tu mirada también es parte del libro.</h2>
+  <p>Si la usas, me encantaría saber qué te gustó y qué no. Y si has diagramado libros, revistas o periódicos, tu experiencia es invaluable. Estas son las preguntas que más me importan:</p>
+  <ol>
+    <li><b>Márgenes.</b> ¿Cómo los ajustarías para la pantalla de un teléfono?</li>
+    <li><b>Interlineado y cuerpo de letra.</b> ¿Qué proporción te resulta cómoda para leer durante horas?</li>
+    <li><b>Inicio de capítulo.</b> ¿Espacio antes del título, letra capitular, versalitas en las primeras palabras?</li>
+    <li><b>Sangría o espacio entre párrafos.</b> ¿Siempre sangría? ¿De qué medida?</li>
+    <li><b>Justificado en líneas cortas.</b> Con pocas palabras por línea aparecen «ríos» de espacio. ¿Conviene alinear a la izquierda en esos casos?</li>
+    <li><b>Lo que no funciona.</b> Cualquier detalle que incomode la vista, aunque no sepas cómo resolverlo.</li>
+  </ol>
+  <p style="margin-top:20px">Basta una captura de pantalla con un comentario. Gracias de corazón.</p>
+</section>
+
+</main>
 
 <footer>
   <span class="hanko kj" style="width:44px;height:44px;font-size:24px">鏡</span>
-  <p>Zerkalo · hecho en Colombia con cuidado<br><a href="https://github.com/sebastianbalbinu/Zerkalo/releases">Todas las versiones</a></p>
+  <p>Zerkalo · Hecho en Colombia, con amor<br><a href="https://github.com/sebastianbalbinu/Zerkalo/releases">Todas las versiones</a></p>
 </footer>
 
 </body>
