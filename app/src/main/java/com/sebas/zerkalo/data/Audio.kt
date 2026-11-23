@@ -109,6 +109,32 @@ object LibriVox {
         val u = "https://archive.org/advancedsearch.php?q=" + enc(q) +
             "&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=description&fl[]=language&sort[]=" + enc(sort.archive) +
             "&rows=$rows&page=$page&output=json"
+        val first = fetch(u, lang)
+        if (query.isNullOrBlank() || raw) return first
+        // Con margen de error: si lo exacto trae poco, se busca cada palabra "parecida" (~) en título o autor
+        // y se ordena por cuánto se parece a lo que escribiste (números en letras o cifras dan igual).
+        val want = Fuzzy.tokens(query)
+        val loose = if (first.size >= 5) emptyList() else runCatching {
+            val ws = want.filter { it.length > 2 && !it[0].isDigit() }.take(5)
+            if (ws.isEmpty()) emptyList() else {
+                val any = ws.joinToString(" OR ") { "$it~1" }
+                val q2 = buildString {
+                    append("collection:librivoxaudio AND mediatype:audio")
+                    LANGS.firstOrNull { it.id == lang }?.archive?.takeIf { it.isNotEmpty() }?.let { append(" AND language:(").append(it.joinToString(" OR ")).append(")") }
+                    append(" AND (title:($any) OR creator:($any))")
+                }
+                fetch("https://archive.org/advancedsearch.php?q=" + enc(q2) +
+                    "&fl[]=identifier&fl[]=title&fl[]=creator&fl[]=description&fl[]=language&sort[]=" + enc(sort.archive) +
+                    "&rows=${rows * 2}&page=$page&output=json", lang)
+            }
+        }.getOrDefault(emptyList())
+        return (first + loose).distinctBy { it.id }
+            .map { it to Fuzzy.score(want, Fuzzy.tokens(it.title + " " + it.author)) }
+            .filter { (b, sc) -> sc >= 0.5 || first.any { it.id == b.id } }
+            .sortedByDescending { it.second }.map { it.first }.take(rows)
+    }
+
+    private suspend fun fetch(u: String, lang: String): List<AudioBook> {
         val docs = JSONObject(Net.text(u, timeout = 20_000)).optJSONObject("response")?.optJSONArray("docs") ?: JSONArray()
         fun str(o: JSONObject, k: String): String = when (val v = o.opt(k)) { is JSONArray -> v.optString(0); null -> ""; else -> v.toString() }
         return (0 until docs.length()).map { i ->
@@ -193,7 +219,8 @@ object AudioStore {
 
     /** Une el audiolibro con un EPUB de la biblioteca, para leer mientras se escucha. */
     fun link(id: String, bookId: String) {
-        books.value = books.value.map { if (it.id == id) it.copy(linkedBook = bookId) else it }
+        // Un libro tiene un solo audiolibro unido: si había otro, se suelta
+        books.value = books.value.map { if (it.id == id) it.copy(linkedBook = bookId) else if (it.linkedBook == bookId) it.copy(linkedBook = null) else it }
         save()
     }
 
@@ -235,17 +262,48 @@ object AudioStore {
         b.linkedBook?.let { Library.book(it) }?.let { return it }
         val t = norm(b.title)
         if (t.length < 3) return null
-        return Library.books.value.firstOrNull { val n = norm(it.title); n.length >= 3 && (n == t || n.startsWith(t) || t.startsWith(n)) }
+        Library.books.value.firstOrNull { val n = norm(it.title); n.length >= 3 && (n == t || n.startsWith(t) || t.startsWith(n)) }?.let { return it }
+        // Con margen: "Veinte mil leguas…" = "20000 leguas…", sin artículos ni subtítulos, mismo autor
+        return Library.books.value.filter { Fuzzy.sameWork(it.title, it.author, b.title, b.author) }
+            .maxByOrNull { Fuzzy.titles(it.title, b.title) }
     }
 
-    /** Busca en LibriVox la versión en audio de un libro de tu biblioteca. */
+    /** Como [bookFor], y además por la edición: si LibriVox leyó el mismo libro de Gutenberg que tienes. */
+    suspend fun findBook(b: AudioBook): Book? {
+        bookFor(b)?.let { return it }
+        val ids = AudioText.gutenbergIds(b.id)
+        return Library.books.value.firstOrNull { it.key.startsWith("pg:") && it.key.removePrefix("pg:") in ids }
+    }
+
+    /**
+     * Busca en LibriVox la versión en audio de un libro de tu biblioteca, con margen de error:
+     * primero por la edición de Gutenberg, luego por título y autor, luego solo por autor,
+     * y al final con palabras parecidas. Se ordena por cuánto se parece el título.
+     */
     suspend fun findFor(book: Book): List<AudioBook> = withContext(Dispatchers.IO) {
-        val words = book.title.replace(Regex("[^\\p{L}\\p{N} ]"), " ").split(' ').filter { it.length > 2 }.take(4)
-        if (words.isEmpty()) return@withContext emptyList()
-        val author = book.author.split(' ', ',').filter { it.length > 2 }.maxByOrNull { it.length }.orEmpty()
-        val q = (listOf("title:(" + words.joinToString(" AND ") + ")") + if (author.isNotBlank()) listOf("creator:($author)") else emptyList()).joinToString(" AND ")
         val lang = book.lang.ifBlank { "es" }
-        runCatching { LibriVox.search(lang, q, rows = 10, raw = true) }.getOrDefault(emptyList())
-            .ifEmpty { runCatching { LibriVox.search(lang, "title:(" + words.joinToString(" AND ") + ")", rows = 10, raw = true) }.getOrDefault(emptyList()) }
+        val byEdition = LinkedHashMap<String, AudioBook>()
+        book.key.takeIf { it.startsWith("pg:") }?.removePrefix("pg:")?.let { id ->
+            runCatching { LibriVox.search("all", "description:(\"gutenberg.org/ebooks/$id\" OR \"gutenberg.org/etext/$id\")", rows = 10, raw = true) }
+                .getOrDefault(emptyList()).forEach { byEdition[it.id] = it }
+        }
+        val words = Fuzzy.tokens(book.title).filter { it.length > 2 && !it[0].isDigit() }.sortedByDescending { it.length }.take(3)
+        val sur = Fuzzy.surname(book.author)
+        val queries = buildList {
+            if (words.isNotEmpty() && sur.isNotEmpty()) add("title:(" + words.joinToString(" AND ") + ") AND creator:($sur)")
+            if (words.isNotEmpty()) add("title:(" + words.joinToString(" AND ") + ")")
+            if (sur.isNotEmpty()) add("creator:($sur~1)")
+            if (words.isNotEmpty()) add("title:(" + words.joinToString(" OR ") { "$it~1" } + ")")
+        }
+        val found = LinkedHashMap<String, AudioBook>()
+        fun good() = found.values.any { Fuzzy.sameWork(book.title, book.author, it.title, it.author) }
+        for (q in queries) {
+            runCatching { LibriVox.search(lang, q, rows = 20, raw = true) }.getOrDefault(emptyList()).forEach { found.putIfAbsent(it.id, it) }
+            if (good()) break
+        }
+        val ranked = found.values.filter { it.id !in byEdition }
+            .map { it to Fuzzy.titles(book.title, it.title) + (if (Fuzzy.sameAuthor(book.author, it.author)) 0.2 else 0.0) }
+            .filter { it.second >= 0.5 }.sortedByDescending { it.second }.map { it.first }
+        (byEdition.values + ranked).take(12)
     }
 }

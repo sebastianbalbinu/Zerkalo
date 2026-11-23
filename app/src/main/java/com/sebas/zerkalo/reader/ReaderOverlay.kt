@@ -603,7 +603,9 @@ private fun ListenSheet(act: ReaderActions, onClose: () -> Unit) {
     val linked = remember { act.linkedAudio() }
     var found by remember { mutableStateOf<List<com.sebas.zerkalo.data.AudioBook>?>(null) }
     var busy by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(Unit) { if (linked == null) found = act.findAudio() }
+    var other by remember { mutableStateOf(false) }   // buscar otro audiolibro aunque ya haya uno unido
+    var q by remember { mutableStateOf("") }
+    LaunchedEffect(other) { if (linked == null || other) found = act.findAudio() }
     var follow by remember { mutableStateOf(com.sebas.zerkalo.data.Prefs.audioFollow) }
     fun start(ab: com.sebas.zerkalo.data.AudioBook, here: Boolean = true) {
         if (ab.tracks.isNotEmpty()) { act.listen(ab, here); return }
@@ -619,7 +621,7 @@ private fun ListenSheet(act: ReaderActions, onClose: () -> Unit) {
         Text("Audiolibros de LibriVox, leídos por personas. Empieza en el capítulo donde vas.", style = Type.ui, color = p.text2, modifier = Modifier.padding(top = 6.dp))
         Spacer(Modifier.height(14.dp))
         when {
-            linked != null -> {
+            linked != null && !other -> {
                 Card2 {
                     Caption("Tu audiolibro")
                     Text(linked.title, style = Type.ui, color = p.text, modifier = Modifier.padding(top = 4.dp))
@@ -642,10 +644,14 @@ private fun ListenSheet(act: ReaderActions, onClose: () -> Unit) {
                     }
                 }
                 Text("Cuando el audio pasa de capítulo, el texto salta a ese capítulo.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
+                Text(
+                    "¿No es este? Unir otro audiolibro", style = Type.uiSmall, color = p.accent,
+                    modifier = Modifier.padding(top = 12.dp).clip(RoundedCornerShape(8.dp)).clickable { other = true }.padding(vertical = 6.dp),
+                )
             }
             found == null -> Text("Buscando en LibriVox…", style = Type.ui, color = p.text2)
             found!!.isEmpty() -> Text(
-                "No encontré este libro en audio. LibriVox solo graba obras de dominio público; prueba en la pestaña Escuchar con otro título.",
+                "No encontré este libro en audio. LibriVox solo graba obras de dominio público. Prueba buscando con otras palabras:",
                 style = Type.ui, color = p.text2,
             )
             else -> LazyColumn(Modifier.heightIn(max = 420.dp)) {
@@ -665,6 +671,11 @@ private fun ListenSheet(act: ReaderActions, onClose: () -> Unit) {
                         Text(if (busy == ab.id) "…" else "Escuchar", style = Type.uiSmall, color = p.accent)
                     }
                 }
+            }
+        }
+        if (linked == null || other) {
+            com.sebas.zerkalo.ui.SearchField(q, { q = it }, "Buscar con otras palabras (título o autor)", Modifier.fillMaxWidth().padding(top = 14.dp)) {
+                if (q.isNotBlank()) { found = null; scope.launch { found = act.searchAudio(q.trim()) } }
             }
         }
     }

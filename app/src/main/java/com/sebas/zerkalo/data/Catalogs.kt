@@ -173,11 +173,16 @@ object Catalogs {
     suspend fun gutenberg(lang: String, topic: String? = null, search: String? = null): Page {
         gutenbergIndex(lang)?.let { idx ->
             val bit = topic?.let { t -> TOPICS.indexOfFirst { it.id == t } } ?: -1
-            val words = search?.let { norm(it).split(Regex("\\s+")).filter { w -> w.length > 1 } } ?: emptyList()
-            val found = idx.asSequence()
-                .filter { bit < 0 || (it.mask and (1 shl bit)) != 0 }
-                .filter { b -> words.all { b.norm.contains(it) } }
-                .take(if (search != null) 40 else 60).map { it.toItem(lang) }.toList()
+            val words = search?.let { Fuzzy.tokens(it) } ?: emptyList()
+            val pool = idx.asSequence().filter { bit < 0 || (it.mask and (1 shl bit)) != 0 }
+            val found = if (search == null) pool.take(60).map { it.toItem(lang) }.toList()
+            else withContext(Dispatchers.Default) {
+                // Primero lo exacto; si no hay, con margen de error (letras de más o de menos, números en letras)
+                val exact = pool.filter { b -> words.all { b.norm.contains(it) } }.take(40).toList()
+                (if (exact.size >= 5) exact else (exact + pool.map { it to Fuzzy.score(words, Fuzzy.tokens(it.title + " " + it.author)) }
+                    .filter { it.second >= 0.66 }.sortedByDescending { it.second }.take(40).map { it.first }.toList()).distinctBy { it.id })
+                    .take(40).map { it.toItem(lang) }
+            }
             if (found.isNotEmpty() || search == null) return Page(found)
         }
         return gutenbergOnline(lang, topic, search)

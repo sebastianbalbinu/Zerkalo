@@ -1368,6 +1368,11 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         brightnessLive = { v -> applyBrightness(v) },
         toggleAuto = { if (ui.auto) stopAuto() else startAuto() },
         findAudio = { com.sebas.zerkalo.data.AudioStore.findFor(book) },
+        searchAudio = { q ->
+            val lang = book.lang.ifBlank { "es" }
+            runCatching { com.sebas.zerkalo.data.LibriVox.search(lang, q, rows = 20) }.getOrDefault(emptyList())
+                .ifEmpty { runCatching { com.sebas.zerkalo.data.LibriVox.search("all", q, rows = 20) }.getOrDefault(emptyList()) }
+        },
         linkedAudio = { com.sebas.zerkalo.data.AudioStore.forBook(book.id) },
         listen = { ab, here ->
             // Si ya lo venías escuchando, conserva por dónde ibas en cada capítulo.
@@ -1697,6 +1702,7 @@ class ReaderActions(
     val brightnessLive: (Float) -> Unit,
     val toggleAuto: () -> Unit,
     val findAudio: suspend () -> List<com.sebas.zerkalo.data.AudioBook>,
+    val searchAudio: suspend (String) -> List<com.sebas.zerkalo.data.AudioBook>,
     val linkedAudio: () -> com.sebas.zerkalo.data.AudioBook?,
     val listen: (com.sebas.zerkalo.data.AudioBook, Boolean) -> Unit, // true = desde el capítulo donde vas leyendo
     val goToTrack: (String) -> Unit,

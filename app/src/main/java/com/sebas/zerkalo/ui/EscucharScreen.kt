@@ -230,7 +230,8 @@ fun AudioSheet(start: AudioBook, onClose: () -> Unit) {
     val playingThis = now.book?.id == b.id
     val started = b.position > 0 || b.index > 0
     val books by com.sebas.zerkalo.data.Library.books.collectAsState()
-    val readable = remember(b.linkedBook, b.title, books) { AudioStore.bookFor(b) }
+    var readable by remember(b.id) { mutableStateOf(AudioStore.bookFor(b)) }
+    LaunchedEffect(b.id, b.linkedBook, books) { readable = AudioStore.findBook(b) }
     ModalBottomSheet(onDismissRequest = onClose, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface) {
         Column(Modifier.padding(horizontal = 22.dp).padding(bottom = 30.dp)) {
             Row {
@@ -277,11 +278,22 @@ fun AudioSheet(start: AudioBook, onClose: () -> Unit) {
                     onClose()
                     openReader(ctx, book)
                 }
-                if (readable != null) {
-                    PillButton("Leer mientras escuchas", { readAlong(readable) }, Modifier.fillMaxWidth().padding(top = 10.dp), ghost = true, icon = "home")
+                val mine = readable
+                var pick by remember { mutableStateOf(false) }
+                if (mine != null) {
+                    PillButton("Leer mientras escuchas", { readAlong(mine) }, Modifier.fillMaxWidth().padding(top = 10.dp), ghost = true, icon = "home")
+                    Text(
+                        "¿No es «${mine.title}»? Elegir otro de mi biblioteca", style = Type.uiSmall, color = p.text2,
+                        modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(8.dp)).clickable { pick = !pick }.padding(6.dp),
+                    )
                 } else if (b.tracks.isNotEmpty()) {
                     GetText(b) { book -> readAlong(book) }
+                    Text(
+                        "Ya lo tengo: elegirlo de mi biblioteca", style = Type.uiSmall, color = p.accent,
+                        modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(8.dp)).clickable { pick = !pick }.padding(6.dp),
+                    )
                 }
+                if (pick) PickFromLibrary(b, books) { book -> pick = false; readAlong(book) }
                 val d = dl[b.id]
                 Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
                     when {
@@ -481,6 +493,36 @@ private fun GetText(b: AudioBook, onReady: (com.sebas.zerkalo.data.Book) -> Unit
                     st?.error?.let { Text(it, style = Type.uiSmall, color = p.accent) }
                 }
                 Text("El audio sigue sonando mientras se descarga.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
+    }
+}
+
+
+/** Unir a mano: los libros de tu biblioteca, los más parecidos primero, con un buscador con margen de error. */
+@Composable
+private fun PickFromLibrary(b: AudioBook, books: List<com.sebas.zerkalo.data.Book>, onPick: (com.sebas.zerkalo.data.Book) -> Unit) {
+    val p = LocalPalette.current
+    var q by remember { mutableStateOf("") }
+    val list = remember(books, q) {
+        val ref = q.ifBlank { b.title + " " + b.author }
+        val want = com.sebas.zerkalo.data.Fuzzy.tokens(ref)
+        books.map { it to com.sebas.zerkalo.data.Fuzzy.score(want, com.sebas.zerkalo.data.Fuzzy.tokens(it.title + " " + it.author)) }
+            .filter { q.isBlank() || it.second >= 0.5 }.sortedByDescending { it.second }.take(8).map { it.first }
+    }
+    Column(Modifier.padding(top = 8.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(p.card.copy(alpha = 0.6f)).padding(12.dp)) {
+        SearchField(q, { q = it }, "Buscar en mi biblioteca", Modifier.fillMaxWidth()) {}
+        if (list.isEmpty()) Text("No encontré nada parecido.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp))
+        list.forEach { book ->
+            Row(
+                Modifier.padding(top = 6.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { onPick(book) }.padding(vertical = 8.dp, horizontal = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(book.title, style = Type.ui, color = p.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    if (book.author.isNotBlank()) Text(book.author, style = Type.uiSmall, color = p.text2, maxLines = 1)
+                }
+                Text("Unir", style = Type.uiSmall, color = p.accent)
             }
         }
     }
