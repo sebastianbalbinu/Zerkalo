@@ -36,6 +36,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -161,6 +163,15 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
             }
         }
 
+        // Audiolibro de este libro: un reproductor pequeño flota sobre el texto mientras lees
+        val ownAudio = listenState.book?.takeIf { linkedAudio != null && it.id == linkedAudio.id && !listenState.sample }
+        AnimatedVisibility(
+            ownAudio != null && !ui.controls && ui.sheet == null && ui.lookup == null, Modifier.align(Alignment.BottomCenter),
+            enter = fadeIn(tween(300)) + slideInVertically { it / 2 }, exit = fadeOut(tween(150)) + slideOutVertically { it / 2 },
+        ) {
+            ownAudio?.let { MiniPlayer(it, listenState, act, Modifier.padding(bottom = if (ui.studyTap) 40.dp else 0.dp)) { ui.sheet = "player" } }
+        }
+
         // Barra superior
         AnimatedVisibility(ui.controls, Modifier.align(Alignment.TopCenter), enter = fadeIn(tween(200)) + slideInVertically { -it / 3 }, exit = fadeOut(tween(180)) + slideOutVertically { -it / 3 }) {
             Box(Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(p.bg, p.bg.copy(alpha = 0.92f), p.bg.copy(alpha = 0f))))) {
@@ -199,9 +210,9 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                         ZIcon("escuchar", p.accent, 18.dp)
                         Column(Modifier.weight(1f).padding(horizontal = 10.dp)) {
                             Text(track?.title ?: ab.title, style = Type.uiSmall, color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            if (ab.linkedBook != null && track != null) Text(
-                                "Ir a este capítulo en el texto", style = Type.uiSmall.copy(fontSize = 11.sp), color = p.accent,
-                                modifier = Modifier.clickable { act.goToTrack(track.title) },
+                            Text(
+                                "Controles y sincronizar", style = Type.uiSmall.copy(fontSize = 11.sp), color = p.accent,
+                                modifier = Modifier.clickable { ui.sheet = "player" },
                             )
                         }
                         Box(Modifier.size(40.dp).clip(CircleShape).clickable { com.sebas.zerkalo.audio.Listen.seekBy(-15_000) }, contentAlignment = Alignment.Center) {
@@ -293,6 +304,7 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
         "fonts" -> FontSheet(ui, act) { ui.sheet = "type" }
         "pair" -> PairSheet(ui, act) { ui.sheet = null }
         "listen" -> ListenSheet(act) { ui.sheet = null }
+        "player" -> PlayerSheet(act) { ui.sheet = null }
         "inks" -> InksSheet(act) { ui.sheet = null }
     }
     ui.activeMark?.let { MarkSheet(it, act) { ui.activeMark = null } }
@@ -1200,5 +1212,140 @@ private fun FinishedSheet(stamp: com.sebas.zerkalo.data.Stamps.BookStamp?, onClo
             )
             PillButton("Gracias", onClose, Modifier.fillMaxWidth())
         }
+    }
+}
+
+
+@Composable
+private fun MiniPlayer(ab: com.sebas.zerkalo.data.AudioBook, st: com.sebas.zerkalo.audio.Listen.State, act: ReaderActions, modifier: Modifier, onOpen: () -> Unit) {
+    val p = LocalPalette.current
+    val track = ab.tracks.getOrNull(st.index)
+    Box(
+        modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(start = 12.dp, end = 12.dp, bottom = 10.dp).fillMaxWidth()
+            .shadow(10.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)).background(p.surface.copy(alpha = 0.96f)).clickable(onClick = onOpen),
+    ) {
+        if (st.duration > 0) Box(Modifier.padding(horizontal = 22.dp).fillMaxWidth().height(2.dp).background(p.text.copy(alpha = 0.08f))) {
+            Box(Modifier.fillMaxWidth((st.position.toFloat() / st.duration).coerceIn(0f, 1f)).height(2.dp).background(p.accent))
+        }
+        Row(Modifier.padding(start = 16.dp, end = 6.dp, top = 6.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(track?.title ?: ab.title, style = Type.uiSmall, color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    if (com.sebas.zerkalo.data.Prefs.audioFollow) "● siguiendo al narrador" else "toca para sincronizar",
+                    style = Type.uiSmall.copy(fontSize = 11.sp), color = p.accent, maxLines = 1,
+                )
+            }
+            Box(Modifier.size(40.dp).clip(CircleShape).clickable { com.sebas.zerkalo.audio.Listen.seekBy(-15_000) }, contentAlignment = Alignment.Center) {
+                Text("−15", style = Type.uiSmall, color = p.text2)
+            }
+            Box(Modifier.size(42.dp).clip(CircleShape).background(p.text).clickable { com.sebas.zerkalo.audio.Listen.toggle() }, contentAlignment = Alignment.Center) {
+                ZIcon(if (st.playing) "pause" else "play", p.bg, 18.dp)
+            }
+            Box(Modifier.size(40.dp).clip(CircleShape).clickable { com.sebas.zerkalo.audio.Listen.seekBy(15_000) }, contentAlignment = Alignment.Center) {
+                Text("+15", style = Type.uiSmall, color = p.text2)
+            }
+        }
+    }
+}
+
+private fun clock(ms: Long): String {
+    val s = (ms / 1000).coerceAtLeast(0)
+    return if (s >= 3600) "%d:%02d:%02d".format(s / 3600, (s / 60) % 60, s % 60) else "%d:%02d".format(s / 60, s % 60)
+}
+
+/** El reproductor completo: tiempo, capítulos, velocidad, temporizador y sincronizar con el texto. */
+@Composable
+private fun PlayerSheet(act: ReaderActions, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    val ctx = LocalContext.current
+    val st by com.sebas.zerkalo.audio.Listen.state.collectAsState()
+    val ab = st.book
+    var drag by remember { mutableStateOf<Float?>(null) }
+    var chapters by remember { mutableStateOf(false) }
+    var follow by remember { mutableStateOf(com.sebas.zerkalo.data.Prefs.audioFollow) }
+    var ear by remember { mutableStateOf<String?>(null) }
+    var earBusy by remember { mutableStateOf(false) }
+    Sheet(onClose) {
+        if (ab == null || ab.tracks.isEmpty()) {
+            Text("No está sonando ningún audiolibro", style = Type.title.copy(fontSize = 20.sp), color = p.text)
+            return@Sheet
+        }
+        val i = st.index
+        Caption("Capítulo ${i + 1} de ${ab.tracks.size}", accent = true)
+        Text(ab.tracks.getOrNull(i)?.title ?: ab.title, style = Type.title.copy(fontSize = 20.sp), color = p.text, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+        val frac = drag ?: if (st.duration > 0) st.position.toFloat() / st.duration else 0f
+        ZSlider(frac, { drag = it }, Modifier.padding(top = 10.dp), onFinished = { drag?.let { com.sebas.zerkalo.audio.Listen.seekTo((it * st.duration).toLong()) }; drag = null })
+        Row(Modifier.fillMaxWidth()) {
+            Text(clock((frac * st.duration).toLong()), style = Type.uiSmall.copy(fontSize = 11.sp), color = p.text2, modifier = Modifier.weight(1f))
+            Text("−" + clock(((1 - frac) * st.duration).toLong()), style = Type.uiSmall.copy(fontSize = 11.sp), color = p.text2)
+        }
+        Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically) {
+            RoundBtn("⏮") { com.sebas.zerkalo.audio.Listen.track(i - 1) }
+            RoundBtn("−15") { com.sebas.zerkalo.audio.Listen.seekBy(-15_000) }
+            Box(Modifier.size(60.dp).clip(CircleShape).background(p.text).clickable { com.sebas.zerkalo.audio.Listen.toggle() }, contentAlignment = Alignment.Center) {
+                ZIcon(if (st.playing) "pause" else "play", p.bg, 22.dp)
+            }
+            RoundBtn("+15") { com.sebas.zerkalo.audio.Listen.seekBy(15_000) }
+            RoundBtn("⏭") { com.sebas.zerkalo.audio.Listen.track(i + 1) }
+        }
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(0.8f, 1f, 1.25f, 1.5f).forEach { v ->
+                SmallPill(if (v == 1f) "1×" else v.toString().replace('.', ',') + "×", kotlin.math.abs(st.speed - v) < 0.01f) { com.sebas.zerkalo.audio.Listen.speed(v) }
+            }
+            SmallPill("☾ 30 min", st.sleepAt > 0) { com.sebas.zerkalo.audio.Listen.sleep(if (st.sleepAt > 0) 0 else 30) }
+            SmallPill("Fin del capítulo", st.sleepEndOfTrack) { com.sebas.zerkalo.audio.Listen.sleep(if (st.sleepEndOfTrack) 0 else -1) }
+            SmallPill("Capítulos", chapters) { chapters = !chapters }
+        }
+        if (chapters) LazyColumn(Modifier.padding(top = 8.dp).heightIn(max = 240.dp)) {
+            items(ab.tracks.size) { k ->
+                Row(
+                    Modifier.fillMaxWidth().clip(RoundedCornerShape(10.dp)).clickable { com.sebas.zerkalo.audio.Listen.track(k) }.padding(vertical = 9.dp, horizontal = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("${k + 1}", style = Type.uiSmall, color = if (k == i) p.accent else p.text2, modifier = Modifier.width(30.dp))
+                    Text(ab.tracks[k].title, style = Type.ui, color = if (k == i) p.accent else p.text, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                    if (ab.tracks[k].seconds > 0) Text(clock(ab.tracks[k].seconds * 1000L), style = Type.uiSmall, color = p.text2)
+                }
+            }
+        }
+        Caption("Sincronizar", accent = true, modifier = Modifier.padding(top = 16.dp))
+        PillButton("Llevar el texto a donde va el audio", act.syncToAudio, Modifier.fillMaxWidth().padding(top = 8.dp), ghost = true)
+        PillButton("Que el audio siga desde donde leo", act.audioFromHere, Modifier.fillMaxWidth().padding(top = 8.dp), ghost = true)
+        val lang = ab.lang.take(2).lowercase()
+        val earOk = com.sebas.zerkalo.audio.Ear.supports(lang)
+        Row(
+            Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.card)
+                .clickable(enabled = !earBusy) {
+                    earBusy = true; ear = "Preparando…"
+                    act.syncByEar { msg -> if (msg == null) { earBusy = false; ear = null } else { ear = msg; if (!msg.endsWith("…") && !msg.contains("%")) earBusy = false } }
+                }.padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ZIcon("escuchar", p.accent, 22.dp)
+            Column(Modifier.weight(1f).padding(start = 12.dp)) {
+                Text("A oído", style = Type.ui.copy(fontWeight = FontWeight.SemiBold), color = p.text)
+                Text(
+                    ear ?: when {
+                        !earOk -> "Todavía no hay diccionario de voz para este idioma"
+                        com.sebas.zerkalo.audio.Ear.hasModel(ctx, lang) -> "Escucha unos segundos al narrador y encuentra la frase exacta"
+                        else -> "Escucha unos segundos al narrador y encuentra la frase exacta. La primera vez baja un diccionario de voz (unos 40 MB)."
+                    },
+                    style = Type.uiSmall, color = p.text2,
+                )
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("La página sigue al narrador", style = Type.ui, color = p.text, modifier = Modifier.weight(1f))
+            SmallPill(if (follow) "Sí" else "No", follow) { follow = !follow; com.sebas.zerkalo.data.Prefs.audioFollow = follow }
+        }
+        Text("Pasa de capítulo y de página con el audio, y marca suave el párrafo que va sonando.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
+    }
+}
+
+@Composable
+private fun RoundBtn(label: String, on: () -> Unit) {
+    val p = LocalPalette.current
+    Box(Modifier.size(46.dp).clip(CircleShape).background(p.card).clickable(onClick = on), contentAlignment = Alignment.Center) {
+        Text(label, style = Type.ui, color = p.text)
     }
 }

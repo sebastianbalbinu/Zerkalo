@@ -18,3 +18,9 @@
 # jsoup (Wikisource) y Media3 (audiolibros)
 -dontwarn org.jspecify.**
 -dontwarn com.google.re2j.**
+
+# Vosk (reconocer la voz del narrador sin internet) usa JNA, que necesita sus clases intactas
+-keep class com.sun.jna.** { *; }
+-keep class * implements com.sun.jna.** { *; }
+-keep class org.vosk.** { *; }
+-dontwarn java.awt.**
