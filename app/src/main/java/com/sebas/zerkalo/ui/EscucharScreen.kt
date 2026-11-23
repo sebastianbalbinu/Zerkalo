@@ -265,19 +265,22 @@ fun AudioSheet(start: AudioBook, onClose: () -> Unit) {
                     if (!playingThis && !started) PillButton("Muestra", { Listen.play(ctx, b, 0, 0, sample = true) }, ghost = true, icon = "speaker")
                 }
                 // Leer el mismo libro mientras suena: abre el EPUB de tu biblioteca y queda unido al audio.
-                readable?.let { book ->
-                    PillButton("Leer mientras escuchas", {
-                        AudioStore.put(stored.firstOrNull { it.id == b.id } ?: b)
-                        AudioStore.link(b.id, book.id)
-                        val linked = (AudioStore.get(b.id) ?: b).copy(tracks = b.tracks)
-                        if (!playingThis || now.sample) {
-                            Listen.play(ctx, linked)
-                        } else {
-                            Listen.state.value = now.copy(book = linked)
-                        }
-                        onClose()
-                        openReader(ctx, book)
-                    }, Modifier.fillMaxWidth().padding(top = 10.dp), ghost = true, icon = "home")
+                fun readAlong(book: com.sebas.zerkalo.data.Book) {
+                    AudioStore.put(stored.firstOrNull { it.id == b.id } ?: b)
+                    AudioStore.link(b.id, book.id)
+                    val linked = (AudioStore.get(b.id) ?: b).copy(tracks = b.tracks)
+                    if (!playingThis || now.sample) {
+                        Listen.play(ctx, linked)
+                    } else {
+                        Listen.state.value = now.copy(book = linked)
+                    }
+                    onClose()
+                    openReader(ctx, book)
+                }
+                if (readable != null) {
+                    PillButton("Leer mientras escuchas", { readAlong(readable) }, Modifier.fillMaxWidth().padding(top = 10.dp), ghost = true, icon = "home")
+                } else if (b.tracks.isNotEmpty()) {
+                    GetText(b) { book -> readAlong(book) }
                 }
                 val d = dl[b.id]
                 Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -419,5 +422,66 @@ private fun Label(text: String, right: String = "") {
     Row(Modifier.fillMaxWidth().padding(top = 20.dp, bottom = 8.dp)) {
         Text(text, style = Type.ui.copy(fontSize = 15.sp), color = p.text, modifier = Modifier.weight(1f))
         if (right.isNotBlank()) Text(right, style = Type.uiSmall, color = p.text2)
+    }
+}
+
+
+/** Conseguir el libro en texto del audiolibro, sin parar el audio. */
+@Composable
+private fun GetText(b: AudioBook, onReady: (com.sebas.zerkalo.data.Book) -> Unit) {
+    val p = LocalPalette.current
+    val core = (LocalContext.current.applicationContext as com.sebas.zerkalo.ZerkaloApp).readium
+    var open by remember { mutableStateOf(false) }
+    var options by remember(b.id) { mutableStateOf<List<com.sebas.zerkalo.data.AudioText.Option>?>(null) }
+    var chosen by remember(b.id) { mutableStateOf<String?>(null) }
+    val states by Downloads.states.collectAsState()
+    if (!open) {
+        PillButton("Conseguir el libro para leer mientras escuchas", { open = true }, Modifier.fillMaxWidth().padding(top = 10.dp), ghost = true, icon = "download")
+        return
+    }
+    LaunchedEffect(b.id) { options = runCatching { com.sebas.zerkalo.data.AudioText.find(b) }.getOrDefault(emptyList()) }
+    // Cuando termina la descarga elegida: queda unido al audio y se abre
+    val done = chosen?.let { states[it]?.book }
+    LaunchedEffect(done?.id) { done?.let(onReady) }
+    Column(Modifier.padding(top = 12.dp).fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(p.card.copy(alpha = 0.6f)).padding(14.dp)) {
+        Text("Leer mientras escuchas", style = Type.title.copy(fontSize = 17.sp), color = p.text)
+        val list = options
+        when {
+            list == null -> Text("Buscando el texto en Project Gutenberg y Wikisource…", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp))
+            list.isEmpty() -> Text("No encontré este libro en texto libre. Si lo tienes, impórtalo y tócalo aquí de nuevo.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp))
+            else -> {
+                if (list.any { it.exact }) Text("La primera es la misma edición que leyó el narrador: así el texto cuadra mejor con el audio.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
+                list.forEach { o ->
+                    val st = states[o.item.key]
+                    Row(
+                        Modifier.padding(top = 8.dp).fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .clickable(enabled = st?.running != true) {
+                                chosen = o.item.key
+                                st?.book?.let(onReady) ?: Downloads.start(core, o.item)
+                            }.padding(vertical = 8.dp, horizontal = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(o.item.title, style = Type.ui, color = p.text, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text(
+                                listOf(o.item.source, if (o.exact) "la edición del audio" else o.item.author).filter { it.isNotBlank() }.joinToString(" · "),
+                                style = Type.uiSmall, color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Text(
+                            when {
+                                st?.running == true -> st!!.progress?.let { "${(it * 100).toInt()} %" } ?: "…"
+                                st?.error != null -> "Reintentar"
+                                st?.book != null -> "Abrir"
+                                else -> "Descargar"
+                            },
+                            style = Type.uiSmall, color = p.accent,
+                        )
+                    }
+                    st?.error?.let { Text(it, style = Type.uiSmall, color = p.accent) }
+                }
+                Text("El audio sigue sonando mientras se descarga.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp))
+            }
+        }
     }
 }

@@ -174,6 +174,13 @@ object Listen {
         val at = state.value.book?.let { AudioStore.get(it.id)?.spot(i) } ?: 0L
         c.seekTo(i, at)
     }
+    /** Salta a un punto exacto de un capítulo (para seguir desde donde vas leyendo). */
+    fun seekTrack(i: Int, ms: Long) {
+        val c = controller ?: return
+        if (i !in 0 until c.mediaItemCount) return
+        persist()
+        c.seekTo(i, ms.coerceAtLeast(0))
+    }
     fun speed(v: Float) { controller?.playbackParameters = PlaybackParameters(v); state.value = state.value.copy(speed = v) }
 
     /** Temporizador para dormir: minutos, o -1 = al terminar el capítulo, 0 = apagado. */
