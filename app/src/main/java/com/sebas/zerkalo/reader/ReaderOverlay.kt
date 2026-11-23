@@ -1242,18 +1242,18 @@ private fun MiniPlayer(ab: com.sebas.zerkalo.data.AudioBook, st: com.sebas.zerka
             Column(Modifier.weight(1f)) {
                 Text(track?.title ?: ab.title, style = Type.uiSmall, color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(
-                    if (com.sebas.zerkalo.data.Prefs.audioFollow) "● siguiendo al narrador" else "toca para sincronizar",
+                    "Capítulo ${st.index + 1} de ${ab.tracks.size}" + if (com.sebas.zerkalo.data.Prefs.audioFollow) " · el libro lo sigue" else "",
                     style = Type.uiSmall.copy(fontSize = 11.sp), color = p.accent, maxLines = 1,
                 )
             }
-            Box(Modifier.size(40.dp).clip(CircleShape).clickable { com.sebas.zerkalo.audio.Listen.seekBy(-15_000) }, contentAlignment = Alignment.Center) {
-                Text("−15", style = Type.uiSmall, color = p.text2)
+            Box(Modifier.size(40.dp).clip(CircleShape).clickable { com.sebas.zerkalo.audio.Listen.track(st.index - 1) }, contentAlignment = Alignment.Center) {
+                Text("⏮", style = Type.ui, color = p.text2)
             }
             Box(Modifier.size(42.dp).clip(CircleShape).background(p.text).clickable { com.sebas.zerkalo.audio.Listen.toggle() }, contentAlignment = Alignment.Center) {
                 ZIcon(if (st.playing) "pause" else "play", p.bg, 18.dp)
             }
-            Box(Modifier.size(40.dp).clip(CircleShape).clickable { com.sebas.zerkalo.audio.Listen.seekBy(15_000) }, contentAlignment = Alignment.Center) {
-                Text("+15", style = Type.uiSmall, color = p.text2)
+            Box(Modifier.size(40.dp).clip(CircleShape).clickable { com.sebas.zerkalo.audio.Listen.track(st.index + 1) }, contentAlignment = Alignment.Center) {
+                Text("⏭", style = Type.ui, color = p.text2)
             }
         }
     }
@@ -1274,8 +1274,6 @@ private fun PlayerSheet(act: ReaderActions, onClose: () -> Unit) {
     var drag by remember { mutableStateOf<Float?>(null) }
     var chapters by remember { mutableStateOf(false) }
     var follow by remember { mutableStateOf(com.sebas.zerkalo.data.Prefs.audioFollow) }
-    var ear by remember { mutableStateOf<String?>(null) }
-    var earBusy by remember { mutableStateOf(false) }
     Sheet(onClose) {
         if (ab == null || ab.tracks.isEmpty()) {
             Text("No está sonando ningún audiolibro", style = Type.title.copy(fontSize = 20.sp), color = p.text)
@@ -1319,37 +1317,14 @@ private fun PlayerSheet(act: ReaderActions, onClose: () -> Unit) {
                 }
             }
         }
-        Caption("Sincronizar", accent = true, modifier = Modifier.padding(top = 16.dp))
-        PillButton("Llevar el texto a donde va el audio", act.syncToAudio, Modifier.fillMaxWidth().padding(top = 8.dp), ghost = true)
-        PillButton("Que el audio siga desde donde leo", act.audioFromHere, Modifier.fillMaxWidth().padding(top = 8.dp), ghost = true)
-        val lang = ab.lang.take(2).lowercase()
-        val earOk = com.sebas.zerkalo.audio.Ear.supports(lang)
-        Row(
-            Modifier.padding(top = 10.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.card)
-                .clickable(enabled = !earBusy) {
-                    earBusy = true; ear = "Preparando…"
-                    act.syncByEar { msg -> if (msg == null) { earBusy = false; ear = null } else { ear = msg; if (!msg.endsWith("…") && !msg.contains("%")) earBusy = false } }
-                }.padding(14.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ZIcon("escuchar", p.accent, 22.dp)
-            Column(Modifier.weight(1f).padding(start = 12.dp)) {
-                Text("A oído", style = Type.ui.copy(fontWeight = FontWeight.SemiBold), color = p.text)
-                Text(
-                    ear ?: when {
-                        !earOk -> "Todavía no hay diccionario de voz para este idioma"
-                        com.sebas.zerkalo.audio.Ear.hasModel(ctx, lang) -> "Escucha unos segundos al narrador y encuentra la frase exacta"
-                        else -> "Escucha unos segundos al narrador y encuentra la frase exacta. La primera vez baja un diccionario de voz (unos 40 MB)."
-                    },
-                    style = Type.uiSmall, color = p.text2,
-                )
-            }
-        }
+        Caption("Libro y audio", accent = true, modifier = Modifier.padding(top = 16.dp))
+        PillButton("Ir al capítulo que suena", { act.goToTrack("") }, Modifier.fillMaxWidth().padding(top = 8.dp), ghost = true)
+        PillButton("Que el narrador lea el capítulo donde voy", act.audioFromHere, Modifier.fillMaxWidth().padding(top = 8.dp), ghost = true)
         Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("La página sigue al narrador", style = Type.ui, color = p.text, modifier = Modifier.weight(1f))
             SmallPill(if (follow) "Sí" else "No", follow) { follow = !follow; com.sebas.zerkalo.data.Prefs.audioFollow = follow }
         }
-        Text("Pasa de capítulo y de página con el audio, y marca suave el párrafo que va sonando.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
+        Text("Cuando el narrador empieza un capítulo (o lo pasas con ⏮ ⏭), el libro va al inicio de ese capítulo.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
     }
 }
 

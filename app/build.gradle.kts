@@ -103,9 +103,6 @@ dependencies {
     // Audiolibros (LibriVox): reproductor con controles en la pantalla de bloqueo
     implementation("androidx.media3:media3-exoplayer:1.8.0")
     implementation("androidx.media3:media3-session:1.8.0")
-    // Sincronizar "a oído": reconoce unos segundos del narrador sin internet (Vosk, Apache 2.0)
-    implementation("com.alphacephei:vosk-android:0.3.47@aar")
-    implementation("net.java.dev.jna:jna:5.13.0@aar")
     // Para convertir las obras de Wikisource en EPUB
     implementation("org.jsoup:jsoup:1.18.3")
 

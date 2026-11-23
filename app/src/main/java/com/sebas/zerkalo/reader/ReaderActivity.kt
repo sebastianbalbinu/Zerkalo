@@ -723,212 +723,116 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     }
 
     // ---------------- leer y escuchar ----------------
-    private fun norm(s: String) = java.text.Normalizer.normalize(s.lowercase(), java.text.Normalizer.Form.NFD)
-        .replace(Regex("\\p{M}+"), "").replace(Regex("[^a-z0-9ivxlc ]"), " ").replace(Regex("\\s+"), " ").trim()
+    // El libro y el audiolibro se unen por capítulos: cuando el narrador empieza un capítulo,
+    // el texto va al inicio de ese capítulo. Dentro del capítulo, cada quien lee a su ritmo.
 
-    /** El capítulo del audiolibro que corresponde a donde vas leyendo: por título si coincide; si no, por proporción. */
+    private var trackMap: Pair<String, IntArray>? = null // audiolibro|índice → capítulo del índice del libro
+
+    /** Los capítulos del índice que mejor corresponden a los del audio (el nivel con una cantidad parecida). */
+    private fun chapterEntries(tracks: Int): List<TocEntry> {
+        val toc = ui.toc
+        if (toc.isEmpty()) return emptyList()
+        val depths = toc.map { it.depth }.distinct().sorted()
+        val best = depths.minByOrNull { d -> kotlin.math.abs(toc.count { it.depth <= d } - tracks) } ?: 0
+        return toc.filter { it.depth <= best }
+    }
+
+    /** Para cada capítulo del audio, cuál capítulo del libro es: por título (números en letras, romanos…) o por orden. */
+    private fun mapTracks(ab: com.sebas.zerkalo.data.AudioBook): IntArray {
+        val key = ab.id + "|" + ui.toc.size
+        trackMap?.let { if (it.first == key) return it.second }
+        val ch = chapterEntries(ab.tracks.size)
+        val T = ab.tracks.size
+        val C = ch.size
+        val tocTok = ch.map { com.sebas.zerkalo.data.Fuzzy.tokens(it.title) }
+        val out = IntArray(T) { i ->
+            if (C == 0) return@IntArray -1
+            val guess = if (T <= 1) 0 else ((i.toDouble() / (T - 1)) * (C - 1)).toInt()
+            val trTok = com.sebas.zerkalo.data.Fuzzy.tokens(ab.tracks[i].title)
+            val hits = ch.indices.filter { k -> tocTok[k].isNotEmpty() && com.sebas.zerkalo.data.Fuzzy.score(tocTok[k], trTok) >= 0.75 }
+            hits.minByOrNull { kotlin.math.abs(it - guess) } ?: guess
+        }
+        trackMap = key to out
+        return out
+    }
+
+    /** El capítulo del índice en el que vas leyendo. */
+    private fun currentEntry(entries: List<TocEntry>): Int {
+        val byTitle = entries.indexOfLast { it.title == ui.chapter }
+        if (byTitle >= 0) return byTitle
+        val loc = navigator?.currentLocator?.value ?: contLoc ?: return 0
+        val href = loc.href.toString().substringBefore('#')
+        return entries.indexOfLast { it.link.href.toString().substringBefore('#').let { h -> h.isNotEmpty() && (href.endsWith(h) || h.endsWith(href)) } }.coerceAtLeast(0)
+    }
+
+    /** El capítulo del audiolibro que corresponde a donde vas leyendo. */
     private fun trackFor(ab: com.sebas.zerkalo.data.AudioBook): Int {
         if (ab.tracks.isEmpty()) return 0
-        val ch = norm(ui.chapter)
-        if (ch.length > 3) {
-            val i = ab.tracks.indexOfFirst { t -> val n = norm(t.title); n.length > 3 && (n.contains(ch) || ch.contains(n)) }
-            if (i >= 0) return i
-        }
-        val pub = publication ?: return 0
-        val idx = (navigator?.currentLocator?.value ?: contLoc)?.let { resourceIndex(pub, it) }?.coerceAtLeast(0) ?: 0
-        return ((idx.toFloat() / pub.readingOrder.size.coerceAtLeast(1)) * ab.tracks.size).toInt().coerceIn(0, ab.tracks.size - 1)
+        val map = mapTracks(ab)
+        val cur = currentEntry(chapterEntries(ab.tracks.size))
+        // El primero que cae en este capítulo del libro; si ninguno, el último de antes
+        return (map.indices.firstOrNull { map[it] == cur } ?: map.indices.lastOrNull { map[it] in 0 until cur } ?: 0).coerceIn(0, ab.tracks.size - 1)
     }
 
-    /** Lleva el texto al capítulo que está sonando. */
-    private fun goToChapterNamed(title: String) {
-        val n = norm(title)
-        val hit = ui.toc.firstOrNull { t -> val c = norm(t.title); c.length > 3 && (n.contains(c) || c.contains(n)) }
-        if (hit != null) { navigator?.go(hit.link, animated = false); setControls(false) } else ui.say("No encontré ese capítulo en el texto")
+    /** Lleva el texto al inicio del capítulo que corresponde a un capítulo del audio. */
+    private fun goToTrackChapter(ab: com.sebas.zerkalo.data.AudioBook, index: Int, quiet: Boolean = false) {
+        val entries = chapterEntries(ab.tracks.size)
+        val k = mapTracks(ab).getOrNull(index) ?: -1
+        val e = entries.getOrNull(k)
+        if (e == null) { if (!quiet) ui.say("No encontré ese capítulo en el texto"); return }
+        if (currentEntry(entries) == k && quiet) return
+        val c = cont
+        if (c != null) c.goHref(ContinuousView.BASE + e.link.url().toString()) else navigator?.go(e.link, animated = false)
+        if (!quiet) ui.say(e.title)
     }
 
-    /** El recurso del libro (capítulo) que corresponde a un capítulo del audio: por título; si no, por proporción. */
-    private fun resourceForTrack(pub: Publication, ab: com.sebas.zerkalo.data.AudioBook, index: Int): Int {
-        val track = ab.tracks.getOrNull(index)
-        val n = norm(track?.title.orEmpty())
-        val hit = ui.toc.firstOrNull { e -> val c = norm(e.title); c.length > 3 && n.length > 3 && (n.contains(c) || c.contains(n)) }
-        val r = hit?.let { h -> pub.readingOrder.indexOfFirst { it.url().toString().substringBefore('#') == h.link.url().toString().substringBefore('#') } }
-        return (r?.takeIf { it >= 0 } ?: ((index.toFloat() / ab.tracks.size.coerceAtLeast(1)) * pub.readingOrder.size).toInt())
-            .coerceIn(0, (pub.readingOrder.size - 1).coerceAtLeast(0))
-    }
-
-    /** Puntos de anclaje de "a oído": en tal milisegundo del capítulo del audio iba en tal parte del texto. */
-    private val audioAnchor = HashMap<String, Pair<Long, Double>>()
-
-    /** Qué parte del capítulo (0..1) está leyendo el narrador. LibriVox lee una presentación al inicio y una despedida al final. */
-    private fun audioFrac(ab: com.sebas.zerkalo.data.AudioBook, st: com.sebas.zerkalo.audio.Listen.State): Double {
-        val dur = st.duration.toDouble()
-        if (dur <= 0) return 0.0
-        audioAnchor["${ab.id}#${st.index}"]?.let { (ms, f) ->
-            return if (st.position >= ms) (f + (st.position - ms) / (dur - ms).coerceAtLeast(1.0) * (1 - f)).coerceIn(0.0, 1.0)
-            else (f * st.position / ms.coerceAtLeast(1)).coerceIn(0.0, 1.0)
-        }
-        val intro = if (dur > 120_000) 18_000.0 else 0.0
-        val outro = if (dur > 120_000) 8_000.0 else 0.0
-        return ((st.position - intro) / (dur - intro - outro)).coerceIn(0.0, 1.0)
-    }
-
-    /** Al revés: en qué milisegundo del audio va una parte del capítulo. */
-    private fun audioMs(ab: com.sebas.zerkalo.data.AudioBook, index: Int, frac: Double, dur: Long): Long {
-        if (dur <= 0) return 0
-        audioAnchor["${ab.id}#$index"]?.let { (ms, f) ->
-            return if (frac >= f) (ms + (frac - f) / (1 - f).coerceAtLeast(0.001) * (dur - ms)).toLong() else (frac / f.coerceAtLeast(0.001) * ms).toLong()
-        }
-        val intro = if (dur > 120_000) 18_000.0 else 0.0
-        val outro = if (dur > 120_000) 8_000.0 else 0.0
-        return (intro + frac * (dur - intro - outro)).toLong().coerceIn(0, dur)
-    }
-
-    /**
-     * Dentro del capítulo: marca suave el párrafo que va sonando y, si ya quedó en la página siguiente,
-     * pasa la página (o en desplazamiento, sube el texto). Nunca si la persona tocó la pantalla hace poco.
-     */
-    private fun pageWithNarrator(ab: com.sebas.zerkalo.data.AudioBook, st: com.sebas.zerkalo.audio.Listen.State) {
-        if (!com.sebas.zerkalo.data.Prefs.audioFollow || ui.sheet != null || ui.auto || ui.lookup != null || st.duration <= 0) return
-        val t = System.currentTimeMillis()
-        if (t - lastPageCheck < 2_500) return
-        lastPageCheck = t
-        val nav = navigator ?: return
-        val pub = publication ?: return
-        if (resourceIndex(pub, nav.currentLocator.value) != resourceForTrack(pub, ab, st.index)) return
-        val frac = audioFrac(ab, st)
-        val follow = t - lastTouch >= 10_000
-        lifecycleScope.launch {
-            val js = SAY_JS.replace("__F__", frac.toString()).replace("__S__", if (ui.settings.scroll && follow) "1" else "0")
-            val r = runCatching { nav.evaluateJavascript(js) }.getOrNull()?.trim('"') ?: return@launch
-            if (follow && !ui.settings.scroll && r == "next") turn(nav, 1)
-        }
-    }
-
-    private fun linkedPlaying(): Pair<com.sebas.zerkalo.data.AudioBook, com.sebas.zerkalo.audio.Listen.State>? {
+    /** Lleva el texto al capítulo que está sonando (botón "Ir al capítulo que suena"). */
+    private fun goToChapterNamed(@Suppress("UNUSED_PARAMETER") title: String) {
         val st = com.sebas.zerkalo.audio.Listen.state.value
-        val ab = st.book?.takeIf { it.linkedBook == book.id && !st.sample } ?: return null
-        return ab to st
+        val ab = st.book ?: return
+        goToTrackChapter(ab, st.index)
+        ui.sheet = null; setControls(false)
     }
 
-    /** Lleva el texto a donde va el audio: al capítulo que suena y a la parte que se está leyendo. */
-    private fun syncTextToAudio(close: Boolean = true): Boolean {
-        val (ab, st) = linkedPlaying() ?: run { ui.say("Pon a sonar el audiolibro de este libro"); return false }
-        val pub = publication ?: return false
-        val r = resourceForTrack(pub, ab, st.index)
-        val frac = audioFrac(ab, st)
-        if (close) { ui.sheet = null; setControls(false) }
-        lastTouch = 0; lastPageCheck = 0
-        cont?.let { it.go(r, frac); return true }
-        val loc = pub.locatorFromLink(pub.readingOrder[r])?.copyWithLocations(progression = frac) ?: return false
-        navigator?.go(loc, animated = false)
-        return true
-    }
-
-    /** Que el audio siga desde donde vas leyendo. */
+    /** Que el audio empiece el capítulo que estás leyendo, desde su inicio. */
     private fun audioFromText() {
         val st = com.sebas.zerkalo.audio.Listen.state.value
         val ab = (st.book?.takeIf { it.linkedBook == book.id } ?: com.sebas.zerkalo.data.AudioStore.forBook(book.id))
             ?: run { ui.say("Este libro no tiene audiolibro unido"); return }
         if (ab.tracks.isEmpty()) { actions.listen(ab, true); return }
         val i = trackFor(ab)
-        val prog = (navigator?.currentLocator?.value ?: contLoc)?.locations?.progression ?: 0.0
-        val same = st.book?.id == ab.id && !st.sample
-        val dur = if (same && st.index == i && st.duration > 0) st.duration else ab.tracks[i].seconds * 1000L
-        val ms = audioMs(ab, i, prog, dur)
-        if (same) {
-            com.sebas.zerkalo.audio.Listen.seekTrack(i, ms)
+        if (st.book?.id == ab.id && !st.sample) {
+            com.sebas.zerkalo.audio.Listen.seekTrack(i, 0)
             if (!st.playing) com.sebas.zerkalo.audio.Listen.toggle()
         } else {
-            com.sebas.zerkalo.audio.Listen.play(this, ab.copy(linkedBook = book.id), i, ms)
+            com.sebas.zerkalo.audio.Listen.play(this, ab.copy(linkedBook = book.id), i, 0)
             com.sebas.zerkalo.data.AudioStore.link(ab.id, book.id)
         }
         ui.sheet = null; setControls(false)
-        ui.say("El audio sigue desde aquí")
-    }
-
-    /** "A oído": escucha unos segundos del narrador, busca la frase en el capítulo y ancla ahí el seguimiento. */
-    private fun syncByEar(status: (String?) -> Unit) {
-        val (ab, st0) = linkedPlaying() ?: run { status("Pon a sonar el audiolibro de este libro"); return }
-        val lang = ab.lang.ifBlank { book.lang }.take(2).lowercase()
-        if (!com.sebas.zerkalo.audio.Ear.supports(lang)) { status("Todavía no hay diccionario de voz para este idioma"); return }
-        if (cont != null) { status("«A oído» funciona en páginas o en desplazamiento (no en el modo continuo)"); return }
-        val ctx = this
-        lifecycleScope.launch {
-            try {
-                if (!com.sebas.zerkalo.audio.Ear.hasModel(ctx, lang)) {
-                    status("Bajando el diccionario de voz… 0 %")
-                    com.sebas.zerkalo.audio.Ear.download(ctx, lang) { p -> status("Bajando el diccionario de voz… ${((p ?: 0f) * 100).toInt()} %") }
-                }
-                val st = com.sebas.zerkalo.audio.Listen.state.value.takeIf { it.book?.id == ab.id } ?: st0
-                val idx = st.index
-                val to = st.position.coerceAtLeast(9_000)
-                val from = to - 9_000
-                val local = com.sebas.zerkalo.data.AudioStore.localFile(ab.id, idx)
-                val src = if (local.length() > 0) local.absolutePath else ab.tracks.getOrNull(idx)?.url ?: return@launch
-                status("Escuchando al narrador…")
-                val heard = com.sebas.zerkalo.audio.Ear.hear(ctx, lang, src, from, to)
-                if (heard.split(' ').size < 4) { status("No entendí bien al narrador. Intenta de nuevo en unos segundos."); return@launch }
-                status("Buscando la frase en el libro…")
-                val pub = publication ?: return@launch
-                val nav = navigator ?: return@launch
-                val r = resourceForTrack(pub, ab, idx)
-                if (resourceIndex(pub, nav.currentLocator.value) != r) {
-                    pub.locatorFromLink(pub.readingOrder[r])?.let { nav.go(it, animated = false) }
-                    delay(1200)
-                }
-                val raw = runCatching { nav.evaluateJavascript("document.body ? document.body.textContent : ''") }.getOrNull().orEmpty()
-                val text = runCatching { org.json.JSONArray("[$raw]").getString(0) }.getOrDefault(raw)
-                val f = com.sebas.zerkalo.audio.Ear.locate(heard, text)
-                if (f == null) { status("Oí «${heard.take(70)}», pero no lo encontré en este capítulo. Quizá es otra edición."); return@launch }
-                audioAnchor["${ab.id}#$idx"] = to to f
-                status(null)
-                ui.sheet = null; setControls(false)
-                lastTouch = 0; lastPageCheck = 0
-                pub.locatorFromLink(pub.readingOrder[r])?.copyWithLocations(progression = audioFrac(ab, com.sebas.zerkalo.audio.Listen.state.value))?.let { nav.go(it, animated = false) }
-                ui.say("Sincronizado: «${heard.split(' ').takeLast(6).joinToString(" ")}»")
-            } catch (e: Exception) {
-                status("No se pudo sincronizar: ${e.message ?: "error"}")
-            }
-        }
+        ui.say("El narrador empieza este capítulo")
     }
 
     /**
-     * La página sigue al narrador: cuando el audiolibro unido a este libro pasa de capítulo,
-     * el texto salta a ese capítulo (por título; si no coincide, por proporción).
+     * La página sigue al narrador por capítulos: al abrir el libro con su audio sonando, y cada vez que el audio
+     * cambia de capítulo (solo, o porque lo pasaste en el reproductor), el texto va al inicio de ese capítulo.
      */
     private fun followAudio() {
         var last: Pair<String, Int>? = null
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 com.sebas.zerkalo.audio.Listen.state.collect { st ->
-                    val ab = st.book?.takeIf { it.linkedBook == book.id && !st.sample } ?: run { last = null; return@collect }
+                    val ab = st.book?.takeIf { it.linkedBook == book.id && !st.sample && it.tracks.isNotEmpty() } ?: run { last = null; return@collect }
                     val now = ab.id to st.index
                     val prev = last
                     last = now
-                    if (prev == null && st.playing && com.sebas.zerkalo.data.Prefs.audioFollow) {
-                        // Al abrir el libro con su audiolibro sonando: el texto va a donde va el narrador
-                        launch {
-                            var n = 0
-                            while (n++ < 40 && (publication == null || (navigator == null && cont == null) || ui.loading)) delay(250)
-                            delay(900)
-                            val pub = publication ?: return@launch
-                            val cur = (navigator?.currentLocator?.value ?: contLoc)?.let { resourceIndex(pub, it) } ?: -1
-                            if (cur != resourceForTrack(pub, ab, st.index)) syncTextToAudio(close = false)
-                        }
+                    if (prev == now || !com.sebas.zerkalo.data.Prefs.audioFollow || ui.auto) return@collect
+                    launch {
+                        // Al abrir: espera a que el libro esté listo
+                        var n = 0
+                        while (n++ < 40 && (publication == null || (navigator == null && cont == null) || ui.loading || ui.toc.isEmpty())) delay(250)
+                        if (prev == null) delay(600)
+                        goToTrackChapter(ab, st.index, quiet = prev == null)
                     }
-                    if (prev == now && st.playing) { pageWithNarrator(ab, st); return@collect }
-                    if (prev == null || prev == now || !st.playing) return@collect
-                    if (!com.sebas.zerkalo.data.Prefs.audioFollow || ui.sheet != null || ui.auto) return@collect
-                    val track = ab.tracks.getOrNull(st.index) ?: return@collect
-                    val n = norm(track.title)
-                    val hit = ui.toc.firstOrNull { t -> val c = norm(t.title); c.length > 3 && n.length > 3 && (n.contains(c) || c.contains(n)) }
-                    if (hit != null) { navigator?.go(hit.link, animated = false); return@collect }
-                    val pub = publication ?: return@collect
-                    val size = pub.readingOrder.size
-                    if (size == 0 || ab.tracks.isEmpty()) return@collect
-                    val r = ((st.index.toFloat() / ab.tracks.size) * size).toInt().coerceIn(0, size - 1)
-                    val cur = navigator?.currentLocator?.value?.let { resourceIndex(pub, it) } ?: -1
-                    if (r != cur) pub.locatorFromLink(pub.readingOrder[r])?.let { navigator?.go(it, animated = false) }
                 }
             }
         }
@@ -1384,9 +1288,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             ui.sheet = null
         },
         goToTrack = { title -> goToChapterNamed(title) },
-        syncToAudio = { syncTextToAudio() },
         audioFromHere = { audioFromText() },
-        syncByEar = { cb -> syncByEar(cb) },
         setInks = { Prefs.setInks(it) },
         highlightWith = { c -> Prefs.lastInk = c },
         openInks = { ui.activeMark = null; ui.sheet = "inks" },
@@ -1706,9 +1608,7 @@ class ReaderActions(
     val linkedAudio: () -> com.sebas.zerkalo.data.AudioBook?,
     val listen: (com.sebas.zerkalo.data.AudioBook, Boolean) -> Unit, // true = desde el capítulo donde vas leyendo
     val goToTrack: (String) -> Unit,
-    val syncToAudio: () -> Unit,
     val audioFromHere: () -> Unit,
-    val syncByEar: ((String?) -> Unit) -> Unit,
     val setInks: (List<com.sebas.zerkalo.data.InkColor>) -> Unit,
     val highlightWith: (Int) -> Unit,
     val openInks: () -> Unit,
@@ -1852,24 +1752,6 @@ private const val PARA_PROG = """(function(){ $PARA_LIST
 })()"""
 
 /** Qué parte del capítulo ocupa una pantalla (para saber si el narrador ya pasó de página). */
-/** Marca suave el párrafo que va sonando (por la parte del capítulo) y dice si quedó en la página siguiente. */
-private const val SAY_JS = """(function(){ var F = __F__, d = document, b = d.body; if (!b) return '';
-  var els = b.querySelectorAll('p,li,blockquote,h1,h2,h3,h4,h5,h6,pre,dd,dt'), tot = 0, L = [];
-  for (var i = 0; i < els.length; i++) { var e = els[i]; if (e.querySelector('p,li,blockquote')) continue;
-    var n = (e.textContent || '').length; if (n < 1) continue; L.push([e, tot, n]); tot += n; }
-  if (!L.length) return '';
-  var at = F * tot, hit = L[L.length - 1][0];
-  for (var j = 0; j < L.length; j++) { if (at < L[j][1] + L[j][2]) { hit = L[j][0]; break; } }
-  var old = d.querySelectorAll('.zk-say'); for (var k = 0; k < old.length; k++) if (old[k] !== hit) old[k].classList.remove('zk-say');
-  if (!d.getElementById('zk-say-css')) { var s = d.createElement('style'); s.id = 'zk-say-css';
-    s.textContent = '.zk-say{background:rgba(226,190,82,.2) !important;border-radius:4px;box-shadow:0 0 0 3px rgba(226,190,82,.2);transition:background .8s}';
-    (d.head || d.documentElement).appendChild(s); }
-  hit.classList.add('zk-say');
-  var r = hit.getBoundingClientRect(), W = window.innerWidth, H = window.innerHeight;
-  if (__S__ === 1) { if (r.top > H * 0.72 || r.bottom < 0) { var se = d.scrollingElement || d.documentElement; window.scrollTo({ top: se.scrollTop + r.top - H * 0.3, behavior: 'smooth' }); } return 'ok'; }
-  return r.left >= W - 2 ? 'next' : 'ok';
-})()"""
-
 private const val PAGE_SHARE = """(function(){ var se = document.scrollingElement || document.documentElement;
   var horiz = se.scrollWidth > window.innerWidth + 4;
   return String(horiz ? window.innerWidth / se.scrollWidth : window.innerHeight / Math.max(1, se.scrollHeight));

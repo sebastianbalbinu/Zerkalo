@@ -77,7 +77,8 @@ object Fuzzy {
             }
         }
         flush()
-        return out.filter { it !in STOP }
+        // "07" = "7"
+        return out.filter { it !in STOP }.map { if (it.all(Char::isDigit)) it.trimStart('0').ifEmpty { "0" } else it }
     }
 
     private fun lev(a: String, b: String, max: Int): Int {
