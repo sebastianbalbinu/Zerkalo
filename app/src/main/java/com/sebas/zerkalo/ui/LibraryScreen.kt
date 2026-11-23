@@ -71,7 +71,16 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
     if (tagSel != null && tagSel !in allTags) tagSel = null
     val list = remember(sorted, query, tagSel) {
         val q = query.trim().lowercase()
-        sorted.filter { (q.isEmpty() || (it.title + " " + it.author + " " + it.tags.joinToString(" ")).lowercase().contains(q)) && (tagSel == null || tagSel in it.tags) }
+        val base = sorted.filter { tagSel == null || tagSel in it.tags }
+        if (q.isEmpty()) base else {
+            // Primero lo que contiene lo escrito tal cual; después lo parecido (con margen de error)
+            val exact = base.filter { (it.title + " " + it.author + " " + it.tags.joinToString(" ")).lowercase().contains(q) }
+            val want = com.sebas.zerkalo.data.Fuzzy.tokens(q)
+            val near = base.filter { it !in exact }
+                .map { it to com.sebas.zerkalo.data.Fuzzy.score(want, com.sebas.zerkalo.data.Fuzzy.tokens(it.title + " " + it.author + " " + it.tags.joinToString(" "))) }
+                .filter { it.second >= 0.66 }.sortedByDescending { it.second }.map { it.first }
+            exact + near
+        }
     }
     var mode by rememberSaveable { mutableStateOf(Prefs.libraryMode) }
     var quick by remember { mutableStateOf<Book?>(null) }
