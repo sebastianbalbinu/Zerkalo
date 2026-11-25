@@ -112,7 +112,7 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.Bottom) {
                         Column(Modifier.weight(1f)) {
                             Caption(SimpleDateFormat("EEEE d 'de' MMMM", Locale("es")).format(Date()))
-                            Text("Biblioteca", style = Type.display, color = p.text, maxLines = 1, softWrap = false, modifier = Modifier.padding(top = 4.dp))
+                            Text("Biblioteca", style = if (screenW < 370.dp) Type.display.copy(fontSize = 30.sp) else Type.display, color = p.text, maxLines = 1, softWrap = false, modifier = Modifier.padding(top = 4.dp))
                         }
                         CircleButton("plus", a.importEpub, desc = "Traer libros")
                         Spacer(Modifier.width(10.dp))
