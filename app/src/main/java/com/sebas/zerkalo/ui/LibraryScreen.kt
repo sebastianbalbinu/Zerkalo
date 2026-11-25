@@ -34,8 +34,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -111,7 +109,6 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
         ) {
             item(key = "head") {
                 Box {
-                    current?.let { HeroGlow(it, Modifier.matchParentSize()) }
                     Column(Modifier.padding(top = top + 18.dp)) {
                         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.Bottom) {
                             Column(Modifier.weight(1f)) {
@@ -279,26 +276,6 @@ private fun EmptyLibrary() {
     }
 }
 
-/** El color de la portada del libro actual, difuminado detrás del encabezado. */
-@Composable
-private fun HeroGlow(b: Book, modifier: Modifier) {
-    val p = LocalPalette.current
-    val file = remember(b.cover) { b.cover?.let { java.io.File(Library.coversDir, it) }?.takeIf { it.exists() } }
-    Box(modifier) {
-        if (file != null && !b.useBinding) {
-            coil.compose.AsyncImage(
-                model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current).data(file).size(120).build(),
-                contentDescription = null, contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().blur(60.dp).alpha(if (p.isDark) 0.55f else 0.4f),
-            )
-        } else {
-            Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.radialGradient(listOf(p.accent.copy(alpha = 0.28f), Color.Transparent))))
-        }
-        // Se funde con el fondo hacia abajo, sin borde
-        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.verticalGradient(0.35f to Color.Transparent, 1f to p.bg)))
-    }
-}
-
 /** El libro que se está leyendo, en grande: portada, avance y el botón para seguir. */
 @Composable
 private fun HeroBook(b: Book) {
@@ -328,7 +305,7 @@ private fun ShelfGrid(row: List<Book>, w: androidx.compose.ui.unit.Dp, onLong: (
     Shelf(Modifier.padding(top = 18.dp)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Bottom) {
             row.forEach { b ->
-                Box {
+                Box(Modifier.width(w)) {
                     BookCover(
                         b, w, w * 1.5f,
                         Modifier.pointerInput(b.id) {
