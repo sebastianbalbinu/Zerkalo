@@ -797,20 +797,19 @@ private fun ToolsSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
     Sheet(onClose) {
         Caption("Herramientas", accent = true)
         Spacer(Modifier.height(12.dp))
-        val tile = Modifier.weight(1f)
         Row(Modifier.fillMaxWidth()) {
-            com.sebas.zerkalo.ui.ToolTile("✎", "Pluma", tile) { onClose(); act.ink(com.sebas.zerkalo.ui.InkTool.PEN) }
-            com.sebas.zerkalo.ui.ToolTile("▌", "Resaltador", tile) { onClose(); act.ink(com.sebas.zerkalo.ui.InkTool.MARKER) }
-            com.sebas.zerkalo.ui.ToolTile("▤", "Nota adhesiva", tile, tint = com.sebas.zerkalo.ui.StickyPaper) {
+            com.sebas.zerkalo.ui.ToolTile("✎", "Pluma", Modifier.weight(1f)) { onClose(); act.ink(com.sebas.zerkalo.ui.InkTool.PEN) }
+            com.sebas.zerkalo.ui.ToolTile("▌", "Resaltador", Modifier.weight(1f)) { onClose(); act.ink(com.sebas.zerkalo.ui.InkTool.MARKER) }
+            com.sebas.zerkalo.ui.ToolTile("▤", "Nota adhesiva", Modifier.weight(1f), tint = com.sebas.zerkalo.ui.StickyPaper) {
                 onClose(); ui.say("Mantén presionada una frase y elige «Nota adhesiva»")
             }
-            com.sebas.zerkalo.ui.ToolTile("⌫", "Borrar", tile) { onClose(); act.ink(com.sebas.zerkalo.ui.InkTool.ERASER) }
+            com.sebas.zerkalo.ui.ToolTile("⌫", "Borrar", Modifier.weight(1f)) { onClose(); act.ink(com.sebas.zerkalo.ui.InkTool.ERASER) }
         }
         Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-            com.sebas.zerkalo.ui.ToolTile("⇪", "Exportar", tile) { onClose(); act.export() }
-            com.sebas.zerkalo.ui.ToolTile("♪", "Escuchar", tile) { ui.sheet = "listen" }
-            com.sebas.zerkalo.ui.ToolTile("文", "Traducir", tile, active = ui.studyTap) { onClose(); act.toggleStudy() }
-            com.sebas.zerkalo.ui.ToolTile("⧉", "Lado a lado", tile, active = ui.pairOn) { ui.sheet = "pair" }
+            com.sebas.zerkalo.ui.ToolTile("⇪", "Exportar", Modifier.weight(1f)) { onClose(); act.export() }
+            com.sebas.zerkalo.ui.ToolTile("♪", "Escuchar", Modifier.weight(1f)) { ui.sheet = "listen" }
+            com.sebas.zerkalo.ui.ToolTile("文", "Traducir", Modifier.weight(1f), active = ui.studyTap) { onClose(); act.toggleStudy() }
+            com.sebas.zerkalo.ui.ToolTile("⧉", "Lado a lado", Modifier.weight(1f), active = ui.pairOn) { ui.sheet = "pair" }
         }
     }
 }
