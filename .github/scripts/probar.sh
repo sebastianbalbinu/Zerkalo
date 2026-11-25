@@ -59,8 +59,13 @@ $T adb exec-out screencap -p > shot8.png
 [ -n "$W" ] && $T adb shell input tap $((W*85/100)) $((H/2))
 sleep 4
 $T adb exec-out screencap -p > shot9.png
+# El menú Aa nuevo (lo básico) abierto sobre el libro
+$T adb shell am start -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bienvenida --es zerkalo.hoja type
+sleep 12
+$T adb exec-out screencap -p > shot10.png
 $T adb logcat -d > logcat-full.txt
 {
+  echo "-- Pantalla --"; grep -E "ZK_HZ" logcat-full.txt | sed 's/^.*Zerkalo *: //' | tail -1
   echo "-- Medida de línea --"; grep -E "ZK_FIT" logcat-full.txt | sed 's/^.*Zerkalo *: //' | tail -4
   echo "-- Letras de Google --"; grep -E "ZK_GFONT" logcat-full.txt | sed 's/^.*Zerkalo *: //' | head -10
   echo "== Android $($T adb shell getprop ro.build.version.release) =="

@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent?) {
         intent ?: return
         AppEvents.testContinuous = intent.getBooleanExtra("zerkalo.continuo", false)
+        AppEvents.testSheet = intent.getStringExtra("zerkalo.hoja")
         // Prueba automática: descargar una letra de Google y dejarla puesta en letra grande (22 pt)
         intent.getStringExtra("zerkalo.gfont")?.let { fam ->
             intent.removeExtra("zerkalo.gfont")

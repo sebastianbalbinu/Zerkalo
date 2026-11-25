@@ -62,6 +62,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
@@ -954,6 +955,7 @@ private fun ExportRow(title: String, sub: String, onClick: () -> Unit) {
 private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
     val p = LocalPalette.current
     val s = ui.settings
+    var blurLite by remember { mutableStateOf(com.sebas.zerkalo.data.Prefs.blurLite()) }
     Sheet(onClose) {
       Column(Modifier.heightIn(max = 640.dp).verticalScroll(rememberScrollState())) {
         AspectTabs(ui, "type")
@@ -965,11 +967,19 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
             com.sebas.zerkalo.ui.ZSwitch(ui.ownLook) { act.ownLook(it) }
         }
         Spacer(Modifier.height(12.dp))
+        if (!ui.typeMore) TypeHome(ui, act) else {
+        Row(
+            Modifier.padding(bottom = 10.dp).clip(RoundedCornerShape(12.dp)).clickable { ui.typeMore = false }.padding(vertical = 6.dp, horizontal = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(Modifier.graphicsLayer { rotationZ = 180f }) { ZIcon("chevron", p.accent, 14.dp) }
+            Text("  Lo básico", style = Type.ui, color = p.accent)
+        }
         Segmented(listOf("Texto", "Página", "Comodidad"), ui.typeTab, { ui.typeTab = it })
         when (ui.typeTab) {
             // ---------- Texto: cómo se ven las letras ----------
             0 -> {
-                Label("Letra")
+                Label("Letra", info = Info.FONT)
                 val ctx = LocalContext.current
                 val gfont = GoogleFonts.get(ctx, s.font)
                 val font = gfont?.let { ReaderFont(it.family, it.family, it.serif, note = "De Google Fonts") } ?: ReaderFonts.getOrElse(s.font) { ReaderFonts[0] }
@@ -987,7 +997,7 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                 }
                 // En puntos, como en Word (por dentro sigue siendo el porcentaje de siempre)
                 val pt = Letra.pt(s.size)
-                Label("Tamaño", "$pt pt")
+                Label("Tamaño", "$pt pt", Info.SIZE)
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     RoundPill("minus", { act.settings(s.copy(size = Letra.pct(pt - 1))) })
                     var v by remember(s.size) { mutableFloatStateOf(pt.toFloat()) }
@@ -1012,13 +1022,13 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                     "Letra grande: márgenes más angostos, títulos más chicos y guiones para que la línea rinda",
                     style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp),
                 )
-                Label("Interlineado")
+                Label("Interlineado", info = Info.LINE)
                 val lhs = listOf(1.4f, 1.6f, 1.85f)
                 Segmented(listOf("Compacto", "Medio", "Amplio"), lhs.indexOfFirst { kotlin.math.abs(it - s.lineHeight) < 0.05f }.coerceAtLeast(0), { act.settings(s.copy(lineHeight = lhs[it])) })
                 InkPicker(ui, act)
-                Label("Espacio entre párrafos")
+                Label("Espacio entre párrafos", info = Info.PARA)
                 Segmented(listOf("Como el libro", "Separados", "Aireados"), s.paragraph, { act.settings(s.copy(paragraph = it)) })
-                Label("Espacio entre letras", "más amplio ayuda con la dislexia")
+                Label("Espacio entre letras", info = Info.LETTERS)
                 Segmented(listOf("Normal", "Amplio", "Muy amplio"), s.spacing, { act.settings(s.copy(spacing = it)) })
                 SwitchRow(
                     "Modo dislexia",
@@ -1033,29 +1043,19 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
             }
             // ---------- Página: cómo se arma la página ----------
             1 -> {
-                Label("Diagramación")
+                Label("Diagramación", info = Info.LAYOUT)
                 val order = listOf(3, 0, 1)
                 Segmented(listOf("Ninguna", "Original", "Ajustada"), order.indexOf(s.layout).let { if (it < 0) 2 else it }, { act.settings(s.copy(layout = order[it])) })
                 Text(
                     when (s.layout) {
                         3 -> "El libro tal cual, sin ningún arreglo de Zerkalo."
                         0 -> "El diseño de la editorial. Zerkalo solo arregla lo que se rompe en el teléfono: versalitas, palabras de otro tamaño y huecos en líneas angostas."
-                        else -> "A tu pantalla y a tu letra: márgenes e interlineado se acomodan para que cada línea tenga unas 50–70 letras. Poemas verso a verso, títulos proporcionados."
+                        else -> "A tu pantalla y a tu letra: el interlineado sigue el largo de la línea, títulos proporcionados y poemas verso a verso. Tus márgenes no los toca."
                     },
                     style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp),
                 )
-                // Letras por línea: lo que más influye en leer cómodo y rápido
-                if (ui.cpl > 0) {
-                    val ok = ui.cpl in 50..75
-                    Row(
-                        Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(12.dp)).background(p.card.copy(alpha = 0.7f)).padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Box(Modifier.size(8.dp).clip(CircleShape).background(if (ok) Color(0xFF7FA35A) else p.accent))
-                        Text("≈ ${ui.cpl} letras por línea · ${Fit.label(ui.cpl)}", style = Type.uiSmall.copy(fontSize = 13.sp), color = p.text, modifier = Modifier.padding(start = 10.dp))
-                    }
-                }
-                Label("Alineación")
+                LineMeter(ui, act)
+                Label("Alineación", info = Info.ALIGN)
                 val align = if (s.dyslexia) 0 else s.align
                 Segmented(listOf("Izquierda", "Justificado", "Automático"), align, { act.settings(ui.settings.withAlign(it).copy(dyslexia = false)) })
                 Text(
@@ -1069,8 +1069,7 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                     },
                     style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp),
                 )
-                Label("Márgenes", "en milímetros")
-                if (s.layout == 1) Text("En Ajustada son el máximo: si la letra es grande, Zerkalo los achica lo justo.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(bottom = 6.dp))
+                Label("Márgenes", "en milímetros", Info.MARGINS)
                 // Atajos que llenan los cuatro valores; luego se afina cada lado
                 val presets = listOf(Triple("Estrechos", 2.5f, 0.8f), Triple("Normales", 4f, 1.5f), Triple("Amplios", 7f, 4f))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1092,7 +1091,7 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                     "En Continuo, el margen de arriba y el de abajo son la zona donde el texto se difumina al pasar.",
                     style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp),
                 )
-                Label("Pasar página")
+                Label("Pasar página", info = Info.MODE)
                 Segmented(
                     listOf("Páginas", "Continuo"), if (s.continuous || s.scroll) 1 else 0,
                     { act.settings(s.copy(scroll = it == 1, continuous = it == 1)) },
@@ -1131,10 +1130,140 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                     "Toques: izquierda o arriba, página anterior · derecha o abajo, siguiente · centro, menú. Con dos idiomas, las páginas se pasan por los lados. En modo traducir, toca una palabra; arriba o abajo abre el menú. El borde izquierdo cambia el brillo y atrás cierra lo abierto antes de salir del libro.",
                     style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 14.dp),
                 )
+                SwitchRow(
+                    "Desenfoque liviano en Continuo",
+                    "Menos capas: se mueve más fluido. Apágalo para el degradé completo.",
+                    blurLite,
+                ) { on -> com.sebas.zerkalo.data.Prefs.setBlurLite(on); blurLite = on; act.settings(ui.settings) }
             }
+        }
         }
       }
     }
+}
+
+/** Letras por línea, con una sugerencia (que solo se aplica si la tocas). */
+@Composable
+private fun LineMeter(ui: ReaderUi, act: ReaderActions) {
+    val p = LocalPalette.current
+    if (ui.cpl <= 0) return
+    var open by remember { mutableStateOf(false) }
+    val ok = ui.cpl in 38..80
+    Column(Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(12.dp)).background(p.card.copy(alpha = 0.7f)).padding(start = 14.dp, end = 4.dp, top = 4.dp, bottom = 4.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(8.dp).clip(CircleShape).background(if (ok) Color(0xFF7FA35A) else p.accent))
+            Text("≈ ${ui.cpl} letras por línea · ${Fit.label(ui.cpl)}", style = Type.uiSmall.copy(fontSize = 13.sp), color = p.text, modifier = Modifier.padding(start = 10.dp).weight(1f))
+            InfoDot(open) { open = !open }
+        }
+        if (open) Box(Modifier.padding(end = 10.dp)) { InfoCard(Info.CPL) }
+        if (ui.fitMm > 0f) Row(Modifier.padding(bottom = 6.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            val mm = (if (ui.fitMm % 1f == 0f) "${ui.fitMm.toInt()}" else "${ui.fitMm}").replace('.', ',')
+            Text("Con márgenes de $mm mm caben más palabras", style = Type.uiSmall, color = p.text2, modifier = Modifier.weight(1f))
+            Text("Ajustar por mí", style = Type.uiSmall, color = p.accent, modifier = Modifier.clip(RoundedCornerShape(8.dp))
+                .clickable { act.settings(ui.settings.copy(mmLeft = ui.fitMm, mmRight = ui.fitMm)) }.padding(6.dp))
+        }
+    }
+}
+
+/** Lo básico de Aa: para qué lees hoy (un toque) y los cuatro ajustes que más se usan. */
+@Composable
+private fun TypeHome(ui: ReaderUi, act: ReaderActions) {
+    val p = LocalPalette.current
+    val ctx = LocalContext.current
+    val s = ui.settings
+    var goal by remember { mutableIntStateOf(com.sebas.zerkalo.data.Prefs.goal()) }
+    Text("¿Cómo quieres leer hoy?", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+    Text("Un toque y queda listo. Después puedes afinar.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 3.dp))
+    val goals = listOf(
+        Triple("Leer de corrido", "Líneas cómodas, Continuo, texto parejo", 0),
+        Triple("Estudiar y retener", "Páginas, más aire, letra de libro", 1),
+        Triple("Descansar la vista", "Letra grande, papel cálido", 2),
+        Triple("Dislexia", "Letra clara, más espacio, a la izquierda", 3),
+    )
+    fun pick(g: Int) {
+        val base = s.copy(dyslexia = false, spacing = 0, layout = 1)
+        val sans = !GoogleFonts.isGoogle(s.font) && ReaderFonts.getOrNull(s.font)?.serif == false
+        val r = when (g) {
+            0 -> base.withAlign(2).copy(lineHeight = 1.5f, paragraph = 0, continuous = true, scroll = true, font = if (s.dyslexia) 0 else s.font)
+            1 -> base.withAlign(2).copy(lineHeight = 1.6f, paragraph = 1, continuous = false, scroll = false, font = if (sans || s.dyslexia) 0 else s.font)
+            2 -> base.withAlign(2).copy(size = maxOf(s.size, Letra.pct(16)), lineHeight = 1.6f, warmth = maxOf(s.warmth, 0.3f), font = if (s.dyslexia) 0 else s.font)
+            else -> s.withAlign(0).copy(dyslexia = true, font = 6, spacing = 1, lineHeight = 1.85f, paragraph = maxOf(s.paragraph, 1), layout = 1)
+        }
+        goal = g; com.sebas.zerkalo.data.Prefs.setGoal(g)
+        act.settings(r)
+    }
+    Column(Modifier.padding(top = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        goals.chunked(2).forEach { pair ->
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                pair.forEach { (t, d, g) ->
+                    val on = goal == g
+                    Column(
+                        Modifier.weight(1f).heightIn(min = 76.dp).clip(RoundedCornerShape(16.dp))
+                            .background(if (on) p.accent.copy(alpha = 0.16f) else p.card.copy(alpha = 0.7f))
+                            .border(1.5.dp, if (on) p.accent else Color.Transparent, RoundedCornerShape(16.dp))
+                            .clickable { pick(g) }.padding(horizontal = 12.dp, vertical = 10.dp),
+                    ) {
+                        Text(t, style = Type.ui.copy(fontWeight = FontWeight.Bold, fontSize = 14.5.sp), color = p.text)
+                        Text(d, style = Type.uiSmall.copy(fontSize = 11.5.sp, lineHeight = 15.sp), color = p.text2, modifier = Modifier.padding(top = 3.dp))
+                    }
+                }
+            }
+        }
+    }
+    Caption("Afinar", accent = true)
+    // Tamaño
+    val pt = Letra.pt(s.size)
+    Row(Modifier.fillMaxWidth().padding(top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        var open by remember { mutableStateOf(false) }
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) { Text("Tamaño", style = Type.ui, color = p.text); InfoDot(open) { open = !open } }
+            if (open) InfoCard(Info.SIZE)
+        }
+        RoundPill("minus", { act.settings(s.copy(size = Letra.pct(pt - 1))) })
+        Text("$pt pt", style = Type.ui, color = p.text, textAlign = TextAlign.Center, modifier = Modifier.width(64.dp))
+        RoundPill("plus", { act.settings(s.copy(size = Letra.pct(pt + 1))) })
+    }
+    // Letra
+    val gfont = GoogleFonts.get(ctx, s.font)
+    val fname = gfont?.family ?: ReaderFonts.getOrElse(s.font) { ReaderFonts[0] }.name
+    HomeRow("Letra", Info.FONT, fname) { ui.sheet = "fonts" }
+    HomeRow("Papel y luz", Info.PAPER, "Cambiar") { ui.sheet = "luz" }
+    // Páginas o continuo
+    var openMode by remember { mutableStateOf(false) }
+    Row(Modifier.padding(top = 14.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text("Páginas o continuo", style = Type.ui, color = p.text); InfoDot(openMode) { openMode = !openMode }
+    }
+    if (openMode) InfoCard(Info.MODE)
+    Segmented(listOf("Páginas", "Continuo"), if (s.continuous || s.scroll) 1 else 0, { act.settings(s.copy(scroll = it == 1, continuous = it == 1)) })
+    LineMeter(ui, act)
+    Row(
+        Modifier.fillMaxWidth().padding(top = 14.dp).clip(RoundedCornerShape(14.dp)).border(1.dp, p.line, RoundedCornerShape(14.dp))
+            .clickable { ui.typeMore = true }.padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text("Más ajustes", style = Type.ui, color = p.text)
+            Text("Interlineado, márgenes, sangría, alineación, dislexia…", style = Type.uiSmall, color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        ZIcon("chevron", p.accent, 16.dp)
+    }
+}
+
+@Composable
+private fun HomeRow(title: String, info: Info, value: String, onClick: () -> Unit) {
+    val p = LocalPalette.current
+    var open by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(14.dp)).background(p.card.copy(alpha = 0.7f))
+            .clickable(onClick = onClick).padding(start = 14.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(title, style = Type.ui, color = p.text)
+        InfoDot(open) { open = !open }
+        Text(value, style = Type.uiSmall, color = p.text2, textAlign = TextAlign.End, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(start = 8.dp))
+        ZIcon("chevron", p.text2, 14.dp)
+    }
+    if (open) Box(Modifier.padding(top = 6.dp)) { InfoCard(info) }
 }
 
 /** Un margen en milímetros: − valor +, de medio en medio milímetro. */
@@ -1335,11 +1464,89 @@ private fun InkPicker(ui: ReaderUi, act: ReaderActions) {
 }
 
 @Composable
-private fun Label(t: String, sub: String = "") {
+private fun Label(t: String, sub: String = "", info: Info? = null) {
     val p = LocalPalette.current
-    Row(Modifier.padding(top = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.Bottom) {
+    var open by remember(t) { mutableStateOf(false) }
+    Row(Modifier.padding(top = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(t, style = Type.ui, color = p.text)
+        if (info != null) InfoDot(open) { open = !open }
         if (sub.isNotEmpty()) Text("  $sub", style = Type.uiSmall, color = p.text2)
+    }
+    if (info != null && open) InfoCard(info)
+}
+
+/** La ⓘ pequeña: un toque explica para qué sirve el ajuste. */
+@Composable
+private fun InfoDot(open: Boolean, onClick: () -> Unit) {
+    val p = LocalPalette.current
+    Box(
+        Modifier.padding(start = 6.dp).size(28.dp).clip(CircleShape).clickable(onClick = onClick),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier.size(17.dp).clip(CircleShape).border(1.3.dp, if (open) p.accent else p.text2, CircleShape)
+                .background(if (open) p.accent else Color.Transparent),
+            contentAlignment = Alignment.Center,
+        ) { Text("i", style = Type.uiSmall.copy(fontSize = 10.5.sp, fontWeight = FontWeight.Bold), color = if (open) p.bg else p.text2) }
+    }
+}
+
+@Composable
+private fun InfoCard(i: Info) {
+    val p = LocalPalette.current
+    Column(Modifier.fillMaxWidth().padding(bottom = 10.dp).clip(RoundedCornerShape(14.dp)).background(p.card.copy(alpha = 0.85f)).padding(horizontal = 14.dp, vertical = 12.dp)) {
+        Text(i.text, style = Type.uiSmall.copy(fontSize = 13.sp, lineHeight = 18.sp), color = p.text)
+        if (i.tips.isNotEmpty()) Row(Modifier.padding(top = 8.dp).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            i.tips.forEach { t ->
+                Text(t, style = Type.uiSmall.copy(fontSize = 11.5.sp), color = p.text, modifier = Modifier.clip(RoundedCornerShape(9.dp)).background(p.accent.copy(alpha = 0.16f)).padding(horizontal = 8.dp, vertical = 4.dp))
+            }
+        }
+    }
+}
+
+/** Qué hace cada ajuste, en palabras simples, y qué conviene según para qué lees. */
+class Info(val text: String, val tips: List<String> = emptyList()) {
+    companion object {
+        val SIZE = Info(
+            "Letra más grande cansa menos la vista, pero caben menos palabras por línea y pasas más páginas. En celular, entre 12 y 15 pt suele ser lo cómodo.",
+            listOf("Leer rápido: 12–14", "Retener: 13–15", "Vista cansada: 16 o más"),
+        )
+        val FONT = Info(
+            "Con serifa (Literata, Garamond) es la letra de los libros, buena para leer largo. Sin serifa (Atkinson, Inter) se ve más nítida en pantallas chicas o con poca luz. Ningún estudio encontró una letra que haga leer mucho más rápido: la mejor es la que te resulta cómoda.",
+            listOf("Dislexia: Atkinson o Lexend", "Noche: sin serifa"),
+        )
+        val PAPER = Info(
+            "De día, papel claro con letra oscura: es lo que se lee más fácil. De noche, el papel oscuro y el filtro cálido molestan menos a los ojos.",
+        )
+        val MODE = Info(
+            "Páginas: como un libro de papel. Ayuda a recordar dónde estaba cada cosa, por eso conviene para estudiar. Continuo: bajas con el dedo sin cortes, cómodo para leer de corrido.",
+            listOf("Leer de corrido: Continuo", "Estudiar: Páginas"),
+        )
+        val LINE = Info(
+            "El espacio entre una línea y la siguiente. Con poco, el ojo se confunde al volver al comienzo de la línea; con mucho, el texto se desarma. Lo cómodo está entre 1,4 y 1,6.",
+            listOf("Leer rápido: Medio", "Retener: Medio o Amplio", "Dislexia: Amplio"),
+        )
+        val PARA = Info(
+            "Cómo se separa un párrafo del siguiente: con sangría (como en los libros) o con un espacio. Separados ayuda a ubicar las ideas al estudiar y a quien tiene dislexia.",
+            listOf("Leer de corrido: Como el libro", "Estudiar: Separados"),
+        )
+        val LETTERS = Info(
+            "Más espacio entre letras ayuda a muchas personas con dislexia a no confundir unas con otras. Si no lo necesitas, déjalo en Normal: las líneas quedan más cortas.",
+            listOf("Dislexia: Amplio"),
+        )
+        val LAYOUT = Info(
+            "Ninguna: el libro tal cual. Original: el diseño de la editorial, con arreglos mínimos. Ajustada: Zerkalo acomoda interlineado, títulos y poemas a tu pantalla y a tu letra (tus márgenes no los toca).",
+        )
+        val ALIGN = Info(
+            "Justificado deja los dos bordes parejos, como un libro. A la izquierda el borde derecho queda irregular, pero el espacio entre palabras es siempre igual. Para la velocidad casi no hay diferencia; con dislexia, a la izquierda es más fácil.",
+            listOf("Dislexia: Izquierda"),
+        )
+        val MARGINS = Info(
+            "El espacio libre en los bordes. Más margen: líneas más cortas y una página más tranquila. Menos margen: más palabras por línea. Zerkalo usa exactamente lo que pongas.",
+        )
+        val CPL = Info(
+            "Cuántas letras caben en una línea: es lo que más influye en leer cómodo. Lo ideal en papel son 50 a 75; en celular se lee bien desde 35–40. Muy cortas hacen saltar el ojo; muy largas cuesta encontrar la línea siguiente.",
+        )
     }
 }
 

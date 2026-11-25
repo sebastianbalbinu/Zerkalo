@@ -49,7 +49,21 @@ object Fit {
      * Cuánto achicar los márgenes de los lados (1 = como los pusiste). En "Ajustada" se calcula para llegar
      * a [MIN_CPL]; en los otros modos solo se achican con letra grande, como antes.
      */
-    fun sideFactor(ctx: Context, r: ReaderSettings, screenPx: Float, insetsPx: Float, mmPx: Float, density: Float): Float {
+    @Suppress("UNUSED_PARAMETER")
+    fun sideFactor(ctx: Context, r: ReaderSettings, screenPx: Float, insetsPx: Float, mmPx: Float, density: Float): Float = 1f // tus márgenes se respetan siempre
+
+    /** Margen de cada lado (mm) para llegar a [MIN_CPL] letras; null si ya se llega o no se puede bajar de [MIN_MM]. */
+    fun suggestMm(ctx: Context, r: ReaderSettings, screenPx: Float, insetsPx: Float, mmPx: Float, density: Float): Float? {
+        val cw = charPx(ctx, r, density)
+        val now = minOf(screenPx - insetsPx - (r.mmLeft + r.mmRight) * mmPx, capPx(r, density)) / cw
+        if (now >= MIN_CPL - 3) return null
+        val side = ((screenPx - insetsPx - MIN_CPL * cw) / 2f / mmPx)
+        val mm = (kotlin.math.floor(side * 2f) / 2f).coerceAtLeast(MIN_MM)
+        return mm.takeIf { it < minOf(r.mmLeft, r.mmRight) - 0.4f }
+    }
+
+    @Suppress("unused")
+    private fun oldSideFactor(ctx: Context, r: ReaderSettings, screenPx: Float, insetsPx: Float, mmPx: Float, density: Float): Float {
         if (r.layout != 1) return Letra.sideK(r.size)
         val userPx = (r.mmLeft + r.mmRight) * mmPx
         if (userPx <= 0f) return 1f

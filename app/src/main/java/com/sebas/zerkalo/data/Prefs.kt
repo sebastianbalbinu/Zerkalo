@@ -124,6 +124,14 @@ object Prefs {
         }.getOrDefault(emptyList())
     }
 
+    /** Desenfoque de Continuo: liviano (menos capas, más fluido) o completo. */
+    fun blurLite() = sp.getBoolean("blurLite", false)
+    fun setBlurLite(on: Boolean) = sp.edit().putBoolean("blurLite", on).apply()
+
+    /** El último objetivo elegido en "¿Cómo quieres leer hoy?" (-1 = ninguno). */
+    fun goal() = sp.getInt("goal", -1)
+    fun setGoal(g: Int) = sp.edit().putInt("goal", g).apply()
+
     /** Avisos de "trazos con otra letra" que la persona cerró con la ✕ (no vuelven a salir). */
     fun inkHintHidden(bookId: String, what: String) = sp.getStringSet("inkHide_$bookId", emptySet())?.contains(what) == true
     fun hideInkHint(bookId: String, what: String) {

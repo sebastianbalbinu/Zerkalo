@@ -28,7 +28,7 @@ object Typeset {
         val c = pad.paper
         val rgb = "${(c shr 16) and 255},${(c shr 8) and 255},${c and 255}"
         val opts = """{"mode":${r.layout},"justify":$justify,"align":$align,"minJ":${Fit.AUTO_JUSTIFY},"lang":"${lang.replace("\"", "")}","scroll":${r.scroll},""" +
-            """"size":${r.size},"padTop":${pad.top},"padBottom":${pad.bottom},"padLeft":${pad.left},"padRight":${pad.right},"paper":"$rgb","n":$nonce}"""
+            """"size":${r.size},"lite":${com.sebas.zerkalo.data.Prefs.blurLite()},"padTop":${pad.top},"padBottom":${pad.bottom},"padLeft":${pad.left},"padRight":${pad.right},"paper":"$rgb","n":$nonce}"""
         return JS.replace("__OPTS__", opts)
     }
 
@@ -37,12 +37,13 @@ var O = __OPTS__;
 var d = document, b = d.body;
 if (!b) return 'sin-cuerpo';
 window.__zkOpts = O;
-window.__zkEdges = function(top, bot, rgb){
+window.__zkEdges = function(top, bot, rgb, lite){
   var d = document, old = d.getElementById('zk-edges');
   if (old) old.remove();
   if (top <= 0 && bot <= 0) return;
   var wrap = d.createElement('div'); wrap.id = 'zk-edges'; wrap.setAttribute('aria-hidden', 'true');
-  var blurs = [1, 2, 4, 8, 16], n = blurs.length;
+  // Liviano: 2 capas (más fluido en teléfonos modestos); completo: 5 capas, el degradé más suave
+  var blurs = lite ? [3, 12] : [1, 2, 4, 8, 16], n = blurs.length;
   function imp(css) { return css.split(';').filter(function(x){ return x.trim(); }).map(function(x){ return x + ' !important'; }).join(';'); }
   function zone(isTop, h) {
     var dir = isTop ? 'to bottom' : 'to top', pos = isTop ? 'top:0' : 'bottom:0';
@@ -110,7 +111,7 @@ window.__zkRun = function(){
   if (O.scroll && (O.padLeft > 0 || O.padRight > 0)) {
     set(b, 'padding-left', O.padLeft + 'px'); set(b, 'padding-right', O.padRight + 'px'); set(b, 'box-sizing', 'border-box');
   }
-  window.__zkEdges(O.scroll ? O.padTop + 10 : 0, O.scroll ? O.padBottom + 18 : 0, O.paper);
+  window.__zkEdges(O.scroll ? O.padTop + 10 : 0, O.scroll ? O.padBottom + 18 : 0, O.paper, !!O.lite);
   if (O.mode === 3) { st.textContent = edge; return 'ninguna'; }
   var css = 'img,svg,video{max-width:100% !important;height:auto !important;object-fit:contain}img{max-height:92vh}' +
     'table{max-width:100% !important}pre{white-space:pre-wrap !important}';

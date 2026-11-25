@@ -156,6 +156,8 @@ class ReaderUi {
     var camHalf by mutableFloatStateOf(0f)  // medio ancho de la cámara, en dp
     var typeTab by mutableIntStateOf(0)     // pestaña abierta en las opciones de lectura
     var cpl by mutableIntStateOf(0)           // letras por línea (aprox.) con los ajustes de ahora
+    var fitMm by mutableFloatStateOf(0f)      // margen sugerido (mm por lado) para líneas más cómodas; 0 = nada que sugerir
+    var typeMore by mutableStateOf(false)     // Aa: "Más ajustes" abierto (si no, lo básico)
     var fadeTop by mutableFloatStateOf(0f)    // desplazamiento: alto (dp) de la zona difuminada de arriba
     var fadeBottom by mutableFloatStateOf(0f) // y de abajo
     var pairSwap by mutableStateOf(false)       // la pareja va arriba (o a la izquierda)
@@ -334,6 +336,20 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private var activeMs = 0L
     private var lastEvent = 0L
 
+    /** Pide la frecuencia más alta de la pantalla (90/120 Hz si la tiene): bajar y pasar página se ven más fluidos. */
+    private fun highRefresh() = runCatching {
+        @Suppress("DEPRECATION")
+        val d = if (android.os.Build.VERSION.SDK_INT >= 30) display else windowManager.defaultDisplay
+        d ?: return@runCatching
+        val cur = d.mode
+        val best = d.supportedModes.filter { it.physicalWidth == cur.physicalWidth && it.physicalHeight == cur.physicalHeight }
+            .maxByOrNull { it.refreshRate } ?: return@runCatching
+        if (best.refreshRate > cur.refreshRate + 1f || window.attributes.preferredDisplayModeId != best.modeId) {
+            window.attributes = window.attributes.apply { preferredDisplayModeId = best.modeId }
+            Log.i("Zerkalo", "ZK_HZ ${cur.refreshRate.toInt()} -> ${best.refreshRate.toInt()} Hz")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // No se restauran fragmentos viejos: el lector siempre se arma de nuevo con el libro abierto.
         super.onCreate(null)
@@ -343,7 +359,14 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         Prefs.bookLook(book.id)?.let { ui.settings = ui.settings.withLook(it); ui.ownLook = true }
         // La prueba automática abre el libro en modo continuo sin cambiar los ajustes guardados
         if (intent.getBooleanExtra("continuo", false)) ui.settings = ui.settings.copy(scroll = true, continuous = true)
+        intent.getStringExtra("hoja")?.let { h -> lifecycleScope.launch { delay(6000); ui.sheet = h } }
         ui.palette = paletteFor(ui.settings)
+        highRefresh()
+        // El margen de los lados (dentro de la página) desde el principio, para que el libro no salte al abrir
+        resources.displayMetrics.let { dm ->
+            val xdpi = dm.xdpi.takeIf { it in 100f..900f } ?: dm.densityDpi.toFloat()
+            gutterCss = (minOf(ui.settings.mmLeft, ui.settings.mmRight) * xdpi / 25.4f).toInt() / dm.density.toDouble()
+        }
         ui.marks = Library.marks.value.filter { it.bookId == book.id }
         ui.minutesToday = Library.minutesToday()
 
@@ -465,7 +488,10 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         // Páginas en pantalla ancha y acostada: el motor pone dos columnas, cada una con la mitad
         if (!r.continuous && !r.scroll && w > dm.heightPixels && w / dm.density >= 600f) text = (text - 32f * dm.density) / 2f
         val cpl = runCatching { Fit.cpl(this, r, text, dm.density) }.getOrDefault(0)
-        if (r == ui.settings) ui.cpl = cpl
+        if (r == ui.settings) {
+            ui.cpl = cpl
+            ui.fitMm = runCatching { Fit.suggestMm(this, r, w, ins, mmPx, dm.density) }.getOrNull() ?: 0f
+        }
         return side to cpl
     }
 
@@ -493,7 +519,17 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             scrollPadBottom = mmY(r.mmBottom) / dm.density
             ui.fadeTop = scrollPadTop; ui.fadeBottom = scrollPadBottom
         } else {
-            panes.setPadding(i.left + mmX(r.mmLeft), cam + mmY(r.mmTop), i.right + mmX(r.mmRight), mmY(r.mmBottom))
+            // Los lados van DENTRO de la página (margen de Readium): así al pasar página la hoja se desliza
+            // de borde a borde, en vez de cortarse a unos milímetros del borde. Lo que sobre de un lado
+            // (si izquierda y derecha son distintos) queda como marco.
+            val gl = mmX(r.mmLeft); val gr = mmX(r.mmRight); val g = minOf(gl, gr)
+            panes.setPadding(i.left + gl - g, cam + mmY(r.mmTop), i.right + gr - g, mmY(r.mmBottom))
+            val css = g / dm.density.toDouble()
+            if (kotlin.math.abs(css - gutterCss) > 0.5) {
+                gutterCss = css
+                navigator?.submitPreferences(preferences(r, ui.palette))
+                pairNav?.submitPreferences(preferences(r, ui.palette))
+            }
             scrollPadTop = 0f; scrollPadBottom = 0f; scrollPadLeft = 0f; scrollPadRight = 0f
             ui.fadeTop = 0f; ui.fadeBottom = 0f
         }
@@ -824,7 +860,11 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     @OptIn(ExperimentalReadiumApi::class)
     private fun navConfig() = EpubNavigatorFragment.Configuration {
         // Largo de línea: unos 66 caracteres, lo ideal según los estudios (antes ~80). Afecta tabletas y el modo horizontal.
-        readiumCssRsProperties = org.readium.r2.navigator.epub.css.RsProperties(maxLineLength = org.readium.r2.navigator.epub.css.Length.Rem(34.0))
+        readiumCssRsProperties = org.readium.r2.navigator.epub.css.RsProperties(
+            maxLineLength = org.readium.r2.navigator.epub.css.Length.Rem(34.0),
+            // 1 px: así "pageMargins" son directamente los px de margen (tus milímetros convertidos)
+            pageGutter = org.readium.r2.navigator.epub.css.Length.Px(1.0),
+        )
         servedAssets = listOf("fonts/.*")
         selectionActionModeCallback = selectionCallback
         // Los cambios de capítulo en desplazamiento continuo los maneja Zerkalo (ver onDrag), no Readium:
@@ -1357,10 +1397,12 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
      * Márgenes de los lados. En modo Zerkalo se achican cuando la letra crece, para que la línea
      * siga teniendo un largo cómodo (y los versos quepan) en vez de quedar con 4 palabras.
      */
-    private fun pageMargins(r: ReaderSettings): Double {
-        // Los márgenes de los lados los pone Zerkalo en milímetros; Readium no agrega los suyos.
-        return 0.0
-    }
+    private fun pageMargins(r: ReaderSettings): Double =
+        // Páginas: tus milímetros de los lados, dentro de la hoja (el "gutter" de Readium vale 1 px). Continuo: los pone Zerkalo.
+        if (r.scroll || r.continuous) 0.0 else gutterCss
+
+    /** Margen de los lados dentro de la página, en px de CSS (lo calcula applyMargins con tus milímetros). */
+    private var gutterCss = 0.0
 
     // ---------------- diagramación ----------------
     private val typesetHref = HashMap<EpubNavigatorFragment, String>()
