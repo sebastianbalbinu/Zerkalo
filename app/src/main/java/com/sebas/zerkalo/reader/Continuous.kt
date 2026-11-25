@@ -77,6 +77,9 @@ class ContinuousView(ctx: Context, private val pub: Publication, private val cb:
                 val path = (u.encodedPath ?: "/").removePrefix("/")
                 return when {
                     path == "__shell.html" -> html(SHELL.toByteArray())
+                    path.startsWith("__gfont/") -> GoogleFonts.webFile(context, path)?.let { f ->
+                        WebResourceResponse(if (f.extension == "woff2") "font/woff2" else "font/ttf", null, f.inputStream())
+                    }
                     path.startsWith("__font/") -> runCatching {
                         val name = path.removePrefix("__font/").substringBefore('?')
                         WebResourceResponse("font/ttf", null, context.assets.open("fonts/$name"))

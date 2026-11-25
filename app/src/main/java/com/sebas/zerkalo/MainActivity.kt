@@ -66,6 +66,19 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(intent: Intent?) {
         intent ?: return
         AppEvents.testContinuous = intent.getBooleanExtra("zerkalo.continuo", false)
+        // Prueba automática: descargar una letra de Google y dejarla puesta en letra grande (22 pt)
+        intent.getStringExtra("zerkalo.gfont")?.let { fam ->
+            intent.removeExtra("zerkalo.gfont")
+            lifecycleScope.launch {
+                com.sebas.zerkalo.reader.GoogleFonts.download(applicationContext, fam, true)
+                    .onSuccess {
+                        val pr = com.sebas.zerkalo.data.Prefs
+                        pr.setReader(pr.reader.value.copy(font = it, size = com.sebas.zerkalo.reader.Letra.pct(22)))
+                        Log.i("Zerkalo", "ZK_GFONT_OK $fam -> $it")
+                    }
+                    .onFailure { Log.w("Zerkalo", "ZK_GFONT_FAIL $fam ${it.message}") }
+            }
+        }
         intent.getStringExtra("zerkalo.abrir")?.let { AppEvents.openBook.value = it; intent.removeExtra("zerkalo.abrir") }
         if (intent.hasExtra("zerkalo.tab")) { AppEvents.tab.value = intent.getIntExtra("zerkalo.tab", 0); intent.removeExtra("zerkalo.tab") }
         val uri: Uri? = when (intent.action) {

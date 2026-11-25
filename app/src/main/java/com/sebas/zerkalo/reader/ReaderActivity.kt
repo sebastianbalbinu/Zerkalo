@@ -456,7 +456,9 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         // Milímetros reales de la pantalla (si el teléfono informa mal sus puntos por pulgada, se usa la densidad)
         val xdpi = dm.xdpi.takeIf { it in 100f..900f } ?: dm.densityDpi.toFloat()
         val ydpi = dm.ydpi.takeIf { it in 100f..900f } ?: dm.densityDpi.toFloat()
-        fun mmX(v: Float) = (v * xdpi / 25.4f).toInt()
+        // Con letra grande los lados se achican, para que la línea no quede de tres palabras
+        val side = Letra.sideK(r.size)
+        fun mmX(v: Float) = (v * side * xdpi / 25.4f).toInt()
         fun mmY(v: Float) = (v * ydpi / 25.4f).toInt()
         val cam = if (r.respectCamera) i.top else 0
         if (r.scroll || r.continuous) {
@@ -737,9 +739,20 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val r = ui.settings
         val p = ui.palette
         fun hex(c: androidx.compose.ui.graphics.Color) = String.format("#%06X", 0xFFFFFF and c.toArgb())
-        val f = ReaderFonts.getOrNull(r.font)
+        val f = if (GoogleFonts.isGoogle(r.font)) null else ReaderFonts.getOrNull(r.font)
         val faces = StringBuilder()
         var fam: String? = null
+        val gf = GoogleFonts.get(this, r.font)
+        if (gf != null) gf.let { g ->
+            fam = g.family
+            listOf(Triple("regular", "normal", 400), Triple("italic", "italic", 400), Triple("bold", "normal", 700)).forEach { (kind, style, weight) ->
+                if (kind != "regular" && g.files[kind] == null) return@forEach
+                GoogleFonts.file(this, g, kind)?.let { faces.append("@font-face{font-family:'${g.family}';src:url('/${GoogleFonts.webPath(g, it)}');font-style:$style;font-weight:$weight}") }
+            }
+        } else if (GoogleFonts.isGoogle(r.font)) {
+            // Letra de Google que ya no está: se usa Literata
+            ReaderFonts[0].let { lf -> FontFiles.regular(this, lf)?.let { reg -> fam = lf.css; faces.append("@font-face{font-family:'${lf.css}';src:url('/__font/$reg');font-style:normal;font-weight:400}") } }
+        }
         if (f?.css != null) {
             val reg = FontFiles.regular(this, f)
             if (reg != null) {
@@ -757,7 +770,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val sb = StringBuilder(faces)
         sb.append(":root{--zk-pt:${scrollPadTop}px;--zk-pb:${scrollPadBottom + 18f}px}")
         sb.append("html{font-size:${r.size}% !important;background:${hex(p.bg)} !important;-webkit-text-size-adjust:100% !important;overflow-anchor:auto;overflow-x:hidden !important;touch-action:pan-y}")
-        sb.append("body{margin:0 !important;padding:0 ${scrollPadRight}px 0 ${scrollPadLeft}px !important;box-sizing:border-box !important;background:${hex(p.bg)} !important;color:${hex(p.text)} !important;line-height:${r.lineHeight} !important;overflow-wrap:break-word")
+        sb.append("body{margin:0 !important;padding:0 ${scrollPadRight}px 0 ${scrollPadLeft}px !important;box-sizing:border-box !important;background:${hex(p.bg)} !important;color:${hex(p.text)} !important;line-height:${Letra.lineHeight(r)} !important;overflow-wrap:break-word")
         if (fam != null) sb.append(";font-family:'$fam',serif !important")
         sb.append("}")
         sb.append("section.zk-ch *{color:inherit !important;background-color:transparent !important}")
@@ -771,7 +784,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             sb.append("section.zk-ch p{text-align:${if (justify) "justify" else "left"} !important;hyphens:${if (justify) "auto" else "manual"} !important;-webkit-hyphens:${if (justify) "auto" else "manual"} !important}")
             listOf(null, "0.6em", "1.2em").getOrNull(r.paragraph)?.let { sb.append("section.zk-ch p{margin-top:$it !important;margin-bottom:$it !important}") }
         }
-        listOf(null, 0.06, 0.14).getOrNull(r.spacing)?.let { sb.append("section.zk-ch{letter-spacing:${it}em !important;word-spacing:${it * 2.5}em !important}") }
+        listOf(null, 0.06, 0.14).getOrNull(Letra.spacing(r))?.let { sb.append("section.zk-ch{letter-spacing:${it}em !important;word-spacing:${it * 2.5}em !important}") }
         sb.append("::selection{background:rgba(196,67,42,0.28)}")
         // Papelito de las notas adhesivas, al final de su frase
         sb.append(".zk-stk{display:inline-block;width:.85em;height:.85em;margin-left:.2em;background:#EFD995 !important;border-radius:2px 2px 6px 2px;transform:rotate(-6deg) translateY(-.45em);box-shadow:1px 2px 4px rgba(0,0,0,.35);vertical-align:baseline;cursor:pointer}")
@@ -1295,7 +1308,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     }
 
     private fun preferences(r: ReaderSettings, p: Palette): EpubPreferences {
-        val fam = ReaderFonts.getOrNull(r.font)?.css
+        val fam = fontCss(this, r.font)
         // Los estilos del libro se desactivan siempre: si no, el libro manda sobre el justificado
         // y el interlineado (con la letra "Original" se conserva su tipografía).
         return EpubPreferences(
@@ -1303,7 +1316,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             textColor = RColor(p.text.toArgb()),
             fontFamily = fam?.let { FontFamily(it) },
             fontSize = r.size / 100.0,
-            lineHeight = r.lineHeight.toDouble(),
+            lineHeight = Letra.lineHeight(r).toDouble(),
             pageMargins = pageMargins(r),
             textAlign = if (r.justify && !r.dyslexia) TextAlign.JUSTIFY else TextAlign.START,
             hyphens = r.justify && !r.dyslexia,
@@ -1311,8 +1324,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             publisherStyles = r.layout == 0 || r.layout == 3,
             scroll = r.scroll,
             paragraphSpacing = listOf(null, 0.6, 1.2).getOrNull(r.paragraph),
-            letterSpacing = listOf(null, 0.06, 0.14).getOrNull(r.spacing),
-            wordSpacing = listOf(null, 0.15, 0.3).getOrNull(r.spacing),
+            letterSpacing = listOf(null, 0.06, 0.14).getOrNull(Letra.spacing(r)),
+            wordSpacing = listOf(null, 0.15, 0.3).getOrNull(Letra.spacing(r)),
         )
     }
 
@@ -1340,6 +1353,14 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             // Como en Books: el capítulo se acomoda apenas aparece, sin parpadeos ni papel encima.
             // Las pasadas siguientes solo actúan si algo cambió (letras o imágenes que terminaron de cargar).
             val pad = PagePad(scrollPadTop, scrollPadBottom, ui.palette.bg.toArgb(), scrollPadLeft, scrollPadRight)
+            // Letra de Google: va dentro de la página (solo si este capítulo todavía no la tiene)
+            GoogleFonts.get(this@ReaderActivity, ui.settings.font)?.let { g ->
+                val has = runCatching { nav.evaluateJavascript(GFontInject.check(g.family)) }.getOrNull()
+                if (has != "true") {
+                    val js = withContext(Dispatchers.IO) { runCatching { GFontInject.script(this@ReaderActivity, ui.settings.font) }.getOrNull() }
+                    if (js != null) runCatching { nav.evaluateJavascript(js) }.onSuccess { Log.i("Zerkalo", "ZK_GFONT_PAGE ${g.family} $it") }
+                }
+            }
             for ((i, wait) in listOf(0L, 240L, 700L).withIndex()) {
                 if (wait > 0) delay(wait)
                 val r = runCatching { nav.evaluateJavascript(Typeset.script(ui.settings, lang, pad, if (force && i == 0) System.nanoTime() else 0)) }.getOrNull()
@@ -1395,6 +1416,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         }
         if (old.brightness != r.brightness) applyBrightness(r.brightness)
         if (old.veil != r.veil) applyVeil()
+        if (Letra.sideK(old.size) != Letra.sideK(r.size)) applyMargins()
         if (old.mmLeft != r.mmLeft || old.mmRight != r.mmRight || old.mmTop != r.mmTop || old.mmBottom != r.mmBottom || old.scroll != r.scroll || old.respectCamera != r.respectCamera) {
             applyMargins()
             if (old.copy(mmLeft = r.mmLeft, mmRight = r.mmRight, mmTop = r.mmTop, mmBottom = r.mmBottom, respectCamera = r.respectCamera) == r) {

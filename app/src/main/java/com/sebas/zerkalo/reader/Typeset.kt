@@ -27,7 +27,7 @@ object Typeset {
         val c = pad.paper
         val rgb = "${(c shr 16) and 255},${(c shr 8) and 255},${c and 255}"
         val opts = """{"mode":${r.layout},"justify":$justify,"lang":"${lang.replace("\"", "")}","scroll":${r.scroll},""" +
-            """"padTop":${pad.top},"padBottom":${pad.bottom},"padLeft":${pad.left},"padRight":${pad.right},"paper":"$rgb","n":$nonce}"""
+            """"size":${r.size},"padTop":${pad.top},"padBottom":${pad.bottom},"padLeft":${pad.left},"padRight":${pad.right},"paper":"$rgb","n":$nonce}"""
         return JS.replace("__OPTS__", opts)
     }
 
@@ -183,10 +183,12 @@ window.__zkRun = function(){
       continue;
     }
     if (cs.textAlign === 'justify' || cs.textAlignLast === 'justify') {
-      var narrow = (O.mode === 0 || O.mode === 1) && e.clientWidth > 0 && perLine(e, cs) < 42;
+      var narrow = (O.mode === 0 || O.mode === 1) && e.clientWidth > 0 && (perLine(e, cs) < 42 || O.size >= 183);
       if (!O.justify || narrow) {
         set(e, 'text-align', 'left'); set(e, 'text-align-last', 'auto');
-        set(e, 'hyphens', 'manual'); set(e, '-webkit-hyphens', 'manual');
+        // Letra grande: a la izquierda pero con guiones, así el borde derecho no queda tan desparejo
+        var hy = narrow && O.justify && O.size >= 150 && O.lang ? 'auto' : 'manual';
+        set(e, 'hyphens', hy); set(e, '-webkit-hyphens', hy);
       }
     }
   }
@@ -208,6 +210,17 @@ window.__zkRun = function(){
     var e = vl[i];
     // Sangría francesa: si un verso se parte, la continuación queda más adentro
     if (parseFloat(getComputedStyle(e).textIndent) >= 0) { set(e, 'padding-left', '1.4em'); set(e, 'text-indent', '-1.4em'); }
+  }
+
+  // Letra grande (18 pt o más): los títulos crecen menos que el texto, para no llenar media página
+  if (O.size >= 150 && O.mode !== 1) {
+    var bodyF = parseFloat(getComputedStyle(b.querySelector('p') || b).fontSize) || 16;
+    var hsB = b.querySelectorAll('h1,h2,h3,h4');
+    for (var i = 0; i < hsB.length; i++) {
+      var h = hsB[i], hf = parseFloat(getComputedStyle(h).fontSize) || bodyF;
+      var capB = bodyF * (h.tagName === 'H1' ? 1.4 : h.tagName === 'H2' ? 1.25 : 1.15);
+      if (hf > capB) set(h, 'font-size', capB.toFixed(1) + 'px');
+    }
   }
 
   if (O.mode === 2) return 'ok';
@@ -243,7 +256,8 @@ window.__zkRun = function(){
   var hs = b.querySelectorAll('h1,h2,h3,h4');
   for (var i = 0; i < hs.length; i++) {
     var h = hs[i], hf = parseFloat(getComputedStyle(h).fontSize) || body;
-    var cap = body * (h.tagName === 'H1' ? 1.7 : h.tagName === 'H2' ? 1.5 : 1.3);
+    var big = O.size >= 150;
+    var cap = body * (h.tagName === 'H1' ? (big ? 1.4 : 1.7) : h.tagName === 'H2' ? (big ? 1.25 : 1.5) : (big ? 1.15 : 1.3));
     if (hf > cap) set(h, 'font-size', cap.toFixed(1) + 'px');
     set(h, 'hyphens', 'manual'); set(h, '-webkit-hyphens', 'manual');
   }

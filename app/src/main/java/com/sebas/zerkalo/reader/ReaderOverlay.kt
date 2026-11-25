@@ -322,6 +322,7 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
         "type" -> TypeSheet(ui, act) { ui.sheet = null }
         "luz" -> LightSheet(ui, act) { ui.sheet = null }
         "fonts" -> FontSheet(ui, act) { ui.sheet = "type" }
+        "gfonts" -> GoogleFontSheet(ui, act) { ui.sheet = "fonts" }
         "pair" -> PairSheet(ui, act) { ui.sheet = null }
         "listen" -> ListenSheet(act) { ui.sheet = null }
         "player" -> PlayerSheet(act) { ui.sheet = null }
@@ -464,7 +465,39 @@ private fun FontSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
     Sheet(onClose) {
         Text("Letra", style = Type.title.copy(fontSize = 21.sp), color = p.text)
         Text("Todas son libres y gratuitas. Las marcadas con ● se eligieron por estudios de legibilidad.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
+        val google = remember { GoogleFonts.installed(ctx) }
         LazyColumn(Modifier.heightIn(max = 560.dp).padding(top = 6.dp)) {
+            item(key = "gmore") {
+                Row(
+                    Modifier.fillMaxWidth().padding(top = 6.dp, bottom = 4.dp).clip(RoundedCornerShape(16.dp)).border(1.dp, p.accent.copy(alpha = 0.5f), RoundedCornerShape(16.dp))
+                        .clickable { ui.sheet = "gfonts" }.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Más letras de Google", style = Type.ui, color = p.text)
+                        Text("Elige y se descargan una vez; después funcionan sin internet", style = Type.uiSmall, color = p.text2)
+                    }
+                    ZIcon("chevron", p.accent, 16.dp)
+                }
+            }
+            if (google.isNotEmpty()) {
+                item(key = "gtitle") { Label("Descargadas de Google") }
+                items(google, key = { "g" + it.first }) { (i, g) ->
+                    val sel = i == s.font
+                    Row(
+                        Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(16.dp))
+                            .background(if (sel) p.text else p.card.copy(alpha = 0.55f))
+                            .clickable { act.settings(ui.settings.copy(font = i)) }.padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text(g.family, fontFamily = GoogleFonts.preview(ctx, i), fontSize = 18.sp, color = if (sel) p.bg else p.text)
+                            Text("Así se ve un párrafo. De Google Fonts", fontFamily = GoogleFonts.preview(ctx, i), fontSize = 13.5.sp, color = if (sel) p.bg.copy(alpha = 0.75f) else p.text2, maxLines = 1)
+                        }
+                        if (sel) ZIcon("check", p.bg, 18.dp)
+                    }
+                }
+            }
             groups.forEach { (title, list) ->
                 if (list.isEmpty()) return@forEach
                 item(key = title) { Label(title) }
@@ -485,6 +518,80 @@ private fun FontSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                             )
                         }
                         if (sel) ZIcon("check", p.bg, 18.dp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Letras de Google: una lista elegida para leer y un buscador con todo el catálogo. */
+@Composable
+private fun GoogleFontSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    val ctx = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var query by remember { mutableStateOf("") }
+    var catalog by remember { mutableStateOf<List<GFont>>(emptyList()) }
+    var loadingCat by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf<String?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var version by remember { mutableIntStateOf(0) }
+    LaunchedEffect(query.isNotBlank()) {
+        if (query.isNotBlank() && catalog.isEmpty() && !loadingCat) {
+            loadingCat = true
+            catalog = GoogleFonts.catalog(ctx)
+            loadingCat = false
+        }
+    }
+    val shown = remember(query, catalog) {
+        val q = query.trim().lowercase()
+        if (q.isEmpty()) GoogleFonts.CURATED
+        else (GoogleFonts.CURATED + catalog).distinctBy { it.family }.filter { it.family.lowercase().contains(q) }.take(60)
+            .ifEmpty { if (catalog.isEmpty() && !loadingCat) listOf(GFont(query.trim(), true, "Probar con este nombre exacto")) else emptyList() }
+    }
+    Sheet(onClose) {
+        Text("Letras de Google", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+        Text("Todas son libres y gratuitas. Cada una pesa entre 100 y 600 KB.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
+        Box(
+            Modifier.fillMaxWidth().padding(top = 12.dp).clip(RoundedCornerShape(14.dp)).background(p.card.copy(alpha = 0.7f)).padding(horizontal = 14.dp, vertical = 12.dp),
+        ) {
+            if (query.isEmpty()) Text("Buscar en todo Google Fonts…", style = Type.ui, color = p.text2)
+            BasicTextField(query, { query = it.take(40) }, singleLine = true, textStyle = Type.ui.copy(color = p.text), cursorBrush = SolidColor(p.accent), modifier = Modifier.fillMaxWidth())
+        }
+        error?.let { Text(it, style = Type.uiSmall, color = p.accent, modifier = Modifier.padding(top = 6.dp)) }
+        if (loadingCat) Text("Cargando el catálogo…", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp))
+        LazyColumn(Modifier.heightIn(max = 520.dp).padding(top = 6.dp)) {
+            if (query.isBlank()) item(key = "t") { Label("Buenas para leer") }
+            items(shown, key = { it.family }) { g ->
+                val idx = remember(version, g.family) { GoogleFonts.indexOf(ctx, g.family) }
+                val sel = idx != null && idx == ui.settings.font
+                Row(
+                    Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(16.dp))
+                        .background(if (sel) p.text else p.card.copy(alpha = 0.55f))
+                        .clickable(enabled = busy == null) {
+                            if (idx != null) { act.settings(ui.settings.copy(font = idx)); return@clickable }
+                            busy = g.family; error = null
+                            scope.launch {
+                                GoogleFonts.download(ctx, g.family, g.serif)
+                                    .onSuccess { act.settings(ui.settings.copy(font = it)); version++ }
+                                    .onFailure { error = "No pude descargar «${g.family}». Revisa el internet e intenta de nuevo." }
+                                busy = null
+                            }
+                        }.padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(g.family, fontFamily = idx?.let { GoogleFonts.preview(ctx, it) } ?: FontFamily.Default, fontSize = 17.sp, color = if (sel) p.bg else p.text)
+                        val sub = when { busy == g.family -> "Descargando…"; g.note.isNotBlank() -> g.note; else -> if (g.serif) "Con serifa" else "Sin serifa" }
+                        Text(sub, style = Type.uiSmall, color = if (sel) p.bg.copy(alpha = 0.75f) else p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                    when {
+                        sel -> ZIcon("check", p.bg, 18.dp)
+                        idx != null -> Text("Quitar", style = Type.uiSmall, color = p.text2, modifier = Modifier.clip(RoundedCornerShape(8.dp)).clickable {
+                            GoogleFonts.remove(ctx, idx); version++
+                        }.padding(6.dp))
+                        else -> Text("Descargar", style = Type.uiSmall, color = p.accent)
                     }
                 }
             }
@@ -863,30 +970,47 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
             0 -> {
                 Label("Letra")
                 val ctx = LocalContext.current
-                val font = ReaderFonts.getOrElse(s.font) { ReaderFonts[0] }
+                val gfont = GoogleFonts.get(ctx, s.font)
+                val font = gfont?.let { ReaderFont(it.family, it.family, it.serif, note = "De Google Fonts") } ?: ReaderFonts.getOrElse(s.font) { ReaderFonts[0] }
                 Row(
                     Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(p.card.copy(alpha = 0.7f)).clickable { ui.sheet = "fonts" }
                         .padding(horizontal = 18.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f)) {
-                        Text(font.name, fontFamily = FontFiles.preview(ctx, s.font), fontSize = 19.sp, color = p.text)
+                        Text(font.name, fontFamily = if (gfont != null) GoogleFonts.preview(ctx, s.font) else FontFiles.preview(ctx, s.font.coerceIn(0, ReaderFonts.lastIndex)), fontSize = 19.sp, color = p.text)
                         Text(font.note, style = Type.uiSmall, color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Text("Cambiar", style = Type.uiSmall, color = p.accent)
                     ZIcon("chevron", p.accent, 16.dp)
                 }
-                Label("Tamaño", "${s.size} %")
+                // En puntos, como en Word (por dentro sigue siendo el porcentaje de siempre)
+                val pt = Letra.pt(s.size)
+                Label("Tamaño", "$pt pt")
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    RoundPill("minus", { act.settings(s.copy(size = (s.size - 10).coerceAtLeast(70))) })
-                    var v by remember(s.size) { mutableFloatStateOf(s.size.toFloat()) }
+                    RoundPill("minus", { act.settings(s.copy(size = Letra.pct(pt - 1))) })
+                    var v by remember(s.size) { mutableFloatStateOf(pt.toFloat()) }
                     ZSlider(
-                        value = v, onChange = { v = it }, range = 70f..200f,
-                        onFinished = { act.settings(ui.settings.copy(size = (v / 5).toInt() * 5)) },
+                        value = v, onChange = { v = it }, range = Letra.PT_MIN.toFloat()..Letra.PT_MAX.toFloat(),
+                        onFinished = { act.settings(ui.settings.copy(size = Letra.pct(kotlin.math.round(v).toInt()))) },
                         modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                     )
-                    RoundPill("plus", { act.settings(s.copy(size = (s.size + 10).coerceAtMost(200))) })
+                    RoundPill("plus", { act.settings(s.copy(size = Letra.pct(pt + 1))) })
                 }
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Letra.QUICK.forEach { q ->
+                        val on = q == pt
+                        Box(
+                            Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).background(if (on) p.text else p.card.copy(alpha = 0.7f))
+                                .clickable { act.settings(ui.settings.copy(size = Letra.pct(q))) }.padding(vertical = 8.dp),
+                            contentAlignment = Alignment.Center,
+                        ) { Text("$q", style = Type.uiSmall.copy(fontSize = 13.sp), color = if (on) p.bg else p.text) }
+                    }
+                }
+                if (pt >= 18) Text(
+                    "Letra grande: márgenes más angostos, títulos más chicos y guiones para que la línea rinda",
+                    style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp),
+                )
                 Label("Interlineado")
                 val lhs = listOf(1.4f, 1.6f, 1.85f)
                 Segmented(listOf("Compacto", "Medio", "Amplio"), lhs.indexOfFirst { kotlin.math.abs(it - s.lineHeight) < 0.05f }.coerceAtLeast(0), { act.settings(s.copy(lineHeight = lhs[it])) })

@@ -50,8 +50,18 @@ $T adb exec-out screencap -p > shot6.png
 [ -n "$W" ] && $T adb shell input swipe $((W*30/100)) $((W*14/100 + H*6/100)) $((W*30/100)) $((W*14/100 + H*6/100)) 1200
 sleep 3
 $T adb exec-out screencap -p > shot7.png
+# Letra de Google descargada + letra grande (22 pt) en el lector por páginas
+$T adb shell am start -n com.sebas.zerkalo/.MainActivity --es zerkalo.gfont Alegreya
+for i in $(seq 1 30); do $T adb logcat -d | grep -qE "ZK_GFONT_OK|ZK_GFONT_FAIL" && break; sleep 2; done
+$T adb shell am start -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bienvenida
+sleep 12
+$T adb exec-out screencap -p > shot8.png
+[ -n "$W" ] && $T adb shell input tap $((W*85/100)) $((H/2))
+sleep 4
+$T adb exec-out screencap -p > shot9.png
 $T adb logcat -d > logcat-full.txt
 {
+  echo "-- Letras de Google --"; grep -E "ZK_GFONT" logcat-full.txt | sed 's/^.*Zerkalo *: //' | head -10
   echo "== Android $($T adb shell getprop ro.build.version.release) =="
   echo "-- Tansu (fuentes y tiempos) --"; grep -E "ZK_TANSU|ZK_FUENTE|ZK_INDICE" logcat-full.txt | sed 's/^.*Zerkalo *: //' | head -40
   echo "-- Fluidez al deslizar el Tansu --"
