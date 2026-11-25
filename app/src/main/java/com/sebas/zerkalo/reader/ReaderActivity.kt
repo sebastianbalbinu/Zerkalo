@@ -1419,16 +1419,17 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             // Como en Books: el capítulo se acomoda apenas aparece, sin parpadeos ni papel encima.
             // Las pasadas siguientes solo actúan si algo cambió (letras o imágenes que terminaron de cargar).
             val pad = PagePad(scrollPadTop, scrollPadBottom, ui.palette.bg.toArgb(), scrollPadLeft, scrollPadRight)
-            // Letra de Google: va dentro de la página (solo si este capítulo todavía no la tiene)
-            GoogleFonts.get(this@ReaderActivity, ui.settings.font)?.let { g ->
-                val has = runCatching { nav.evaluateJavascript(GFontInject.check(g.family)) }.getOrNull()
-                if (has != "true") {
-                    val js = withContext(Dispatchers.IO) { runCatching { GFontInject.script(this@ReaderActivity, ui.settings.font) }.getOrNull() }
-                    if (js != null) runCatching { nav.evaluateJavascript(js) }.onSuccess { Log.i("Zerkalo", "ZK_GFONT_PAGE ${g.family} $it") }
-                }
-            }
             for ((i, wait) in listOf(0L, 240L, 700L).withIndex()) {
                 if (wait > 0) delay(wait)
+                // Letra de Google: va dentro de la página. Se revisa en cada pasada, porque al abrir el libro
+                // la página puede no estar lista todavía en la primera.
+                GoogleFonts.get(this@ReaderActivity, ui.settings.font)?.let { g ->
+                    val has = runCatching { nav.evaluateJavascript(GFontInject.check(g.family)) }.getOrNull()
+                    if (has == "false") {
+                        val js = withContext(Dispatchers.IO) { runCatching { GFontInject.script(this@ReaderActivity, ui.settings.font) }.getOrNull() }
+                        if (js != null) runCatching { nav.evaluateJavascript(js) }.onSuccess { Log.i("Zerkalo", "ZK_GFONT_PAGE ${g.family} $href $it") }
+                    }
+                }
                 val r = runCatching { nav.evaluateJavascript(Typeset.script(ui.settings, lang, pad, if (force && i == 0) System.nanoTime() else 0)) }.getOrNull()
                 if (i == 0) Log.i("Zerkalo", "ZK_TYPESET $href $r")
                 if (i == 1) {

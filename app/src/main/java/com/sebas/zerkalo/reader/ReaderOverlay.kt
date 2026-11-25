@@ -1210,6 +1210,7 @@ private fun TypeHome(ui: ReaderUi, act: ReaderActions) {
             }
         }
     }
+    Spacer(Modifier.height(14.dp))
     Caption("Afinar", accent = true)
     // Tamaño
     val pt = Letra.pt(s.size)
@@ -1219,9 +1220,9 @@ private fun TypeHome(ui: ReaderUi, act: ReaderActions) {
             Row(verticalAlignment = Alignment.CenterVertically) { Text("Tamaño", style = Type.ui, color = p.text); InfoDot(open) { open = !open } }
             if (open) InfoCard(Info.SIZE)
         }
-        RoundPill("minus", { act.settings(s.copy(size = Letra.pct(pt - 1))) })
+        RoundPill("minus", { act.settings(s.copy(size = Letra.pct(pt - 1))) }, size = 38.dp)
         Text("$pt pt", style = Type.ui, color = p.text, textAlign = TextAlign.Center, modifier = Modifier.width(64.dp))
-        RoundPill("plus", { act.settings(s.copy(size = Letra.pct(pt + 1))) })
+        RoundPill("plus", { act.settings(s.copy(size = Letra.pct(pt + 1))) }, size = 38.dp)
     }
     // Letra
     val gfont = GoogleFonts.get(ctx, s.font)
