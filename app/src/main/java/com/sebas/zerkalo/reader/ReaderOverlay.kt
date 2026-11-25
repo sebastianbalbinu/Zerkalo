@@ -189,6 +189,9 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                     RoundPill("escuchar", { ui.sheet = "listen" }, active = listening)
                     Spacer(Modifier.width(8.dp))
                     RoundPill("pair", { ui.sheet = "pair" }, active = ui.pairOn)
+                    Spacer(Modifier.width(8.dp))
+                    // Pluma de colores para rayar sobre la página
+                    RoundPill("", act.toggleInk, active = ui.inking, glyph = "✎")
                 }
             }
         }
@@ -236,7 +239,7 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Row(
                         Modifier.height(48.dp).shadow(6.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)).background(p.text)
-                            .clickable { ui.say("Hoy llevas ${fmt(ui.minutesToday)} de lectura") }.padding(horizontal = 16.dp),
+                            .clickable { ui.say("Hoy llevas ${fmt(ui.minutesToday)} de lectura") }.padding(horizontal = 13.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         ZIcon("clock", p.bg, 19.dp, 1.7f)
@@ -244,12 +247,15 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                     }
                     Spacer(Modifier.weight(1f))
                     RoundPill("toc", { ui.sheet = "toc" })
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(6.dp))
                     RoundPill("sun", { ui.sheet = "luz" })
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(6.dp))
                     RoundPill("aa", { ui.sheet = "type" })
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(6.dp))
                     RoundPill("shiori", act.toggleShiori, active = ui.bookmarked)
+                    Spacer(Modifier.width(6.dp))
+                    // El apunte: se abre aunque esté vacío, para escribir sin citar
+                    RoundPill("", act.openNote, active = true, glyph = "記")
                 }
             }
         }
@@ -316,12 +322,15 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
 private fun fmt(m: Int) = if (m < 60) "$m min" else "${m / 60} h ${m % 60}"
 
 @Composable
-private fun RoundPill(icon: String, onClick: () -> Unit, active: Boolean = false) {
+private fun RoundPill(icon: String, onClick: () -> Unit, active: Boolean = false, glyph: String? = null) {
     val p = LocalPalette.current
     Box(
         Modifier.size(48.dp).shadow(6.dp, CircleShape).clip(CircleShape).background(if (active) p.accent else p.text).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
-    ) { ZIcon(icon, if (active) Color.White else p.bg, 21.dp) }
+    ) {
+        if (glyph != null) Text(glyph, style = Type.title.copy(fontSize = 20.sp), color = if (active) Color.White else p.bg)
+        else ZIcon(icon, if (active) Color.White else p.bg, 21.dp)
+    }
 }
 
 @Composable

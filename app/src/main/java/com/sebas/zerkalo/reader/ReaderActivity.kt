@@ -26,6 +26,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.view.ViewCompat
@@ -113,6 +115,7 @@ data class Lookup(
 
 /** Estado que ve la capa de controles (Compose). */
 class ReaderUi {
+    var inking by mutableStateOf(false)   // pluma de colores activa
     var loading by mutableStateOf(true)
     var error by mutableStateOf<String?>(null)
     var controls by mutableStateOf(true)
@@ -167,7 +170,31 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private var publication: Publication? = null
     private var navigator: EpubNavigatorFragment? = null
     private val ui = ReaderUi()
-    private val note = com.sebas.zerkalo.ui.NoteState(com.sebas.zerkalo.ui.NoteMode.HIDDEN)
+    private val note = com.sebas.zerkalo.ui.NoteState.start()
+    private val inkUi = com.sebas.zerkalo.ui.InkUi()
+    private var inkView: com.sebas.zerkalo.ui.InkView? = null
+
+    /**
+     * La pantalla exacta donde va la tinta en un EPUB: capítulo, punto del capítulo y todo lo que cambia
+     * cómo se acomoda el texto (letra, tamaño, márgenes, pantalla). Si algo de eso cambia, los trazos
+     * se guardan igual y vuelven a verse al regresar a esos mismos ajustes. Solo en modo páginas.
+     */
+    private fun inkKey(): String? {
+        if (cont != null || ui.settings.scroll) return null
+        val loc = navigator?.currentLocator?.value ?: return null
+        val prog = loc.locations.progression ?: return null
+        val s = ui.settings
+        val look = listOf(s.font, s.size, s.lineHeight, s.margin, s.vMargin, s.spacing, s.paragraph, s.justify, s.layout, s.dyslexia, s.fullscreen, s.mmLeft, s.mmRight, s.mmTop, s.mmBottom, ui.pairOn).joinToString("-")
+        return "e|${loc.href}|${String.format(java.util.Locale.US, "%.4f", prog)}|$look|${root.width}x${root.height}"
+    }
+
+    private fun toggleInk() {
+        if (!inkUi.on && inkKey() == null) { ui.say("La pluma funciona en modo páginas, no en desplazamiento"); return }
+        inkUi.on = !inkUi.on
+        ui.inking = inkUi.on
+        if (inkUi.on) { setControls(false); note.minimize() }
+        inkView?.invalidate()
+    }
     private val containerId = View.generateViewId()
     private val pairId = View.generateViewId()
     private lateinit var root: FrameLayout
@@ -248,19 +275,30 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         panes.addView(pairContainer)
         layoutPanes(resources.configuration)
         root.addView(panes, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // Pluma de colores: capa encima de la página (en modo páginas, cada pantalla guarda sus trazos)
+        inkView = com.sebas.zerkalo.ui.InkView(this, book.id, panes, inkUi) {
+            val k = inkKey()
+            if (k == null || root.width == 0) emptyList() else listOf(k to android.graphics.RectF(0f, 0f, root.width.toFloat(), root.height.toFloat()))
+        }
+        root.addView(inkView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val overlay = ComposeView(this).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent { ReaderOverlay(ui, actions) }
         }
         root.addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        // El apunte flotante: aparece como bolita si el libro ya tiene apunte, o al mandar una frase "Al apunte"
-        if (com.sebas.zerkalo.data.Apuntes.flow(book.id).value.isNotBlank()) note.mode = com.sebas.zerkalo.ui.NoteMode.BUBBLE
+        // El apunte flotante: bolita 記 (o pestañita en el borde si se escondió), igual que en los PDF
         root.addView(ComposeView(this).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent {
                 com.sebas.zerkalo.ui.ZerkaloTheme {
                     androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().imePadding()) {
-                        com.sebas.zerkalo.ui.FloatingNote(book.id, book.title, note, bottomSpace = 140.dp)
+                        if (!inkUi.on) com.sebas.zerkalo.ui.FloatingNote(book.id, book.title, note, bottomSpace = 140.dp)
+                        if (inkUi.on) com.sebas.zerkalo.ui.InkBar(
+                            inkUi, onUndo = { inkView?.undoLast() }, onDone = { toggleInk() },
+                            onPage = { d -> turn(navigator, d); inkView?.postInvalidateDelayed(350) },
+                            modifier = androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.BottomCenter)
+                                .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.navigationBars).padding(bottom = 18.dp, start = 10.dp, end = 10.dp),
+                        )
                     }
                 }
             }
@@ -972,6 +1010,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private fun pendingMs() = if (lastEvent == 0L) 0L else minOf(System.currentTimeMillis() - lastEvent, 180_000L)
 
     private fun onLocator(loc: Locator, turn: Boolean = true) {
+        inkView?.invalidate()
         val now = System.currentTimeMillis()
         if (turn) {
             activeMs += pendingMs(); lastEvent = now
@@ -1284,7 +1323,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                     val t = sel.locator.text.highlight?.trim().orEmpty()
                     if (t.isNotEmpty()) {
                         com.sebas.zerkalo.data.Apuntes.addQuote(book.id, t, ui.chapter.take(40))
-                        if (note.mode != com.sebas.zerkalo.ui.NoteMode.BIG) note.mode = com.sebas.zerkalo.ui.NoteMode.OPEN
+                        note.open()
                     }
                 }
                 103 -> lifecycleScope.launch {
@@ -1302,6 +1341,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
     private val actions = ReaderActions(
         close = { finish() },
+        openNote = { setControls(false); note.toggle() },
+        toggleInk = { toggleInk() },
         toggleShiori = { toggleShiori() },
         go = { if (cont != null) contGo(it) else { navigator?.go(it, animated = false); setControls(false) } },
         goLink = { l ->
@@ -1638,6 +1679,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
 class ReaderActions(
     val close: () -> Unit,
+    val openNote: () -> Unit = {},
+    val toggleInk: () -> Unit = {},
     val toggleShiori: () -> Unit,
     val go: (Locator) -> Unit,
     val goLink: (Link) -> Unit,

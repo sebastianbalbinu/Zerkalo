@@ -102,7 +102,7 @@ class PdfReaderActivity : AppCompatActivity() {
     private lateinit var book: Book
     private lateinit var pdfView: PdfView
     private var doc: PdfDocument? = null
-    private val note = NoteState(NoteMode.BUBBLE)
+    private val note = NoteState.start()
 
     // Lo que muestra la capa de encima (Compose)
     private var page by mutableIntStateOf(0)
@@ -117,6 +117,14 @@ class PdfReaderActivity : AppCompatActivity() {
     private var goTo by mutableStateOf(false)
 
     private val marks = ArrayList<PdfRect>()   // subrayados de este PDF
+    // Luz: los mismos ajustes que el lector de EPUB (brillo, velo y filtro cálido)
+    private var light by mutableStateOf(com.sebas.zerkalo.data.Prefs.reader.value)
+    private var dim by mutableStateOf(0f)
+    private var lightSheet by mutableStateOf(false)
+    // Pluma de colores
+    private val inkUi = com.sebas.zerkalo.ui.InkUi()
+    private var inkView: com.sebas.zerkalo.ui.InkView? = null
+    private val pageRects = java.util.TreeMap<Int, RectF>()  // dónde está cada página visible, en px
     private var startedAt = 0L
     private var restored = false
 
@@ -147,9 +155,12 @@ class PdfReaderActivity : AppCompatActivity() {
             maxZoom = 8f
         }
         root.addView(pdfView)
+        inkView = com.sebas.zerkalo.ui.InkView(this, book.id, pdfView, inkUi) { pageRects.map { (pg, r) -> "p$pg" to r } }
+        root.addView(inkView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         root.addView(overlay)
         setContentView(root)
         applyNight()
+        applyBrightness(light.brightness)
         loadMarks()
         setup()
         open()
@@ -159,6 +170,10 @@ class PdfReaderActivity : AppCompatActivity() {
     private fun setup() {
         pdfView.addOnViewportChangedListener(object : PdfView.OnViewportChangedListener {
             override fun onViewportChanged(firstVisiblePage: Int, visiblePagesCount: Int, pageLocations: SparseArray<RectF>, zoomLevel: Float) {
+                // Copia de dónde está cada página (la pluma dibuja encima de ellas)
+                pageRects.clear()
+                for (i in 0 until pageLocations.size()) pageRects[pageLocations.keyAt(i)] = RectF(pageLocations.valueAt(i))
+                inkView?.invalidate()
                 if (!restored) return
                 // La página que más se ve: la primera visible, salvo que ya casi se fue hacia arriba
                 var p = firstVisiblePage
@@ -184,7 +199,7 @@ class PdfReaderActivity : AppCompatActivity() {
                 components.add(0, SelectionMenuComponent("zk-apunte", "Al apunte", null) {
                     val where = bounds.firstOrNull()?.let { "pág. ${it.pageNum + 1}" } ?: "pág. ${page + 1}"
                     Apuntes.addQuote(book.id, text, where)
-                    if (note.mode == NoteMode.BUBBLE || note.mode == NoteMode.HIDDEN) note.mode = NoteMode.OPEN
+                    note.open()
                     close(); pdfView.clearCurrentSelection()
                 })
                 components.add(1, SelectionMenuComponent("zk-subrayar", "Subrayar", null) {
@@ -291,27 +306,70 @@ class PdfReaderActivity : AppCompatActivity() {
 
     // ---------- Modo noche: la página se invierte y queda en tonos cálidos ----------
 
+    /**
+     * Color de la página: "Página oscura" la invierte y la deja en tonos cálidos;
+     * el filtro cálido baja el azul (y un poco el verde), igual que en el lector de EPUB.
+     */
     private fun applyNight() {
+        if (!::pdfView.isInitialized) return
+        val m = ColorMatrix()
+        var touched = false
         if (night) {
-            val invert = ColorMatrix(floatArrayOf(
+            m.set(floatArrayOf(
                 -1f, 0f, 0f, 0f, 255f,
                 0f, -1f, 0f, 0f, 255f,
                 0f, 0f, -1f, 0f, 255f,
                 0f, 0f, 0f, 1f, 0f,
             ))
             // Blanco → ámbar suave (como el modo Sumi), negro → casi negro
-            invert.postConcat(ColorMatrix(floatArrayOf(
+            m.postConcat(ColorMatrix(floatArrayOf(
                 0.91f, 0f, 0f, 0f, 0f,
                 0f, 0.80f, 0f, 0f, 0f,
                 0f, 0f, 0.64f, 0f, 0f,
                 0f, 0f, 0f, 1f, 0f,
             )))
-            pdfView.setLayerType(View.LAYER_TYPE_HARDWARE, Paint().apply { colorFilter = ColorMatrixColorFilter(invert) })
-            pdfView.setBackgroundColor(0xFFD6CEC4.toInt()) // se ve casi negro después de invertir
-        } else {
-            pdfView.setLayerType(View.LAYER_TYPE_NONE, null)
-            pdfView.setBackgroundColor(0xFF3B2B24.toInt())
+            touched = true
         }
+        val w = light.warmth
+        if (w > 0f) {
+            m.postConcat(ColorMatrix(floatArrayOf(
+                1f, 0f, 0f, 0f, 0f,
+                0f, 1f - 0.10f * w, 0f, 0f, 0f,
+                0f, 0f, 1f - 0.42f * w, 0f, 0f,
+                0f, 0f, 0f, 1f, 0f,
+            )))
+            touched = true
+        }
+        if (touched) pdfView.setLayerType(View.LAYER_TYPE_HARDWARE, Paint().apply { colorFilter = ColorMatrixColorFilter(m) })
+        else pdfView.setLayerType(View.LAYER_TYPE_NONE, null)
+        // El espacio entre páginas: oscuro siempre (después de invertir, este gris claro se ve casi negro)
+        pdfView.setBackgroundColor(if (night) 0xFFD6CEC4.toInt() else 0xFF3B2B24.toInt())
+    }
+
+    /** Brillo propio del lector, igual que en EPUB: bajo la marca, la pantalla al mínimo y un velo encima. */
+    private fun applyBrightness(b: Float) {
+        val screen = when {
+            b < 0f -> android.view.WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+            b < 0.3f -> 0.01f
+            else -> 0.02f + (b - 0.3f) / 0.7f * 0.98f
+        }
+        val base = if (b in 0f..0.3f) (0.3f - b) / 0.3f * 0.78f else 0f
+        dim = 1f - (1f - base) * (1f - light.veil.coerceIn(0f, 0.85f))
+        window.attributes = window.attributes.apply { screenBrightness = screen }
+    }
+
+    private fun setLight(r: com.sebas.zerkalo.data.ReaderSettings) {
+        light = r
+        com.sebas.zerkalo.data.Prefs.setReader(r)
+        applyBrightness(r.brightness)
+        applyNight()
+    }
+
+    private fun toggleInk() {
+        if (!::pdfView.isInitialized || doc == null) return
+        inkUi.on = !inkUi.on
+        if (inkUi.on) { pdfView.clearCurrentSelection(); note.minimize() }
+        inkView?.invalidate()
     }
 
     private fun toggleNight() {
@@ -346,6 +404,8 @@ class PdfReaderActivity : AppCompatActivity() {
         val p = LocalPalette.current
         val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         val bottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        // Velo de la luz (atenúa la página sin cambiar el brillo de la pantalla)
+        if (dim > 0f) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = dim)))
         Box(Modifier.fillMaxSize().imePadding()) {
             // Barra de arriba: volver, título, buscar, noche
             Row(
@@ -361,7 +421,15 @@ class PdfReaderActivity : AppCompatActivity() {
                     )
                     CircleButton("search", { searching = true }, size = 40.dp, desc = "Buscar")
                     Spacer(Modifier.width(6.dp))
-                    CircleButton(if (night) "sun" else "moon", { toggleNight() }, size = 40.dp, desc = "Modo noche")
+                    CircleButton("sun", { lightSheet = true }, size = 40.dp, desc = "Luz")
+                    Spacer(Modifier.width(6.dp))
+                    Box(
+                        Modifier.size(40.dp).clip(CircleShape).background(if (inkUi.on) p.accent else p.surface.copy(alpha = if (p.isDark) 0.85f else 1f))
+                            .clickable { toggleInk() },
+                        contentAlignment = Alignment.Center,
+                    ) { Text("✎", style = Type.title.copy(fontSize = 18.sp), color = if (inkUi.on) Color.White else p.text) }
+                    Spacer(Modifier.width(6.dp))
+                    com.sebas.zerkalo.ui.NoteButton(note, 40.dp)
                 } else SearchRow()
             }
 
@@ -378,12 +446,17 @@ class PdfReaderActivity : AppCompatActivity() {
             }
 
             // Página actual: al tocarla, se salta a otra página
-            if (pages > 0) Box(
+            if (pages > 0 && !inkUi.on) Box(
                 Modifier.align(Alignment.BottomCenter).padding(bottom = bottom + 22.dp).clip(RoundedCornerShape(16.dp))
                     .background(p.bg.copy(alpha = 0.88f)).clickable { goTo = true }.padding(horizontal = 14.dp, vertical = 7.dp),
             ) { Text("pág. ${page + 1} de $pages", style = Type.uiSmall, color = p.text2) }
 
-            FloatingNote(book.id, book.title, note, bottomSpace = bottom + 90.dp)
+            if (!inkUi.on) FloatingNote(book.id, book.title, note, bottomSpace = bottom + 90.dp)
+            else com.sebas.zerkalo.ui.InkBar(
+                inkUi, onUndo = { inkView?.undoLast() }, onDone = { toggleInk() },
+                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottom + 18.dp, start = 10.dp, end = 10.dp),
+            )
+            if (lightSheet) LightSheet()
 
             if (goTo) GoToPage { n ->
                 goTo = false
@@ -408,6 +481,68 @@ class PdfReaderActivity : AppCompatActivity() {
         }
         if (hits.isNotEmpty()) Text("${hit + 1}/${hits.size}", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(end = 6.dp))
         CircleButton("chevron", { if (hits.isNotEmpty()) { hit = (hit + 1) % hits.size; showHit() } else search() }, size = 40.dp, desc = "Siguiente")
+    }
+
+    /** La misma hoja de Luz que en el lector de EPUB, más "Página oscura" (antes la luna). */
+    @Composable
+    private fun LightSheet() {
+        val p = LocalPalette.current
+        androidx.compose.material3.ModalBottomSheet(
+            onDismissRequest = { lightSheet = false },
+            sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface,
+        ) {
+            Column(Modifier.padding(horizontal = 22.dp).padding(bottom = 30.dp)) {
+                Text("Luz", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+                Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Brillo automático", style = Type.ui, color = p.text)
+                        Text("El del teléfono", style = Type.uiSmall, color = p.text2)
+                    }
+                    com.sebas.zerkalo.ui.ZSwitch(light.brightness < 0f) { setLight(light.copy(brightness = if (it) -1f else 0.65f)) }
+                }
+                if (light.brightness >= 0f) {
+                    var b by remember { mutableStateOf(light.brightness) }
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+                        ZIcon("moon", p.text2, 18.dp)
+                        com.sebas.zerkalo.ui.ZSlider(
+                            value = b, onChange = { b = it; applyBrightness(it) }, onFinished = { setLight(light.copy(brightness = b)) },
+                            marker = 0.3f, modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
+                        )
+                        ZIcon("sun", p.text2, 20.dp)
+                    }
+                }
+                var veil by remember { mutableStateOf(light.veil) }
+                LightLabel("Atenuar", if (veil <= 0f) "apagado" else "${(veil / 0.85f * 100).toInt()} %")
+                com.sebas.zerkalo.ui.ZSlider(
+                    value = veil, range = 0f..0.85f,
+                    onChange = { veil = it; light = light.copy(veil = it); applyBrightness(light.brightness) },
+                    onFinished = { setLight(light.copy(veil = veil)) },
+                )
+                Text("Oscurece la página sin cambiar el brillo de la pantalla.", style = Type.uiSmall, color = p.text2)
+                var w by remember { mutableStateOf(light.warmth) }
+                LightLabel("Filtro cálido", if (w <= 0f) "apagado" else "${(w * 100).toInt()} %")
+                com.sebas.zerkalo.ui.ZSlider(
+                    value = w, onChange = { w = it; light = light.copy(warmth = it); applyNight() },
+                    onFinished = { setLight(light.copy(warmth = w)) },
+                )
+                Row(Modifier.fillMaxWidth().padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Página oscura", style = Type.ui, color = p.text)
+                        Text("La hoja blanca se vuelve oscura y la letra, ámbar", style = Type.uiSmall, color = p.text2)
+                    }
+                    com.sebas.zerkalo.ui.ZSwitch(night) { toggleNight() }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun LightLabel(t: String, sub: String) {
+        val p = LocalPalette.current
+        Row(Modifier.padding(top = 18.dp, bottom = 10.dp), verticalAlignment = Alignment.Bottom) {
+            Text(t, style = Type.ui, color = p.text)
+            Text("  $sub", style = Type.uiSmall, color = p.text2)
+        }
     }
 
     @Composable

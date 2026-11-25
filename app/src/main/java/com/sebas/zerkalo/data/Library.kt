@@ -129,6 +129,7 @@ object Library {
         _marks.update { l -> l.filterNot { it.bookId == book.id } }
         _sessions.update { l -> l.filterNot { it.bookId == book.id } }
         Apuntes.remove(book.id)
+        InkStore.remove(book.id)
         save()
     }
 
