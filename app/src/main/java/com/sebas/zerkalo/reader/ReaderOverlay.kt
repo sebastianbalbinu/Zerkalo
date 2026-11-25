@@ -236,26 +236,30 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                     Text("${((drag ?: ui.progress) * 100).toInt()} %", style = Type.uiSmall.copy(fontSize = 12.sp), color = p.text2)
                 }
                 Spacer(Modifier.height(12.dp))
+                // Seis botones abajo: en pantallas angostas se achican un poco para que quepan todos
+                val sw = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
+                val pill = if (sw < 400) 44.dp else 48.dp
+                val gap = if (sw < 400) 5.dp else 6.dp
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Row(
-                        Modifier.height(48.dp).shadow(6.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)).background(p.text)
-                            .clickable { ui.say("Hoy llevas ${fmt(ui.minutesToday)} de lectura") }.padding(horizontal = 13.dp),
+                        Modifier.height(pill).shadow(6.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)).background(p.text)
+                            .clickable { ui.say("Hoy llevas ${fmt(ui.minutesToday)} de lectura") }.padding(horizontal = if (sw < 360) 12.dp else 13.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         ZIcon("clock", p.bg, 19.dp, 1.7f)
-                        Text(fmt(ui.minutesToday), style = Type.ui.copy(fontSize = 15.sp), color = p.bg, modifier = Modifier.padding(start = 8.dp))
+                        if (sw >= 360) Text(fmt(ui.minutesToday), style = Type.ui.copy(fontSize = 15.sp), color = p.bg, modifier = Modifier.padding(start = 8.dp))
                     }
                     Spacer(Modifier.weight(1f))
-                    RoundPill("toc", { ui.sheet = "toc" })
-                    Spacer(Modifier.width(6.dp))
-                    RoundPill("sun", { ui.sheet = "luz" })
-                    Spacer(Modifier.width(6.dp))
-                    RoundPill("aa", { ui.sheet = "type" })
-                    Spacer(Modifier.width(6.dp))
-                    RoundPill("shiori", act.toggleShiori, active = ui.bookmarked)
-                    Spacer(Modifier.width(6.dp))
+                    RoundPill("toc", { ui.sheet = "toc" }, size = pill)
+                    Spacer(Modifier.width(gap))
+                    RoundPill("sun", { ui.sheet = "luz" }, size = pill)
+                    Spacer(Modifier.width(gap))
+                    RoundPill("aa", { ui.sheet = "type" }, size = pill)
+                    Spacer(Modifier.width(gap))
+                    RoundPill("shiori", act.toggleShiori, active = ui.bookmarked, size = pill)
+                    Spacer(Modifier.width(gap))
                     // El apunte: se abre aunque esté vacío, para escribir sin citar
-                    RoundPill("", act.openNote, active = true, glyph = "記")
+                    RoundPill("", act.openNote, active = true, glyph = "記", size = pill)
                 }
             }
         }
@@ -322,10 +326,10 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
 private fun fmt(m: Int) = if (m < 60) "$m min" else "${m / 60} h ${m % 60}"
 
 @Composable
-private fun RoundPill(icon: String, onClick: () -> Unit, active: Boolean = false, glyph: String? = null) {
+private fun RoundPill(icon: String, onClick: () -> Unit, active: Boolean = false, glyph: String? = null, size: androidx.compose.ui.unit.Dp = 48.dp) {
     val p = LocalPalette.current
     Box(
-        Modifier.size(48.dp).shadow(6.dp, CircleShape).clip(CircleShape).background(if (active) p.accent else p.text).clickable(onClick = onClick),
+        Modifier.size(size).shadow(6.dp, CircleShape).clip(CircleShape).background(if (active) p.accent else p.text).clickable(onClick = onClick),
         contentAlignment = Alignment.Center,
     ) {
         if (glyph != null) Text(glyph, style = Type.title.copy(fontSize = 20.sp), color = if (active) Color.White else p.bg)
