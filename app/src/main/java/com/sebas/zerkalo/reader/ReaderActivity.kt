@@ -866,6 +866,23 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             pageGutter = org.readium.r2.navigator.epub.css.Length.Px(1.0),
         )
         servedAssets = listOf("fonts/.*")
+        // Letra de Google elegida: va declarada en cada capítulo que Readium sirve (así nunca falta al reabrir)
+        runCatching {
+            GoogleFonts.get(this@ReaderActivity, ui.settings.font)?.let { g ->
+                val faces = GFontInject.dataUrls(this@ReaderActivity, ui.settings.font)
+                if (faces.isNotEmpty()) addFontFamilyDeclaration(FontFamily(g.family)) {
+                    faces.forEach { (url, italic, bold) ->
+                        org.readium.r2.shared.util.AbsoluteUrl(url)?.let { u ->
+                            addFontFace {
+                                addSource(u)
+                                setFontStyle(if (italic) org.readium.r2.navigator.epub.css.FontStyle.ITALIC else org.readium.r2.navigator.epub.css.FontStyle.NORMAL)
+                                setFontWeight(if (bold) org.readium.r2.navigator.epub.css.FontWeight.BOLD else org.readium.r2.navigator.epub.css.FontWeight.NORMAL)
+                            }
+                        }
+                    }
+                }
+            }
+        }.onFailure { Log.w("Zerkalo", "ZK_GFONT_DECL ${it.message}") }
         selectionActionModeCallback = selectionCallback
         // Los cambios de capítulo en desplazamiento continuo los maneja Zerkalo (ver onDrag), no Readium:
         // Readium cambiaba de capítulo con cualquier gesto un poco de lado y siempre volvía al inicio.

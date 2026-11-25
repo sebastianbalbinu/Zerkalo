@@ -265,6 +265,17 @@ s.setAttribute('data-f',$fam);s.textContent=${JSONObject.quote(css.toString())};
         }
     }
 
+    /** Los archivos de la letra como direcciones data: (para que Readium la meta en cada capítulo al servirlo). */
+    fun dataUrls(ctx: Context, index: Int): List<Triple<String, Boolean, Boolean>> {
+        val g = GoogleFonts.get(ctx, index) ?: return emptyList()
+        return listOf(Triple("regular", false, false), Triple("italic", true, false), Triple("bold", false, true)).mapNotNull { (kind, it, bold) ->
+            if (kind != "regular" && g.files[kind] == null) return@mapNotNull null
+            val f = GoogleFonts.file(ctx, g, kind) ?: return@mapNotNull null
+            val mime = when (f.extension) { "woff2" -> "font/woff2"; "woff" -> "font/woff"; "otf" -> "font/otf"; else -> "font/ttf" }
+            Triple("data:$mime;base64," + android.util.Base64.encodeToString(f.readBytes(), android.util.Base64.NO_WRAP), it, bold)
+        }
+    }
+
     /** Pregunta barata antes de mandar el archivo: ¿esta página ya tiene la letra? */
     fun check(family: String) = "(function(){var s=document.getElementById('zk-gf');return !!(s&&s.getAttribute('data-f')===${JSONObject.quote(family)});})()"
 }
