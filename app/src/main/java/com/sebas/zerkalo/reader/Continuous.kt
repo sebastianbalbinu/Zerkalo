@@ -53,6 +53,7 @@ class ContinuousView(ctx: Context, private val pub: Publication, private val cb:
         settings.allowContentAccess = false
         settings.textZoom = 100
         isVerticalScrollBarEnabled = false
+        isHorizontalScrollBarEnabled = false
         overScrollMode = OVER_SCROLL_NEVER
         setBackgroundColor(0)
         addJavascriptInterface(Bridge(), "ZKA")
@@ -137,6 +138,12 @@ class ContinuousView(ctx: Context, private val pub: Publication, private val cb:
         @JavascriptInterface fun tap(fx: Float) = main.post { cb.onTap(fx) }
         @JavascriptInterface fun loaded(i: Int) = main.post { cb.onLoaded(i) }
         @JavascriptInterface fun ready() = main.post { cb.onReady() }
+    }
+
+    /** Todo el libro va hacia abajo: nunca se deja correr hacia los lados (cortaría el texto). */
+    override fun onScrollChanged(l: Int, t: Int, oldl: Int, oldt: Int) {
+        if (l != 0) { scrollTo(0, t); return }
+        super.onScrollChanged(l, t, oldl, oldt)
     }
 
     fun js(code: String) { if (shellReady) evaluateJavascript(code, null) }

@@ -102,7 +102,7 @@ window.__zkRun = function(){
   // inicio y del final va en ::before/::after del cuerpo, que el motor del lector no anula.
   var edge = '';
   if (O.scroll) {
-    edge = 'body::before{content:"" !important;display:block !important;height:' + O.padTop + 'px !important}' +
+    edge = 'html{overflow-x:hidden !important}' + 'body::before{content:"" !important;display:block !important;height:' + O.padTop + 'px !important}' +
       'body::after{content:"" !important;display:block !important;height:' + (O.padBottom + 28) + 'px !important}';
   }
   // Los márgenes de los lados van dentro de la página: así el desenfoque llega de borde a borde

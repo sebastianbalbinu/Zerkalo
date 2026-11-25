@@ -389,6 +389,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val nav = supportFragmentManager.findFragmentByTag("lector") as EpubNavigatorFragment
         navigator = nav
         nav.addInputListener(tapListener(nav, pair = false))
+        lockSideways(nav)
         nav.addDecorationListener("subrayados", object : DecorableNavigator.Listener {
             override fun onDecorationActivated(event: DecorableNavigator.OnActivatedEvent): Boolean {
                 ui.activeMark = ui.marks.firstOrNull { it.id == event.decoration.id }
@@ -536,7 +537,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val justify = r.justify && !r.dyslexia
         val sb = StringBuilder(faces)
         sb.append(":root{--zk-pt:${scrollPadTop}px;--zk-pb:${scrollPadBottom + 18f}px}")
-        sb.append("html{font-size:${r.size}% !important;background:${hex(p.bg)} !important;-webkit-text-size-adjust:100% !important;overflow-anchor:auto}")
+        sb.append("html{font-size:${r.size}% !important;background:${hex(p.bg)} !important;-webkit-text-size-adjust:100% !important;overflow-anchor:auto;overflow-x:hidden !important;touch-action:pan-y}")
         sb.append("body{margin:0 !important;padding:0 ${scrollPadRight}px 0 ${scrollPadLeft}px !important;box-sizing:border-box !important;background:${hex(p.bg)} !important;color:${hex(p.text)} !important;line-height:${r.lineHeight} !important;overflow-wrap:break-word")
         if (fam != null) sb.append(";font-family:'$fam',serif !important")
         sb.append("}")
@@ -686,6 +687,23 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             }
             return false
         }
+    }
+
+    /**
+     * En desplazamiento la página nunca se corre hacia los lados. Un deslizamiento diagonal podía dejar la
+     * página del motor (WebView) corrida y el texto cortado por un borde; aquí se devuelve siempre a su lugar.
+     */
+    private fun lockSideways(nav: EpubNavigatorFragment) {
+        val root = nav.view ?: return
+        fun fix(v: View) {
+            if (v is android.webkit.WebView) {
+                v.isHorizontalScrollBarEnabled = false
+                if (v.scrollX != 0) v.scrollTo(0, v.scrollY)
+                return
+            }
+            if (v is android.view.ViewGroup) for (i in 0 until v.childCount) fix(v.getChildAt(i))
+        }
+        root.viewTreeObserver.addOnScrollChangedListener { if (ui.settings.scroll) fix(root) }
     }
 
     private fun pubOf(nav: EpubNavigatorFragment): Publication? = if (nav === pairNav) pairPub else publication
