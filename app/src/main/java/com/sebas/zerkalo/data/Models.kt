@@ -43,6 +43,8 @@ data class Book(
     val tags: List<String> = emptyList(), // etiquetas propias
     val favorite: Boolean = false,
     val genre: String = "",     // id de Catalogs.TOPICS; "" = sin revisar todavía, "-" = no se supo
+    /** Documento (un PDF abierto desde otra app): se lee igual, pero no va a los estantes de la Biblioteca. */
+    val doc: Boolean = false,
 ) {
     val reading get() = progress > 0.0 && finishedAt == 0L
     val finished get() = finishedAt > 0L
@@ -55,7 +57,7 @@ data class Book(
         .put("addedAt", addedAt).put("lastOpened", lastOpened).put("progress", progress)
         .put("locator", locator ?: JSONObject.NULL).put("finishedAt", finishedAt)
         .put("binding", binding.toJson()).put("useBinding", useBinding).put("pair", pair ?: JSONObject.NULL)
-        .put("tags", JSONArray(tags)).put("fav", favorite).put("genre", genre)
+        .put("tags", JSONArray(tags)).put("fav", favorite).put("genre", genre).put("doc", doc)
 
     companion object {
         fun fromJson(o: JSONObject): Book {
@@ -69,7 +71,7 @@ data class Book(
                 binding = Binding.fromJson(o.optJSONObject("binding")) ?: Binding.forSeed(id),
                 useBinding = o.optBoolean("useBinding"), pair = o.optStringOrNull("pair"),
                 tags = o.optJSONArray("tags")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() } } ?: emptyList(),
-                favorite = o.optBoolean("fav"), genre = o.optString("genre"),
+                favorite = o.optBoolean("fav"), genre = o.optString("genre"), doc = o.optBoolean("doc"),
             )
         }
     }

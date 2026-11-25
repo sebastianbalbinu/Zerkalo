@@ -143,6 +143,13 @@ object Library {
         save()
     }
 
+    /** Suma sesiones de lectura que vienen de una copia (sin repetir). */
+    fun importSessions(xs: List<Session>) {
+        if (xs.isEmpty()) return
+        _sessions.update { (it + xs).distinctBy { s -> Triple(s.bookId, s.date, s.at) } }
+        save()
+    }
+
     fun addSession(bookId: String, ms: Long) {
         if (ms < 20_000) return
         _sessions.update { it + Session(bookId, today(), ms, System.currentTimeMillis()) }

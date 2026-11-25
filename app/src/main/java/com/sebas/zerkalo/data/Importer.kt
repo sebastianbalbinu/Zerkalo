@@ -75,7 +75,8 @@ object Importer {
     private fun newId() = "b" + System.currentTimeMillis().toString(36) + (100..999).random()
 
     /** Trae un EPUB desde otra app (Archivos, WhatsApp, Drive…). */
-    suspend fun fromUri(ctx: Context, core: ReadiumCore, uri: Uri): Result<Book> = withContext(Dispatchers.IO) {
+    /** [asDoc]: los PDF llegan como documento (no van a los estantes). Se usa al abrir un archivo desde otra app. */
+    suspend fun fromUri(ctx: Context, core: ReadiumCore, uri: Uri, asDoc: Boolean = false): Result<Book> = withContext(Dispatchers.IO) {
         try {
             var display = "libro.epub"
             runCatching {
@@ -93,7 +94,7 @@ object Importer {
             val pdf = display.endsWith(".pdf", true) || type == "application/pdf" || looksPdf(tmp)
             val dest = File(Library.booksDir, if (pdf) "$id.pdf" else "$id.epub")
             tmp.renameTo(dest)
-            if (pdf) fromPdf(dest, id, display.substringBeforeLast('.'))
+            if (pdf) fromPdf(dest, id, display.substringBeforeLast('.'), doc = asDoc)
             else fromFile(core, dest, id, key = "local:$id", source = "Importado", fallbackTitle = display.removeSuffix(".epub"))
         } catch (e: SecurityException) {
             Result.failure(ImportError("La otra app no dio permiso para leer el archivo"))
@@ -125,7 +126,7 @@ object Importer {
      * Registra un PDF: la portada es la primera página. Android trae su propio lector de PDF
      * (PdfRenderer), así que no hace falta nada más para dibujarla.
      */
-    suspend fun fromPdf(file: File, id: String, name: String): Result<Book> = withContext(Dispatchers.IO) {
+    suspend fun fromPdf(file: File, id: String, name: String, doc: Boolean = false): Result<Book> = withContext(Dispatchers.IO) {
         try {
             var pages = 0
             var cover: String? = null
@@ -146,7 +147,7 @@ object Importer {
             if (pages == 0) { file.delete(); return@withContext Result.failure(ImportError("El PDF está vacío")) }
             val book = Book(
                 id = id, key = "local:$id", title = titleFromName(name), author = "", source = "PDF",
-                file = file.name, cover = cover, genre = "-",
+                file = file.name, cover = cover, genre = "-", doc = doc,
             )
             Library.twinOf(book.title, book.author, book.id)?.takeIf { it.isPdf }?.let { twin ->
                 file.delete(); cover?.let { File(Library.coversDir, it).delete() }

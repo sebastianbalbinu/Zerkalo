@@ -85,6 +85,8 @@ sealed class Screen {
     /** Repaso de tarjetas: [practice] = práctica libre (no cambia fechas); [introOnly] = solo la explicación. */
     data class Review(val practice: Boolean = false, val introOnly: Boolean = false) : Screen()
     data object CardList : Screen()
+    /** Documentos: PDF abiertos desde otra app, aparte de los libros. */
+    data object Documents : Screen()
 }
 
 /** Acciones que cualquier pantalla puede pedir. */
@@ -131,15 +133,34 @@ fun ZerkaloRoot(onReady: () -> Unit) {
     val haze = rememberHazeState()
     val books by Library.books.collectAsState()
 
+    /**
+     * Un archivo abierto o compartido desde otra app: se trae y se abre directo para leer.
+     * Los PDF llegan como documento (aparte de los estantes); los EPUB, a la Biblioteca.
+     */
     suspend fun doImport(uri: Uri, openAfter: Boolean) {
-        AppEvents.toast("Leyendo el libro…")
-        Importer.fromUri(ctx, app.readium, uri)
+        AppEvents.toast("Abriendo…")
+        Importer.fromUri(ctx, app.readium, uri, asDoc = true)
             .onSuccess { b ->
-                AppEvents.toast("«${b.title}» llegó a tu biblioteca")
-                if (openAfter) stack.add(Screen.BookDetail(b.id))
+                val now = Library.book(b.id) ?: b
+                AppEvents.toast(if (now.doc) "«${now.title}» está en Documentos" else "«${now.title}» llegó a tu biblioteca")
+                if (openAfter) openReader(ctx, now)
             }
-            .onFailure { e -> AppEvents.toast(e.message ?: "No se pudo importar") }
+            .onFailure { e -> AppEvents.toast(e.message ?: "No se pudo abrir el archivo") }
     }
+    // Documentos viejos: los que no tienen notas se quitan solos; por los que tienen notas se pregunta
+    var staleDocs by remember { mutableStateOf<List<Book>>(emptyList()) }
+    LaunchedEffect(Unit) { staleDocs = withContext(Dispatchers.IO) { com.sebas.zerkalo.data.Docs.cleanup(ctx) } }
+    staleDocs.firstOrNull()?.let { d ->
+        ConfirmDialog(
+            title = "¿Quitar «${d.title}»?",
+            text = "Es un documento que no abres hace más de ${com.sebas.zerkalo.data.Docs.DAYS} días y tiene notas tuyas. Si lo quitas, se borran también.",
+            ok = "Quitar", onOk = { Library.remove(d); staleDocs = staleDocs.drop(1) },
+            other = "A la biblioteca", onOther = { com.sebas.zerkalo.data.Docs.toLibrary(d); staleDocs = staleDocs.drop(1) },
+            cancel = "Conservar", onDismiss = { com.sebas.zerkalo.data.Docs.keep(d); staleDocs = staleDocs.drop(1) },
+        )
+    }
+    // La importación sigue aunque cambie la pantalla (antes se cancelaba a medias y el libro nunca llegaba)
+    val importScope = rememberCoroutineScope()
 
     // Elegir varios EPUB a la vez con el selector de Android
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
@@ -177,7 +198,7 @@ fun ZerkaloRoot(onReady: () -> Unit) {
     LaunchedEffect(wantTab) { wantTab?.let { stack.clear(); tab = it; AppEvents.tab.value = null } }
     val incoming by AppEvents.incoming.collectAsState()
     LaunchedEffect(incoming) {
-        incoming?.let { AppEvents.incoming.value = null; doImport(it, openAfter = true) }
+        incoming?.let { u -> AppEvents.incoming.value = null; importScope.launch { doImport(u, openAfter = true) } }
     }
 
     // Imagen compartida (por ejemplo, desde Google Imágenes): portada del libro que la pidió, o se elige el libro.
@@ -249,6 +270,7 @@ fun ZerkaloRoot(onReady: () -> Unit) {
                                 is Screen.Shelf -> ShelfScreen(s.lang, s.kind, s.value, s.title)
                                 is Screen.Review -> ReviewScreen(s.practice, s.introOnly)
                                 Screen.CardList -> CardListScreen()
+                                Screen.Documents -> DocumentsScreen()
                             }
                         }
                     }

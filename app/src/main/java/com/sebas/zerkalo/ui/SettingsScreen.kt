@@ -60,6 +60,30 @@ fun SettingsScreen() {
     val notifPerm = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {}
     val version = remember { runCatching { ctx.packageManager.getPackageInfo(ctx.packageName, 0).versionName }.getOrNull() ?: "" }
 
+    // Copia de la biblioteca en .zip
+    var working by remember { mutableStateOf(false) }
+    fun backup(full: Boolean) {
+        if (working) return
+        working = true
+        a.toast(if (full) "Preparando la copia completa…" else "Preparando tus libros…")
+        scope.launch {
+            runCatching { com.sebas.zerkalo.data.Backup.export(ctx, full) }
+                .onSuccess { com.sebas.zerkalo.data.Export.share(ctx, it, "application/zip") }
+                .onFailure { a.toast("No se pudo hacer la copia: ${it.message}") }
+            working = false
+        }
+    }
+    val restorePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            a.toast("Leyendo la copia…")
+            scope.launch {
+                com.sebas.zerkalo.data.Backup.restore(ctx, uri)
+                    .onSuccess { n -> a.toast(if (n == 0) "Ya tenías todos esos libros" else if (n == 1) "Llegó 1 libro a tu biblioteca" else "Llegaron $n libros a tu biblioteca") }
+                    .onFailure { a.toast(it.message ?: "No se pudo leer la copia") }
+            }
+        }
+    }
+
     fun setReminder(on: Boolean, h: Int, m: Int) {
         if (on && Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(ctx, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             notifPerm.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -111,6 +135,22 @@ fun SettingsScreen() {
                 Column {
                     ListRow("Traer mis EPUB", "Busca en tu teléfono o elige varios a la vez", onClick = a.importEpub) { ZIcon("chevron", p.text2, 16.dp) }
                     ListRow("Catálogos OPDS", "Agrega otras bibliotecas libres", onClick = { catalogs = true }) { ZIcon("chevron", p.text2, 16.dp) }
+                }
+            }
+        }
+        item { SectionTitle("Copia de la biblioteca", modifier = Modifier.padding(top = 28.dp)) }
+        item {
+            Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), PaddingValues(horizontal = 18.dp, vertical = 4.dp)) {
+                Column {
+                    ListRow("Guardar o enviar copia completa", "Libros, documentos, avance, subrayados, notas, trazos y apuntes en un .zip", onClick = { backup(true) }) {
+                        ZIcon("share", p.text2, 18.dp)
+                    }
+                    ListRow("Compartir solo los libros", "Sin tus notas ni tu avance, y sin documentos: para regalar tu biblioteca", onClick = { backup(false) }) {
+                        ZIcon("share", p.text2, 18.dp)
+                    }
+                    ListRow("Recibir una copia", "Abre un .zip de Zerkalo y suma sus libros a los tuyos", onClick = {
+                        restorePicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
+                    }) { ZIcon("chevron", p.text2, 16.dp) }
                 }
             }
         }

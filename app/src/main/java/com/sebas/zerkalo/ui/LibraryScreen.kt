@@ -65,7 +65,9 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
     val top = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
-    val sorted = remember(books) { books.sortedByDescending { maxOf(it.lastOpened, it.addedAt) } }
+    // Los documentos (PDF abiertos desde otra app) no van a los estantes: tienen su propia lista
+    val sorted = remember(books) { books.filter { !it.doc }.sortedByDescending { maxOf(it.lastOpened, it.addedAt) } }
+    val docCount = remember(books) { books.count { it.doc } }
     var tagSel by rememberSaveable { mutableStateOf<String?>(null) }
     val allTags = remember(books) { books.flatMap { it.tags }.distinct().sortedBy { it.lowercase() } }
     if (tagSel != null && tagSel !in allTags) tagSel = null
@@ -124,7 +126,7 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
                 }
             }
             if (searching) item(key = "search") { SearchField(query, { query = it }, "Título o autor", Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp)) }
-            if (books.isNotEmpty()) item(key = "filters") {
+            if (sorted.isNotEmpty() || docCount > 0) item(key = "filters") {
                 androidx.compose.foundation.lazy.LazyRow(
                     Modifier.fillMaxWidth().padding(top = 16.dp),
                     contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -134,6 +136,7 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
                     if (unread.isNotEmpty()) item { SmallPill("Por leer ${unread.size}", estado == 2) { estado = if (estado == 2) 0 else 2 } }
                     if (done.isNotEmpty()) item { SmallPill("Leídos ${done.size}", estado == 3) { estado = if (estado == 3) 0 else 3 } }
                     if (favorites.isNotEmpty()) item { SmallPill("Favoritos ${favorites.size}", estado == 4) { estado = if (estado == 4) 0 else 4 } }
+                    if (docCount > 0) item { SmallPill("Documentos $docCount", false) { a.open(Screen.Documents) } }
                     items(allTags.size) { i -> val t = allTags[i]; SmallPill("#$t", tagSel == t) { tagSel = if (tagSel == t) null else t } }
                 }
             }
