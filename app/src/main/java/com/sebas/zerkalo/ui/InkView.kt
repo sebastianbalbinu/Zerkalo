@@ -20,14 +20,14 @@ import kotlin.math.hypot
 /** Herramientas de la pluma. */
 enum class InkTool { PEN, MARKER, ERASER }
 
-/** Colores de la pluma: amarillo, bermellón, azul y verde. */
-val InkColors = listOf(0xFFE9C46A.toInt(), 0xFFC4432A.toInt(), 0xFF3A6EA5.toInt(), 0xFF3F7A4A.toInt())
+/** Colores de la pluma: negro (la tinta de siempre), amarillo, bermellón, azul y verde. */
+val InkColors = listOf(0xFF1D1A17.toInt(), 0xFFE9C46A.toInt(), 0xFFC4432A.toInt(), 0xFF3A6EA5.toInt(), 0xFF3F7A4A.toInt())
 
 /** Lo que muestra la barrita de la pluma (Compose la observa). */
 class InkUi {
     var on by mutableStateOf(false)
     var tool by mutableStateOf(InkTool.PEN)
-    var color by mutableIntStateOf(InkColors[1])
+    var color by mutableIntStateOf(InkColors[0])
     var canUndo by mutableStateOf(false)
 }
 
@@ -45,7 +45,19 @@ class InkView(
     private val target: View,
     private val ui: InkUi,
     private val pages: () -> List<Pair<String, RectF>>,
+    /** Se avisa cada vez que cambian los trazos de una página (para guardar su foto en los EPUB). */
+    private val onCommit: (String) -> Unit = {},
+    /**
+     * Si no es null, con la pluma apagada esta capa recibe los toques y se los pasa al libro, para darse cuenta
+     * de un toque simple (mostrar u ocultar los controles). Se usa en los PDF, cuyo visor no avisa de los toques.
+     */
+    private val onTap: (() -> Unit)? = null,
 ) : View(context) {
+    private var tapDown = 0L
+    private var tapX = 0f
+    private var tapY = 0f
+    private var tapMulti = false
+    private val tapRun = Runnable { onTap?.invoke() }
     private val strokes = InkStore.load(bookId)
     private sealed class Step { class Added(val key: String, val s: Stroke) : Step(); class Removed(val key: String, val s: Stroke, val at: Int) : Step() }
     private val undo = ArrayList<Step>()
@@ -64,6 +76,12 @@ class InkView(
 
     /** ¿Hay trazos guardados en alguna de las páginas que se ven? (para no dibujar de más). */
     fun hasAny() = strokes.values.any { it.isNotEmpty() }
+
+    /** Cuántos trazos hay en cada página (para avisar de trazos hechos con otra letra en los EPUB). */
+    fun counts(): Map<String, Int> = strokes.filterValues { it.isNotEmpty() }.mapValues { it.value.size }
+
+    /** Todos los trazos, para exportar. */
+    fun all(): Map<String, List<Stroke>> = strokes
 
     override fun onDraw(canvas: Canvas) {
         for ((key, r) in pages()) {
@@ -98,7 +116,23 @@ class InkView(
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(ev: MotionEvent): Boolean {
-        if (!ui.on) return false
+        if (!ui.on) {
+            val tap = onTap ?: return false
+            when (ev.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    // Segundo toque seguido = doble toque (zoom): no es para los controles
+                    removeCallbacks(tapRun)
+                    tapDown = ev.eventTime; tapX = ev.x; tapY = ev.y; tapMulti = false
+                }
+                MotionEvent.ACTION_POINTER_DOWN -> tapMulti = true
+                MotionEvent.ACTION_UP -> {
+                    val slop = 12f * resources.displayMetrics.density
+                    if (!tapMulti && ev.eventTime - tapDown < 260 && hypot(ev.x - tapX, ev.y - tapY) < slop) postDelayed(tapRun, 280)
+                }
+            }
+            target.dispatchTouchEvent(ev)
+            return true
+        }
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 forwarding = false; erasedThisGesture = false
@@ -144,7 +178,7 @@ class InkView(
                         val s = Stroke(ui.color, widthFor(ui.tool, r), ui.tool == InkTool.MARKER, cur.toFloatArray())
                         strokes.getOrPut(key) { ArrayList() }.add(s)
                         undo.add(Step.Added(key, s))
-                        changed()
+                        changed(key)
                     }
                 }
                 cur.clear(); curKey = null; curRect = null
@@ -180,21 +214,22 @@ class InkView(
                 if (hypot(r.left + s.pts[i] * r.width() - x, r.top + s.pts[i + 1] * r.height() - y) < tol) { near = true; break }
                 i += 2
             }
-            if (near) { it.remove(); undo.add(Step.Removed(key, s, idx)); erasedThisGesture = true; changed(); invalidate() } else idx++
+            if (near) { it.remove(); undo.add(Step.Removed(key, s, idx)); erasedThisGesture = true; changed(key); invalidate() } else idx++
         }
     }
 
     fun undoLast() {
-        when (val st = undo.removeLastOrNull() ?: return) {
-            is Step.Added -> strokes[st.key]?.remove(st.s)
-            is Step.Removed -> strokes.getOrPut(st.key) { ArrayList() }.let { l -> l.add(st.at.coerceIn(0, l.size), st.s) }
+        val key = when (val st = undo.removeLastOrNull() ?: return) {
+            is Step.Added -> { strokes[st.key]?.remove(st.s); st.key }
+            is Step.Removed -> { strokes.getOrPut(st.key) { ArrayList() }.let { l -> l.add(st.at.coerceIn(0, l.size), st.s) }; st.key }
         }
-        changed()
+        changed(key)
         invalidate()
     }
 
-    private fun changed() {
+    private fun changed(key: String) {
         ui.canUndo = undo.isNotEmpty()
         InkStore.save(bookId, strokes)
+        onCommit(key)
     }
 }

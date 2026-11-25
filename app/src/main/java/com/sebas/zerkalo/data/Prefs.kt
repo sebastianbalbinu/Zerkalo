@@ -59,6 +59,27 @@ data class InkColor(val name: String, val argb: Int) {
     }
 }
 
+/**
+ * "Cómo se ve el texto": letra, tamaño, interlineado, márgenes y espacios. Es lo que cambia dónde cae cada línea.
+ * Se usa para los ajustes propios de un libro y para recordar con qué letra se hizo cada trazo de la pluma.
+ */
+fun ReaderSettings.look(): String = listOf(
+    font, size, lineHeight, margin, vMargin, spacing, paragraph, justify, layout, dyslexia, fullscreen, mmLeft, mmRight, mmTop, mmBottom,
+).joinToString("~")
+
+/** Los mismos ajustes, pero con la letra y los márgenes de [look]. */
+fun ReaderSettings.withLook(look: String): ReaderSettings {
+    val v = look.split("~")
+    if (v.size < 15) return this
+    return runCatching {
+        copy(
+            font = v[0].toInt(), size = v[1].toInt(), lineHeight = v[2].toFloat(), margin = v[3].toInt(), vMargin = v[4].toInt(),
+            spacing = v[5].toInt(), paragraph = v[6].toInt(), justify = v[7].toBoolean(), layout = v[8].toInt(), dyslexia = v[9].toBoolean(),
+            fullscreen = v[10].toBoolean(), mmLeft = v[11].toFloat(), mmRight = v[12].toFloat(), mmTop = v[13].toFloat(), mmBottom = v[14].toFloat(),
+        )
+    }.getOrDefault(this)
+}
+
 object Prefs {
     private lateinit var sp: SharedPreferences
     val paper = MutableStateFlow(PaperPref.SISTEMA)
@@ -92,6 +113,12 @@ object Prefs {
             val a = JSONArray(sp.getString("opds", "[]"))
             (0 until a.length()).map { a.getJSONObject(it).let { o -> OpdsCatalog(o.getString("name"), o.getString("url")) } }
         }.getOrDefault(emptyList())
+    }
+
+    /** Letra y márgenes propios de un libro (null = usa los de todos los libros). */
+    fun bookLook(bookId: String): String? = sp.getString("look_$bookId", null)
+    fun setBookLook(bookId: String, look: String?) {
+        sp.edit().apply { if (look == null) remove("look_$bookId") else putString("look_$bookId", look) }.apply()
     }
 
     fun setPaper(p: PaperPref) { paper.value = p; sp.edit().putString("paper", p.name).apply() }

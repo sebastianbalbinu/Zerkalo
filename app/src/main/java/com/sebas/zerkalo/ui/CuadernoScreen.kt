@@ -71,7 +71,7 @@ fun NotasScreen(haze: HazeState) {
     var summaryFor by rememberSaveable { mutableStateOf<String?>(null) }
 
     val byId = remember(books) { books.associateBy { it.id } }
-    val notes = remember(marks) { marks.filter { it.type == "hl" || it.type == "word" } }
+    val notes = remember(marks) { marks.filter { it.type == "hl" || it.type == "word" || it.type == "sticky" } }
     // Libros con algo guardado, el más reciente primero
     val groups = remember(notes, byId) {
         notes.groupBy { it.bookId }.mapNotNull { (id, xs) -> byId[id]?.let { it to xs } }.sortedByDescending { (_, xs) -> xs.maxOf { it.at } }
@@ -164,7 +164,7 @@ private fun Help(t: String) {
 private fun BookNotes(b: Book, xs: List<Mark>, onSummary: () -> Unit) {
     val p = LocalPalette.current
     // En el orden del libro, no en el orden en que se subrayaron.
-    val hls = xs.filter { it.type == "hl" }.sortedBy { it.progress }
+    val hls = xs.filter { it.type == "hl" || it.type == "sticky" }.sortedBy { it.progress }
     val words = xs.count { it.type == "word" }
     var open by remember { mutableStateOf(false) }
     Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 14.dp), PaddingValues(16.dp)) {
@@ -196,11 +196,18 @@ private fun NoteRow(m: Mark, book: String, modifier: Modifier, bare: Boolean = f
     val p = LocalPalette.current
     val body: @Composable () -> Unit = {
         Row(Modifier.height(IntrinsicSize.Min)) {
-            Box(Modifier.width(3.dp).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(if (m.type == "word") p.accent else highlightColor(m.color)))
+            Box(Modifier.width(3.dp).fillMaxHeight().clip(RoundedCornerShape(2.dp)).background(if (m.type == "word") p.accent else if (m.type == "sticky") StickyPaper else highlightColor(m.color)))
             Column(Modifier.padding(start = 12.dp)) {
                 if (m.type == "word") {
                     Text(m.text, style = Type.ui.copy(fontSize = 16.sp), color = p.text)
                     Text(m.note, style = Type.ui, color = p.text2)
+                } else if (m.type == "sticky") {
+                    // Nota adhesiva: primero lo que escribiste, debajo la frase o la página donde quedó
+                    Text(m.note, style = Type.body.copy(fontSize = 15.sp), color = p.text, maxLines = 8, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        (if (m.text.isNotBlank()) "«${m.text.take(80)}» · " else "") + m.chapter,
+                        style = Type.uiSmall, color = p.text2, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp),
+                    )
                 } else {
                     Text("«${m.text.take(240)}»", style = Type.body.copy(fontSize = 15.sp), color = p.text, maxLines = 6, overflow = TextOverflow.Ellipsis)
                     if (m.note.isNotBlank()) Text(m.note, style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))

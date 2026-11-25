@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.view.ViewCompat
@@ -47,6 +48,8 @@ import com.sebas.zerkalo.data.Mark
 import com.sebas.zerkalo.data.PaperPref
 import com.sebas.zerkalo.data.Prefs
 import com.sebas.zerkalo.data.ReaderSettings
+import com.sebas.zerkalo.data.look
+import com.sebas.zerkalo.data.withLook
 import com.sebas.zerkalo.ui.Chashitsu
 import com.sebas.zerkalo.ui.Nogal
 import com.sebas.zerkalo.ui.Palette
@@ -57,6 +60,8 @@ import android.view.KeyEvent
 import android.view.HapticFeedbackConstants
 import com.sebas.zerkalo.ui.highlightColor
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.readium.r2.navigator.DecorableNavigator
@@ -117,6 +122,8 @@ data class Lookup(
 /** Estado que ve la capa de controles (Compose). */
 class ReaderUi {
     var inking by mutableStateOf(false)   // pluma de colores activa
+    var ownLook by mutableStateOf(false)  // este libro tiene su propia letra y márgenes
+    var inkOther by mutableStateOf<Pair<Int, String>?>(null) // trazos hechos con otra letra en este capítulo: (cuántos, ajustes)
     var loading by mutableStateOf(true)
     var error by mutableStateOf<String?>(null)
     var controls by mutableStateOf(true)
@@ -173,6 +180,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private val ui = ReaderUi()
     private val note = com.sebas.zerkalo.ui.NoteState.start()
     private val inkUi = com.sebas.zerkalo.ui.InkUi()
+    private var sticky by mutableStateOf<Mark?>(null)   // nota adhesiva abierta
     private var inkView: com.sebas.zerkalo.ui.InkView? = null
 
     /**
@@ -185,8 +193,83 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val loc = navigator?.currentLocator?.value ?: return null
         val prog = loc.locations.progression ?: return null
         val s = ui.settings
-        val look = listOf(s.font, s.size, s.lineHeight, s.margin, s.vMargin, s.spacing, s.paragraph, s.justify, s.layout, s.dyslexia, s.fullscreen, s.mmLeft, s.mmRight, s.mmTop, s.mmBottom, ui.pairOn).joinToString("-")
+        val look = s.look() + "~" + ui.pairOn
         return "e|${loc.href}|${String.format(java.util.Locale.US, "%.4f", prog)}|$look|${root.width}x${root.height}"
+    }
+
+    private var snapJob: Job? = null
+
+    /**
+     * Guarda una foto de la pantalla rayada (la página y sus trazos), para poder exportar las páginas rayadas
+     * de un EPUB: los trazos no se pueden meter dentro del EPUB porque su texto se reacomoda.
+     */
+    private fun snapInk(key: String) {
+        snapJob?.cancel()
+        snapJob = lifecycleScope.launch {
+            delay(700)
+            val iv = inkView ?: return@launch
+            val dir = com.sebas.zerkalo.data.Export.inkShotsDir(this@ReaderActivity, book.id)
+            val tag = Integer.toHexString(key.hashCode())
+            dir.listFiles { f -> f.name.endsWith("-$tag.jpg") }?.forEach { it.delete() }
+            if ((iv.counts()[key] ?: 0) == 0 || root.width == 0) return@launch
+            runCatching {
+                val bmp = android.graphics.Bitmap.createBitmap(root.width, root.height, android.graphics.Bitmap.Config.ARGB_8888)
+                val c = android.graphics.Canvas(bmp)
+                c.drawColor(ui.palette.bg.toArgb())
+                panes.draw(c)
+                iv.draw(c)
+                val prog = ((navigator?.currentLocator?.value?.locations?.totalProgression ?: 0.0) * 1_000_000).toInt()
+                val f = java.io.File(dir, String.format(java.util.Locale.US, "%07d-%s.jpg", prog, tag))
+                withContext(Dispatchers.IO) { f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 86, it) } }
+                bmp.recycle()
+            }
+        }
+    }
+
+    private fun exportEpub() {
+        if (book.isPdf) return
+        ui.say("Preparando el EPUB…")
+        lifecycleScope.launch {
+            runCatching { com.sebas.zerkalo.data.Export.epubWithNotes(this@ReaderActivity, book, Library.marks.value) }
+                .onSuccess { com.sebas.zerkalo.data.Export.share(this@ReaderActivity, it, "application/epub+zip") }
+                .onFailure { ui.say("No se pudo exportar: ${it.message}") }
+        }
+    }
+
+    private fun exportInkPages() {
+        lifecycleScope.launch {
+            val f = withContext(Dispatchers.IO) { runCatching { com.sebas.zerkalo.data.Export.inkPagesPdf(this@ReaderActivity, book) }.getOrNull() }
+            if (f == null) ui.say("Todavía no has rayado ninguna página con la pluma")
+            else com.sebas.zerkalo.data.Export.share(this@ReaderActivity, f, "application/pdf")
+        }
+    }
+
+    /** "Solo para este libro": al encenderlo se guarda la letra actual para este libro; al apagarlo vuelve la de todos. */
+    private fun setOwnLook(on: Boolean) {
+        if (on) { ui.ownLook = true; Prefs.setBookLook(book.id, ui.settings.look()); ui.say("Estos ajustes quedan solo para este libro") }
+        else {
+            Prefs.setBookLook(book.id, null); ui.ownLook = false
+            updateSettings(ui.settings.withLook(Prefs.reader.value.look()))
+            ui.say("Este libro vuelve a usar los ajustes de todos")
+        }
+    }
+
+    /**
+     * ¿Hay trazos en este capítulo hechos con otra letra? Entonces se ofrece volver a esa letra para verlos,
+     * así nunca se pierden aunque se cambie el tamaño o la letra.
+     */
+    private fun checkInkProfiles() {
+        val iv = inkView ?: return
+        val k = inkKey() ?: run { ui.inkOther = null; return }
+        val parts = k.split("|")
+        val href = parts.getOrNull(1) ?: return
+        val mine = parts.getOrNull(3) ?: return
+        val counts = iv.counts()
+        if (counts.keys.any { it.startsWith("e|$href|") && it.split("|").getOrNull(3) == mine }) { ui.inkOther = null; return }
+        val other = counts.filter { (key, _) -> key.startsWith("e|$href|") && key.split("|").getOrNull(3) != mine }
+            .entries.groupBy { it.key.split("|").getOrNull(3).orEmpty() }
+            .mapValues { e -> e.value.sumOf { it.value } }.maxByOrNull { it.value }
+        ui.inkOther = other?.let { it.value to it.key.substringBeforeLast("~") }
     }
 
     private fun toggleInk() {
@@ -240,6 +323,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         super.onCreate(null)
         book = Library.book(intent.getStringExtra("id")) ?: run { finish(); return }
         ui.settings = Prefs.reader.value
+        // Este libro puede tener su propia letra y márgenes
+        Prefs.bookLook(book.id)?.let { ui.settings = ui.settings.withLook(it); ui.ownLook = true }
         // La prueba automática abre el libro en modo continuo sin cambiar los ajustes guardados
         if (intent.getBooleanExtra("continuo", false)) ui.settings = ui.settings.copy(scroll = true, continuous = true)
         ui.palette = paletteFor(ui.settings)
@@ -277,10 +362,10 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         layoutPanes(resources.configuration)
         root.addView(panes, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         // Pluma de colores: capa encima de la página (en modo páginas, cada pantalla guarda sus trazos)
-        inkView = com.sebas.zerkalo.ui.InkView(this, book.id, panes, inkUi) {
+        inkView = com.sebas.zerkalo.ui.InkView(this, book.id, panes, inkUi, pages = {
             val k = inkKey()
             if (k == null || root.width == 0) emptyList() else listOf(k to android.graphics.RectF(0f, 0f, root.width.toFloat(), root.height.toFloat()))
-        }
+        }, onCommit = { key -> snapInk(key) })
         root.addView(inkView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val overlay = ComposeView(this).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -294,11 +379,19 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                 com.sebas.zerkalo.ui.ZerkaloTheme {
                     androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().imePadding()) {
                         if (!inkUi.on) com.sebas.zerkalo.ui.FloatingNote(book.id, book.title, note, bottomSpace = 140.dp)
-                        if (inkUi.on) com.sebas.zerkalo.ui.InkBar(
+                        sticky?.let { m ->
+                            com.sebas.zerkalo.ui.StickyEditor(
+                                m, m.chapter.take(40),
+                                onSave = { t -> Library.putMark(m.copy(note = t)); refreshMarks() },
+                                onDelete = { Library.removeMark(m.id); refreshMarks(); sticky = null },
+                                onClose = { sticky = null },
+                            )
+                        }
+                        if (inkUi.on) com.sebas.zerkalo.ui.InkPill(
                             inkUi, onUndo = { inkView?.undoLast() }, onDone = { toggleInk() },
                             onPage = { d -> turn(navigator, d); inkView?.postInvalidateDelayed(350) },
-                            modifier = androidx.compose.ui.Modifier.align(androidx.compose.ui.Alignment.BottomCenter)
-                                .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.navigationBars).padding(bottom = 18.dp, start = 10.dp, end = 10.dp),
+                            modifier = androidx.compose.ui.Modifier.windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.navigationBars)
+                                .windowInsetsPadding(androidx.compose.foundation.layout.WindowInsets.statusBars),
                         )
                     }
                 }
@@ -445,6 +538,12 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         navigator = nav
         nav.addInputListener(tapListener(nav, pair = false))
         lockSideways(nav)
+        nav.addDecorationListener("notas", object : DecorableNavigator.Listener {
+            override fun onDecorationActivated(event: DecorableNavigator.OnActivatedEvent): Boolean {
+                sticky = ui.marks.firstOrNull { it.id == event.decoration.id }
+                return true
+            }
+        })
         nav.addDecorationListener("subrayados", object : DecorableNavigator.Listener {
             override fun onDecorationActivated(event: DecorableNavigator.OnActivatedEvent): Boolean {
                 ui.activeMark = ui.marks.firstOrNull { it.id == event.decoration.id }
@@ -635,6 +734,12 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                 width = HtmlDecorationTemplate.Width.WRAP,
                 element = { deco -> markElement(deco) },
                 stylesheet = MARK_CSS,
+            )
+            t[Decoration.Style.Underline::class] = HtmlDecorationTemplate(
+                layout = HtmlDecorationTemplate.Layout.BOUNDS,
+                width = HtmlDecorationTemplate.Width.WRAP,
+                element = { "<div><div class=\"zk-sticky\"></div></div>" },
+                stylesheet = STICKY_CSS,
             )
         }
         val files = FontFiles.available(this@ReaderActivity).toSet()
@@ -1012,6 +1117,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
     private fun onLocator(loc: Locator, turn: Boolean = true) {
         inkView?.invalidate()
+        checkInkProfiles()
         val now = System.currentTimeMillis()
         if (turn) {
             activeMs += pendingMs(); lastEvent = now
@@ -1204,7 +1310,11 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     }
 
     fun updateSettings(r: ReaderSettings) {
-        Prefs.setReader(r)
+        // Con ajustes propios, la letra y los márgenes se guardan solo para este libro; lo demás vale para todos.
+        if (ui.ownLook) {
+            Prefs.setBookLook(book.id, r.look())
+            Prefs.setReader(r.withLook(Prefs.reader.value.look()))
+        } else Prefs.setReader(r)
         val old = ui.settings
         // Entrar o salir del modo continuo cambia de motor: se vuelve a abrir el lector en el mismo punto
         if (old.continuous != r.continuous) { ui.settings = r; recreate(); return }
@@ -1256,6 +1366,12 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             Decoration(id = m.id, locator = loc, style = Decoration.Style.Highlight(tint = tint))
         }
         runCatching { nav.applyDecorations(decos, "subrayados") }
+        // Notas adhesivas: un papelito en la esquina de la frase (estilo "Underline" con su propia plantilla)
+        val notes = ui.marks.filter { it.type == "sticky" }.mapNotNull { m ->
+            val loc = runCatching { Locator.fromJSON(JSONObject(m.locator)) }.getOrNull() ?: return@mapNotNull null
+            Decoration(id = m.id, locator = loc, style = Decoration.Style.Underline(tint = 0xFFEFD995.toInt()))
+        }
+        runCatching { nav.applyDecorations(notes, "notas") }
     }
 
     private fun refreshMarks() {
@@ -1288,12 +1404,14 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
     private val selectionCallback = object : ActionMode.Callback {
         override fun onCreateActionMode(mode: ActionMode, menu: Menu): Boolean {
+            // Lo más usado primero; lo demás Android lo guarda solo en "⋮" si no cabe
             menu.add(Menu.NONE, 101, 0, "Subrayar")
-            menu.add(Menu.NONE, 102, 1, "Nota")
-            menu.add(Menu.NONE, 104, 2, "Traducir")
-            menu.add(Menu.NONE, 105, 3, "Tarjeta")
-            menu.add(Menu.NONE, 103, 4, "Copiar")
-            menu.add(Menu.NONE, 106, 5, "Al apunte")
+            menu.add(Menu.NONE, 107, 1, "Nota adhesiva")
+            menu.add(Menu.NONE, 106, 2, "Al apunte")
+            menu.add(Menu.NONE, 103, 3, "Copiar")
+            menu.add(Menu.NONE, 104, 4, "Traducir")
+            menu.add(Menu.NONE, 105, 5, "Tarjeta")
+            menu.add(Menu.NONE, 102, 6, "Subrayar con nota")
             return true
         }
         override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
@@ -1327,6 +1445,21 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                         note.open()
                     }
                 }
+                107 -> lifecycleScope.launch {
+                    val nav = navigator ?: return@launch
+                    val sel = nav.currentSelection() ?: return@launch
+                    nav.clearSelection()
+                    val loc = sel.locator
+                    // La nota adhesiva queda pegada a la frase: sobrevive aunque cambien la letra o el tamaño
+                    val m = Mark(
+                        id = "n" + System.currentTimeMillis().toString(36), bookId = book.id, type = "sticky",
+                        locator = loc.toJSON().toString(), text = loc.text.highlight?.trim().orEmpty(),
+                        chapter = ui.chapter, progress = loc.locations.totalProgression ?: ui.progress.toDouble(),
+                    )
+                    Library.putMark(m)
+                    refreshMarks()
+                    sticky = m
+                }
                 103 -> lifecycleScope.launch {
                     val t = navigator?.currentSelection()?.locator?.text?.highlight.orEmpty()
                     (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Zerkalo", t))
@@ -1344,6 +1477,13 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         close = { finish() },
         openNote = { setControls(false); note.toggle() },
         toggleInk = { toggleInk() },
+        ink = { t -> inkUi.tool = t; if (!inkUi.on) toggleInk() },
+        export = { ui.sheet = "export" },
+        ownLook = { on -> setOwnLook(on) },
+        useLook = { look -> updateSettings(ui.settings.withLook(look)); ui.inkOther = null },
+        exportEpub = { exportEpub() },
+        exportInk = { exportInkPages() },
+        exportNote = { com.sebas.zerkalo.ui.shareTxt(this, book.title, com.sebas.zerkalo.data.Apuntes.flow(book.id).value) },
         toggleShiori = { toggleShiori() },
         go = { if (cont != null) contGo(it) else { navigator?.go(it, animated = false); setControls(false) } },
         goLink = { l ->
@@ -1682,6 +1822,13 @@ class ReaderActions(
     val close: () -> Unit,
     val openNote: () -> Unit = {},
     val toggleInk: () -> Unit = {},
+    val ink: (com.sebas.zerkalo.ui.InkTool) -> Unit = {},
+    val export: () -> Unit = {},
+    val ownLook: (Boolean) -> Unit = {},
+    val useLook: (String) -> Unit = {},
+    val exportEpub: () -> Unit = {},
+    val exportInk: () -> Unit = {},
+    val exportNote: () -> Unit = {},
     val toggleShiori: () -> Unit,
     val go: (Locator) -> Unit,
     val goLink: (Link) -> Unit,
@@ -1847,6 +1994,14 @@ private const val PAGE_SHARE = """(function(){ var se = document.scrollingElemen
 })()"""
 
 /** Formas de los subrayados: marcador, lápiz y ondulado. */
+/** El papelito de la nota adhesiva: arriba a la derecha de la frase, un poco torcido, como pegado a mano. */
+private const val STICKY_CSS = """
+.zk-sticky { position: absolute; right: -10px; top: -12px; width: 18px; height: 18px; background: #EFD995;
+  border-radius: 2px 2px 7px 2px; transform: rotate(-6deg); box-shadow: 1px 2px 4px rgba(0,0,0,.35); pointer-events: auto; }
+.zk-sticky::before { content: ""; position: absolute; left: 4px; top: 6px; width: 9px; height: 1.5px; background: rgba(59,43,26,.35);
+  box-shadow: 0 4px 0 rgba(59,43,26,.35); }
+"""
+
 private const val MARK_CSS = """
 .zk-mk { background: linear-gradient(180deg, transparent 0 16%, var(--c) 16% 94%, transparent 94%); mix-blend-mode: multiply; }
 .zk-mk.zk-dark { mix-blend-mode: screen; }

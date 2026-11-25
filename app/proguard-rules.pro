@@ -23,3 +23,9 @@
 # Lector de PDF (androidx.pdf): su servicio aislado se comunica por AIDL; se conserva completo.
 -keep class androidx.pdf.** { *; }
 -dontwarn androidx.pdf.**
+
+# PDFBox (exportar PDF con notas): usa recursos y reflexión; se conserva y se callan clases opcionales (JPEG2000)
+-keep class com.tom_roush.** { *; }
+-dontwarn com.tom_roush.**
+-dontwarn com.gemalto.jp2.**
+-dontwarn org.bouncycastle.**

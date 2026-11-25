@@ -32,6 +32,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -125,6 +128,14 @@ class PdfReaderActivity : AppCompatActivity() {
     private val inkUi = com.sebas.zerkalo.ui.InkUi()
     private var inkView: com.sebas.zerkalo.ui.InkView? = null
     private val pageRects = java.util.TreeMap<Int, RectF>()  // dónde está cada página visible, en px
+    private var rectsTick by mutableIntStateOf(0)           // cambia cuando las páginas se mueven (para las notas)
+    // Notas adhesivas: locator "pdf:<página>:<x>:<y>" (x e y de 0 a 1 dentro de la página)
+    private var stickies by mutableStateOf<List<com.sebas.zerkalo.data.Mark>>(emptyList())
+    private var sticky by mutableStateOf<com.sebas.zerkalo.data.Mark?>(null)
+    private var placing by mutableStateOf(false)
+    private var controls by mutableStateOf(true)   // controles a la vista (un toque los muestra u oculta)
+    private var tools by mutableStateOf(false)
+    private var exporting by mutableStateOf(false)
     private var startedAt = 0L
     private var restored = false
 
@@ -155,13 +166,18 @@ class PdfReaderActivity : AppCompatActivity() {
             maxZoom = 8f
         }
         root.addView(pdfView)
-        inkView = com.sebas.zerkalo.ui.InkView(this, book.id, pdfView, inkUi) { pageRects.map { (pg, r) -> "p$pg" to r } }
+        inkView = com.sebas.zerkalo.ui.InkView(
+            this, book.id, pdfView, inkUi,
+            pages = { pageRects.map { (pg, r) -> "p$pg" to r } },
+            onTap = { if (!searching) controls = !controls },
+        )
         root.addView(inkView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         root.addView(overlay)
         setContentView(root)
         applyNight()
         applyBrightness(light.brightness)
         loadMarks()
+        loadStickies()
         setup()
         open()
         Library.update(book.id) { it.copy(lastOpened = System.currentTimeMillis()) }
@@ -174,12 +190,19 @@ class PdfReaderActivity : AppCompatActivity() {
                 pageRects.clear()
                 for (i in 0 until pageLocations.size()) pageRects[pageLocations.keyAt(i)] = RectF(pageLocations.valueAt(i))
                 inkView?.invalidate()
+                rectsTick++
                 if (!restored) return
                 // La página que más se ve: la primera visible, salvo que ya casi se fue hacia arriba
                 var p = firstVisiblePage
                 val r = pageLocations.get(firstVisiblePage)
                 if (r != null && visiblePagesCount > 1 && r.bottom < pdfView.height * 0.35f) p = firstVisiblePage + 1
                 if (p != page) { page = p; saveProgress() }
+            }
+        })
+        // Al mover la página, los controles se esconden: la pantalla queda para leer
+        pdfView.addOnGestureStateChangedListener(object : PdfView.OnGestureStateChangedListener {
+            override fun onGestureStateChanged(newState: Int) {
+                if (newState == PdfView.GESTURE_STATE_INTERACTING && controls && !searching) controls = false
             }
         })
         pdfView.addOnFirstContentLoadListener {
@@ -202,7 +225,13 @@ class PdfReaderActivity : AppCompatActivity() {
                     note.open()
                     close(); pdfView.clearCurrentSelection()
                 })
-                components.add(1, SelectionMenuComponent("zk-subrayar", "Subrayar", null) {
+                components.add(1, SelectionMenuComponent("zk-nota", "Nota adhesiva", null) {
+                    val b = bounds.firstOrNull()
+                    close(); pdfView.clearCurrentSelection()
+                    // El papelito queda arriba a la derecha de la frase elegida
+                    b?.let { pdfView.pdfToViewPoint(PdfPoint(it.pageNum, it.right, it.top)) }?.let { pt -> placeSticky(pt.x, pt.y, text) }
+                })
+                components.add(2, SelectionMenuComponent("zk-subrayar", "Subrayar", null) {
                     marks.addAll(bounds); saveMarks(); paintHighlights()
                     close(); pdfView.clearCurrentSelection()
                 })
@@ -240,6 +269,25 @@ class PdfReaderActivity : AppCompatActivity() {
         val n = pages.coerceAtLeast(1)
         val prog = ((page + 1).toDouble() / n).coerceIn(0.0, 1.0)
         Library.update(book.id) { it.copy(locator = "pdf:$page", progress = maxOf(prog, 0.0001), lastOpened = System.currentTimeMillis()) }
+    }
+
+    // ---------- Notas adhesivas ----------
+
+    private fun loadStickies() { stickies = Library.marks.value.filter { it.bookId == book.id && it.type == "sticky" } }
+
+    /** Pega una nota nueva donde se tocó la pantalla (en px) y la abre para escribir. */
+    private fun placeSticky(x: Float, y: Float, quote: String = "") {
+        placing = false
+        val hit = pageRects.entries.firstOrNull { it.value.contains(x, y) } ?: run { say("Toca sobre una página"); return }
+        val r = hit.value
+        val nx = ((x - r.left) / r.width()).coerceIn(0f, 1f)
+        val ny = ((y - r.top) / r.height()).coerceIn(0f, 1f)
+        val m = com.sebas.zerkalo.data.Mark(
+            id = "n" + System.currentTimeMillis().toString(36), bookId = book.id, type = "sticky",
+            locator = "pdf:${hit.key}:$nx:$ny", chapter = "pág. ${hit.key + 1}", text = quote,
+            progress = (hit.key + 1).toDouble() / pages.coerceAtLeast(1),
+        )
+        Library.putMark(m); loadStickies(); sticky = m
     }
 
     // ---------- Subrayados (se guardan aparte, en files/pdfmarcas) ----------
@@ -365,10 +413,31 @@ class PdfReaderActivity : AppCompatActivity() {
         applyNight()
     }
 
+    private fun ink(t: com.sebas.zerkalo.ui.InkTool) {
+        inkUi.tool = t
+        if (t == com.sebas.zerkalo.ui.InkTool.MARKER && inkUi.color == com.sebas.zerkalo.ui.InkColors[0]) inkUi.color = com.sebas.zerkalo.ui.InkColors[1]
+        if (!inkUi.on) toggleInk()
+    }
+
+    private fun exportPdf() {
+        val iv = inkView ?: return
+        say("Preparando el PDF…")
+        lifecycleScope.launch {
+            runCatching {
+                com.sebas.zerkalo.data.Export.pdfWithNotes(
+                    this@PdfReaderActivity, book, iv.all(),
+                    marks.map { floatArrayOf(it.pageNum.toFloat(), it.left, it.top, it.right, it.bottom) },
+                    stickies,
+                )
+            }.onSuccess { com.sebas.zerkalo.data.Export.share(this@PdfReaderActivity, it, "application/pdf") }
+                .onFailure { Log.e("Zerkalo", "Exportar PDF", it); say("No se pudo exportar: ${it.message}") }
+        }
+    }
+
     private fun toggleInk() {
         if (!::pdfView.isInitialized || doc == null) return
         inkUi.on = !inkUi.on
-        if (inkUi.on) { pdfView.clearCurrentSelection(); note.minimize() }
+        if (inkUi.on) { pdfView.clearCurrentSelection(); note.minimize(); controls = false } else controls = true
         inkView?.invalidate()
     }
 
@@ -407,10 +476,10 @@ class PdfReaderActivity : AppCompatActivity() {
         // Velo de la luz (atenúa la página sin cambiar el brillo de la pantalla)
         if (dim > 0f) Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = dim)))
         Box(Modifier.fillMaxSize().imePadding()) {
-            // Barra de arriba: volver, título, buscar, noche
-            Row(
+            // Arriba, solo con los controles (o buscando): volver, título y buscar
+            if (controls || searching) Row(
                 Modifier.align(Alignment.TopCenter).padding(top = top + 8.dp, start = 12.dp, end = 12.dp).fillMaxWidth()
-                    .clip(RoundedCornerShape(26.dp)).background(p.bg.copy(alpha = 0.9f)).padding(6.dp),
+                    .clip(RoundedCornerShape(26.dp)).background(p.bg.copy(alpha = 0.92f)).padding(6.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 if (!searching) {
@@ -420,16 +489,6 @@ class PdfReaderActivity : AppCompatActivity() {
                         overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                     )
                     CircleButton("search", { searching = true }, size = 40.dp, desc = "Buscar")
-                    Spacer(Modifier.width(6.dp))
-                    CircleButton("sun", { lightSheet = true }, size = 40.dp, desc = "Luz")
-                    Spacer(Modifier.width(6.dp))
-                    Box(
-                        Modifier.size(40.dp).clip(CircleShape).background(if (inkUi.on) p.accent else p.surface.copy(alpha = if (p.isDark) 0.85f else 1f))
-                            .clickable { toggleInk() },
-                        contentAlignment = Alignment.Center,
-                    ) { Text("✎", style = Type.title.copy(fontSize = 18.sp), color = if (inkUi.on) Color.White else p.text) }
-                    Spacer(Modifier.width(6.dp))
-                    com.sebas.zerkalo.ui.NoteButton(note, 40.dp)
                 } else SearchRow()
             }
 
@@ -445,18 +504,72 @@ class PdfReaderActivity : AppCompatActivity() {
                 }
             }
 
-            // Página actual: al tocarla, se salta a otra página
-            if (pages > 0 && !inkUi.on) Box(
-                Modifier.align(Alignment.BottomCenter).padding(bottom = bottom + 22.dp).clip(RoundedCornerShape(16.dp))
-                    .background(p.bg.copy(alpha = 0.88f)).clickable { goTo = true }.padding(horizontal = 14.dp, vertical = 7.dp),
-            ) { Text("pág. ${page + 1} de $pages", style = Type.uiSmall, color = p.text2) }
+            // Abajo: con los controles, la página y cuatro botones; sin ellos, solo una línea fina de avance
+            if (pages > 0 && controls && !inkUi.on) Column(
+                Modifier.align(Alignment.BottomCenter).padding(bottom = bottom + 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Box(
+                    Modifier.clip(RoundedCornerShape(16.dp)).background(p.bg.copy(alpha = 0.88f)).clickable { goTo = true }
+                        .padding(horizontal = 14.dp, vertical = 7.dp),
+                ) { Text("pág. ${page + 1} de $pages", style = Type.uiSmall, color = p.text2) }
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    Modifier.clip(RoundedCornerShape(30.dp)).background(p.bg.copy(alpha = 0.94f)).padding(7.dp),
+                    horizontalArrangement = Arrangement.spacedBy(9.dp), verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    CircleButton("toc", { goTo = true }, size = 44.dp, desc = "Ir a la página")
+                    CircleButton("aa", { lightSheet = true }, size = 44.dp, desc = "Aspecto")
+                    Box(
+                        Modifier.size(44.dp).clip(CircleShape).background(p.surface.copy(alpha = if (p.isDark) 0.85f else 1f)).clickable { tools = true },
+                        contentAlignment = Alignment.Center,
+                    ) { Text("✎", style = Type.title.copy(fontSize = 19.sp), color = p.text) }
+                    com.sebas.zerkalo.ui.NoteButton(note, 44.dp)
+                }
+            }
+            if (pages > 0 && !controls && !inkUi.on) Box(
+                Modifier.align(Alignment.BottomCenter).padding(bottom = bottom + 6.dp, start = 28.dp, end = 28.dp).fillMaxWidth().height(2.dp)
+                    .background(p.text2.copy(alpha = 0.25f)),
+            ) { Box(Modifier.fillMaxWidth(((page + 1f) / pages).coerceIn(0f, 1f)).height(2.dp).background(p.accent)) }
 
+            // Notas adhesivas pegadas en las páginas que se ven
+            @Suppress("UNUSED_VARIABLE") val tick = rectsTick
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val half = with(density) { 12.dp.toPx() }
+            stickies.forEach { m ->
+                val parts = m.locator.split(":")
+                val pg = parts.getOrNull(1)?.toIntOrNull() ?: return@forEach
+                val nx = parts.getOrNull(2)?.toFloatOrNull() ?: return@forEach
+                val ny = parts.getOrNull(3)?.toFloatOrNull() ?: return@forEach
+                val r = pageRects[pg] ?: return@forEach
+                com.sebas.zerkalo.ui.StickyChip(
+                    Modifier.offset { androidx.compose.ui.unit.IntOffset((r.left + nx * r.width() - half).toInt(), (r.top + ny * r.height() - half).toInt()) },
+                ) { sticky = m }
+            }
+            if (placing) Box(
+                Modifier.fillMaxSize().background(Color(0x22000000)).pointerInput(Unit) { detectTapGestures { o -> placeSticky(o.x, o.y) } },
+            ) {
+                Text(
+                    "Toca donde quieres pegar la nota", style = Type.ui, color = Color.White,
+                    modifier = Modifier.align(Alignment.Center).clip(RoundedCornerShape(16.dp)).background(Color(0xCC2E231D)).padding(horizontal = 16.dp, vertical = 10.dp),
+                )
+            }
             if (!inkUi.on) FloatingNote(book.id, book.title, note, bottomSpace = bottom + 90.dp)
-            else com.sebas.zerkalo.ui.InkBar(
+            else com.sebas.zerkalo.ui.InkPill(
                 inkUi, onUndo = { inkView?.undoLast() }, onDone = { toggleInk() },
-                modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = bottom + 18.dp, start = 10.dp, end = 10.dp),
+                modifier = Modifier.padding(top = top + 70.dp, bottom = bottom + 10.dp),
             )
             if (lightSheet) LightSheet()
+            if (tools) ToolsSheet()
+            if (exporting) ExportSheet()
+            sticky?.let { m ->
+                com.sebas.zerkalo.ui.StickyEditor(
+                    m, m.chapter,
+                    onSave = { t -> Library.putMark(m.copy(note = t)); loadStickies() },
+                    onDelete = { Library.removeMark(m.id); loadStickies(); sticky = null },
+                    onClose = { sticky = null },
+                )
+            }
 
             if (goTo) GoToPage { n ->
                 goTo = false
@@ -481,6 +594,70 @@ class PdfReaderActivity : AppCompatActivity() {
         }
         if (hits.isNotEmpty()) Text("${hit + 1}/${hits.size}", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(end = 6.dp))
         CircleButton("chevron", { if (hits.isNotEmpty()) { hit = (hit + 1) % hits.size; showHit() } else search() }, size = 40.dp, desc = "Siguiente")
+    }
+
+    /** Herramientas: lo que no cabe en los cuatro botones. */
+    @Composable
+    private fun ToolsSheet() {
+        val p = LocalPalette.current
+        androidx.compose.material3.ModalBottomSheet(
+            onDismissRequest = { tools = false },
+            sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface,
+        ) {
+            Column(Modifier.padding(horizontal = 22.dp).padding(bottom = 30.dp)) {
+                com.sebas.zerkalo.ui.Caption("Herramientas", accent = true)
+                Spacer(Modifier.height(12.dp))
+                Row(Modifier.fillMaxWidth()) {
+                    com.sebas.zerkalo.ui.ToolTile("✎", "Pluma", Modifier.weight(1f)) { tools = false; ink(com.sebas.zerkalo.ui.InkTool.PEN) }
+                    com.sebas.zerkalo.ui.ToolTile("▌", "Resaltador", Modifier.weight(1f)) { tools = false; ink(com.sebas.zerkalo.ui.InkTool.MARKER) }
+                    com.sebas.zerkalo.ui.ToolTile("▤", "Nota adhesiva", Modifier.weight(1f), tint = com.sebas.zerkalo.ui.StickyPaper) {
+                        tools = false; controls = false; placing = true
+                    }
+                    com.sebas.zerkalo.ui.ToolTile("⌫", "Borrar", Modifier.weight(1f)) { tools = false; ink(com.sebas.zerkalo.ui.InkTool.ERASER) }
+                }
+                Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                    com.sebas.zerkalo.ui.ToolTile("⇪", "Exportar", Modifier.weight(1f)) { tools = false; exporting = true }
+                    com.sebas.zerkalo.ui.ToolTile("⌕", "Buscar", Modifier.weight(1f)) { tools = false; searching = true }
+                    com.sebas.zerkalo.ui.ToolTile("☼", "Luz", Modifier.weight(1f)) { tools = false; lightSheet = true }
+                    com.sebas.zerkalo.ui.ToolTile("#", "Ir a página", Modifier.weight(1f)) { tools = false; goTo = true }
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun ExportSheet() {
+        val p = LocalPalette.current
+        androidx.compose.material3.ModalBottomSheet(
+            onDismissRequest = { exporting = false },
+            sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface,
+        ) {
+            Column(Modifier.padding(horizontal = 22.dp).padding(bottom = 30.dp)) {
+                Text("Exportar", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+                Text("Se crea una copia nueva; tu PDF en Zerkalo no cambia.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp))
+                ExportRow("PDF con mis notas", "Trazos, subrayados y notas adhesivas dentro del PDF; el texto se sigue pudiendo seleccionar") {
+                    exporting = false; exportPdf()
+                }
+                ExportRow("Apunte (.txt)", "Las frases y lo que escribiste en el apunte") {
+                    exporting = false; com.sebas.zerkalo.ui.shareTxt(this@PdfReaderActivity, book.title, Apuntes.flow(book.id).value)
+                }
+            }
+        }
+    }
+
+    @Composable
+    private fun ExportRow(title: String, sub: String, onClick: () -> Unit) {
+        val p = LocalPalette.current
+        Row(
+            Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(16.dp)).background(p.card.copy(alpha = 0.6f)).clickable(onClick = onClick).padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(title, style = Type.ui, color = p.text)
+                Text(sub, style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 2.dp))
+            }
+            ZIcon("share", p.text2, 18.dp)
+        }
     }
 
     /** La misma hoja de Luz que en el lector de EPUB, más "Página oscura" (antes la luna). */

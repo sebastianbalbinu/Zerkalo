@@ -184,14 +184,8 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                         ui.chapter, style = Type.uiSmall.copy(fontSize = 14.sp), color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis,
                         textAlign = TextAlign.Center, modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
                     )
-                    RoundPill("translate", act.toggleStudy, active = ui.studyTap)
-                    Spacer(Modifier.width(8.dp))
-                    RoundPill("escuchar", { ui.sheet = "listen" }, active = listening)
-                    Spacer(Modifier.width(8.dp))
-                    RoundPill("pair", { ui.sheet = "pair" }, active = ui.pairOn)
-                    Spacer(Modifier.width(8.dp))
-                    // Pluma de colores para rayar sobre la página
-                    RoundPill("", act.toggleInk, active = ui.inking, glyph = "✎")
+                    // Arriba solo lo justo: volver, el capítulo y el shiori. Lo demás vive en ✎ (Herramientas).
+                    RoundPill("shiori", act.toggleShiori, active = ui.bookmarked)
                 }
             }
         }
@@ -236,35 +230,51 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                     Text("${((drag ?: ui.progress) * 100).toInt()} %", style = Type.uiSmall.copy(fontSize = 12.sp), color = p.text2)
                 }
                 Spacer(Modifier.height(12.dp))
-                // Seis botones abajo: en pantallas angostas se achican un poco para que quepan todos
-                val sw = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp
-                val pill = if (sw < 400) 44.dp else 48.dp
-                val gap = if (sw < 400) 5.dp else 6.dp
+                // Abajo, cuatro botones: Índice, Aspecto (letra y luz), Herramientas y Apunte
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Row(
-                        Modifier.height(pill).shadow(6.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)).background(p.text)
-                            .clickable { ui.say("Hoy llevas ${fmt(ui.minutesToday)} de lectura") }.padding(horizontal = if (sw < 360) 12.dp else 13.dp),
+                        Modifier.height(48.dp).shadow(6.dp, RoundedCornerShape(24.dp)).clip(RoundedCornerShape(24.dp)).background(p.text)
+                            .clickable { ui.say("Hoy llevas ${fmt(ui.minutesToday)} de lectura") }.padding(horizontal = 13.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         ZIcon("clock", p.bg, 19.dp, 1.7f)
-                        if (sw >= 360) Text(fmt(ui.minutesToday), style = Type.ui.copy(fontSize = 15.sp), color = p.bg, modifier = Modifier.padding(start = 8.dp))
+                        Text(fmt(ui.minutesToday), style = Type.ui.copy(fontSize = 15.sp), color = p.bg, modifier = Modifier.padding(start = 8.dp))
                     }
                     Spacer(Modifier.weight(1f))
-                    RoundPill("toc", { ui.sheet = "toc" }, size = pill)
-                    Spacer(Modifier.width(gap))
-                    RoundPill("sun", { ui.sheet = "luz" }, size = pill)
-                    Spacer(Modifier.width(gap))
-                    RoundPill("aa", { ui.sheet = "type" }, size = pill)
-                    Spacer(Modifier.width(gap))
-                    RoundPill("shiori", act.toggleShiori, active = ui.bookmarked, size = pill)
-                    Spacer(Modifier.width(gap))
+                    RoundPill("toc", { ui.sheet = "toc" })
+                    Spacer(Modifier.width(8.dp))
+                    RoundPill("aa", { ui.sheet = "type" })
+                    Spacer(Modifier.width(8.dp))
+                    RoundPill("", { ui.sheet = "tools" }, active = ui.inking || ui.studyTap, glyph = "✎")
+                    Spacer(Modifier.width(8.dp))
                     // El apunte: se abre aunque esté vacío, para escribir sin citar
-                    RoundPill("", act.openNote, active = true, glyph = "記", size = pill)
+                    RoundPill("", act.openNote, active = true, glyph = "記")
                 }
             }
         }
 
         ReaderToast(ui, Modifier.align(Alignment.BottomCenter))
+
+        // Trazos de la pluma hechos con otra letra en este capítulo: se ofrece volver a esa letra para verlos
+        AnimatedVisibility(ui.inkOther != null && ui.sheet == null, Modifier.align(Alignment.TopCenter), enter = fadeIn(), exit = fadeOut()) {
+            val o = ui.inkOther
+            Row(
+                Modifier.windowInsetsPadding(WindowInsets.statusBars).padding(top = if (ui.controls) 70.dp else 14.dp)
+                    .shadow(6.dp, RoundedCornerShape(18.dp)).clip(RoundedCornerShape(18.dp)).background(p.surface)
+                    .clickable { o?.let { act.useLook(it.second) } }.padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("✎", style = Type.ui, color = p.accent)
+                Text(
+                    "${o?.first ?: 0} ${if ((o?.first ?: 0) == 1) "trazo" else "trazos"} con otra letra · ",
+                    style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(start = 6.dp),
+                )
+                Text("Verlos", style = Type.uiSmall, color = p.accent)
+                Box(Modifier.padding(start = 8.dp).size(22.dp).clip(CircleShape).clickable { ui.inkOther = null }, contentAlignment = Alignment.Center) {
+                    ZIcon("close", p.text2, 12.dp)
+                }
+            }
+        }
 
         // Aviso al llegar al borde de un capítulo en desplazamiento continuo
         AnimatedVisibility(ui.edgeHint != null, Modifier.align(Alignment.BottomCenter), enter = fadeIn(tween(120)), exit = fadeOut(tween(120))) {
@@ -316,6 +326,8 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
         "listen" -> ListenSheet(act) { ui.sheet = null }
         "player" -> PlayerSheet(act) { ui.sheet = null }
         "inks" -> InksSheet(act) { ui.sheet = null }
+        "tools" -> ToolsSheet(ui, act) { ui.sheet = null }
+        "export" -> ExportSheet(act) { ui.sheet = null }
     }
     ui.activeMark?.let { MarkSheet(it, act) { ui.activeMark = null } }
     ui.noteFor?.let { NoteSheet(it, act) { ui.noteFor = null } }
@@ -762,13 +774,89 @@ private fun Card2(content: @Composable () -> Unit) {
     Column(Modifier.padding(top = 14.dp).fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(p.card.copy(alpha = 0.6f)).padding(14.dp)) { content() }
 }
 
+/** Aspecto: letra y luz en la misma hoja, con dos pestañas. */
+@Composable
+private fun AspectTabs(ui: ReaderUi, now: String) {
+    val p = LocalPalette.current
+    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(18.dp)).background(p.card.copy(alpha = 0.6f)).padding(4.dp)) {
+        listOf("type" to "Letra", "luz" to "Luz").forEach { (id, label) ->
+            val on = id == now
+            Box(
+                Modifier.weight(1f).clip(RoundedCornerShape(14.dp)).background(if (on) p.text else Color.Transparent)
+                    .clickable { ui.sheet = id }.padding(vertical = 9.dp),
+                contentAlignment = Alignment.Center,
+            ) { Text(label, style = Type.ui, color = if (on) p.bg else p.text) }
+        }
+    }
+}
+
+/** Herramientas: todo lo que no cabe en los cuatro botones, en cuadritos. */
+@Composable
+private fun ToolsSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    Sheet(onClose) {
+        Caption("Herramientas", accent = true)
+        Spacer(Modifier.height(12.dp))
+        val tile = Modifier.weight(1f)
+        Row(Modifier.fillMaxWidth()) {
+            com.sebas.zerkalo.ui.ToolTile("✎", "Pluma", tile) { onClose(); act.ink(com.sebas.zerkalo.ui.InkTool.PEN) }
+            com.sebas.zerkalo.ui.ToolTile("▌", "Resaltador", tile) { onClose(); act.ink(com.sebas.zerkalo.ui.InkTool.MARKER) }
+            com.sebas.zerkalo.ui.ToolTile("▤", "Nota adhesiva", tile, tint = com.sebas.zerkalo.ui.StickyPaper) {
+                onClose(); ui.say("Mantén presionada una frase y elige «Nota adhesiva»")
+            }
+            com.sebas.zerkalo.ui.ToolTile("⌫", "Borrar", tile) { onClose(); act.ink(com.sebas.zerkalo.ui.InkTool.ERASER) }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+            com.sebas.zerkalo.ui.ToolTile("⇪", "Exportar", tile) { onClose(); act.export() }
+            com.sebas.zerkalo.ui.ToolTile("♪", "Escuchar", tile) { ui.sheet = "listen" }
+            com.sebas.zerkalo.ui.ToolTile("文", "Traducir", tile, active = ui.studyTap) { onClose(); act.toggleStudy() }
+            com.sebas.zerkalo.ui.ToolTile("⧉", "Lado a lado", tile, active = ui.pairOn) { ui.sheet = "pair" }
+        }
+    }
+}
+
+/** Exportar: el libro con mis notas, las páginas rayadas con la pluma y el apunte. */
+@Composable
+private fun ExportSheet(act: ReaderActions, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    Sheet(onClose) {
+        Text("Exportar", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+        Text("Se crea una copia nueva; tu libro en Zerkalo no cambia.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp, bottom = 10.dp))
+        ExportRow("EPUB con mis notas", "Subrayados marcados en el texto y notas adhesivas en su sitio") { onClose(); act.exportEpub() }
+        ExportRow("Páginas rayadas (PDF)", "Cada página que rayaste con la pluma, tal como la dejaste") { onClose(); act.exportInk() }
+        ExportRow("Apunte (.txt)", "Las frases y lo que escribiste en el apunte") { onClose(); act.exportNote() }
+    }
+}
+
+@Composable
+private fun ExportRow(title: String, sub: String, onClick: () -> Unit) {
+    val p = LocalPalette.current
+    Row(
+        Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(16.dp)).background(p.card.copy(alpha = 0.6f)).clickable(onClick = onClick).padding(14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = Type.ui, color = p.text)
+            Text(sub, style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 2.dp))
+        }
+        ZIcon("share", p.text2, 18.dp)
+    }
+}
+
 @Composable
 private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
     val p = LocalPalette.current
     val s = ui.settings
     Sheet(onClose) {
       Column(Modifier.heightIn(max = 640.dp).verticalScroll(rememberScrollState())) {
-        Text("Lectura", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+        AspectTabs(ui, "type")
+        Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text("Solo para este libro", style = Type.ui, color = p.text)
+                Text(if (ui.ownLook) "Letra y márgenes de este libro" else "Los mismos ajustes en todos los libros", style = Type.uiSmall, color = p.text2)
+            }
+            com.sebas.zerkalo.ui.ZSwitch(ui.ownLook) { act.ownLook(it) }
+        }
         Spacer(Modifier.height(12.dp))
         Segmented(listOf("Texto", "Página", "Comodidad"), ui.typeTab, { ui.typeTab = it })
         when (ui.typeTab) {
@@ -1010,7 +1098,7 @@ private fun LightSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
     val s = ui.settings
     val sliderColors = SliderDefaults.colors(thumbColor = p.accent, activeTrackColor = p.accent, inactiveTrackColor = p.line)
     Sheet(onClose) {
-        Text("Luz", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+        AspectTabs(ui, "luz")
         Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
                 Text("Brillo automático", style = Type.ui, color = p.text)
