@@ -13,10 +13,10 @@ import com.sebas.zerkalo.data.ReaderSettings
  * salta demasiado; con más, cuesta encontrar la línea siguiente. Las líneas largas piden más interlineado.
  */
 object Fit {
-    const val MIN_CPL = 52           // menos que esto: se achican los márgenes
+    const val MIN_CPL = 45           // menos que esto: se achican los márgenes (en celular 60 no caben sin pegar el texto al borde)
     const val IDEAL = 60
     const val MAX_REM = 34.0         // ancho máximo del texto (en "rem", crece con la letra): ~66 letras
-    const val MIN_MM = 1.5f          // nunca menos margen que esto (salvo que tú lo pongas)
+    const val MIN_MM = 2.5f          // nunca menos margen que esto (salvo que tú lo pongas)
     const val AUTO_JUSTIFY = 34      // "Automático" justifica desde 34 letras por línea (con guiones no deja huecos)
     private const val SAMPLE = "de la conquista del infinito y lo desconocido"
 

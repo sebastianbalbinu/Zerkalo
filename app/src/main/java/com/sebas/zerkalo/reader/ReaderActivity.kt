@@ -461,7 +461,9 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val i = lastInsets?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
         val ins = ((i?.left ?: 0) + (i?.right ?: 0)).toFloat()
         val side = runCatching { Fit.sideFactor(this, r, w, ins, mmPx, dm.density) }.getOrDefault(1f)
-        val text = w - ins - (r.mmLeft + r.mmRight) * side * mmPx
+        var text = w - ins - (r.mmLeft + r.mmRight) * side * mmPx
+        // Páginas en pantalla ancha y acostada: el motor pone dos columnas, cada una con la mitad
+        if (!r.continuous && !r.scroll && w > dm.heightPixels && w / dm.density >= 600f) text = (text - 32f * dm.density) / 2f
         val cpl = runCatching { Fit.cpl(this, r, text, dm.density) }.getOrDefault(0)
         if (r == ui.settings) ui.cpl = cpl
         return side to cpl
