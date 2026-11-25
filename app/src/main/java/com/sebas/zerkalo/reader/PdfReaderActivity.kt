@@ -358,7 +358,7 @@ class PdfReaderActivity : AppCompatActivity() {
         window.attributes = window.attributes.apply { screenBrightness = screen }
     }
 
-    private fun setLight(r: com.sebas.zerkalo.data.ReaderSettings) {
+    private fun saveLight(r: com.sebas.zerkalo.data.ReaderSettings) {
         light = r
         com.sebas.zerkalo.data.Prefs.setReader(r)
         applyBrightness(r.brightness)
@@ -498,14 +498,14 @@ class PdfReaderActivity : AppCompatActivity() {
                         Text("Brillo automático", style = Type.ui, color = p.text)
                         Text("El del teléfono", style = Type.uiSmall, color = p.text2)
                     }
-                    com.sebas.zerkalo.ui.ZSwitch(light.brightness < 0f) { setLight(light.copy(brightness = if (it) -1f else 0.65f)) }
+                    com.sebas.zerkalo.ui.ZSwitch(light.brightness < 0f) { saveLight(light.copy(brightness = if (it) -1f else 0.65f)) }
                 }
                 if (light.brightness >= 0f) {
                     var b by remember { mutableStateOf(light.brightness) }
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
                         ZIcon("moon", p.text2, 18.dp)
                         com.sebas.zerkalo.ui.ZSlider(
-                            value = b, onChange = { b = it; applyBrightness(it) }, onFinished = { setLight(light.copy(brightness = b)) },
+                            value = b, onChange = { b = it; applyBrightness(it) }, onFinished = { saveLight(light.copy(brightness = b)) },
                             marker = 0.3f, modifier = Modifier.weight(1f).padding(horizontal = 10.dp),
                         )
                         ZIcon("sun", p.text2, 20.dp)
@@ -516,14 +516,14 @@ class PdfReaderActivity : AppCompatActivity() {
                 com.sebas.zerkalo.ui.ZSlider(
                     value = veil, range = 0f..0.85f,
                     onChange = { veil = it; light = light.copy(veil = it); applyBrightness(light.brightness) },
-                    onFinished = { setLight(light.copy(veil = veil)) },
+                    onFinished = { saveLight(light.copy(veil = veil)) },
                 )
                 Text("Oscurece la página sin cambiar el brillo de la pantalla.", style = Type.uiSmall, color = p.text2)
                 var w by remember { mutableStateOf(light.warmth) }
                 LightLabel("Filtro cálido", if (w <= 0f) "apagado" else "${(w * 100).toInt()} %")
                 com.sebas.zerkalo.ui.ZSlider(
                     value = w, onChange = { w = it; light = light.copy(warmth = it); applyNight() },
-                    onFinished = { setLight(light.copy(warmth = w)) },
+                    onFinished = { saveLight(light.copy(warmth = w)) },
                 )
                 Row(Modifier.fillMaxWidth().padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
