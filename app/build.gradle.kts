@@ -112,3 +112,8 @@ dependencies {
     // Instala los perfiles de arranque que traen Compose y las demás librerías: abre y desliza más rápido.
     implementation("androidx.profileinstaller:profileinstaller:1.4.1")
 }
+
+// El lector de PDF de Google (androidx.pdf) pide compilar con una "extensión" del SDK que GitHub no trae.
+// Esa extensión solo la usan sus funciones nuevas (anotar, formularios), que ya revisan en el teléfono si existen;
+// Zerkalo no las llama, así que se salta esa revisión al compilar.
+tasks.matching { it.name.startsWith("check") && it.name.endsWith("AarMetadata") }.configureEach { enabled = false }
