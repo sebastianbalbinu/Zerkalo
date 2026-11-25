@@ -24,6 +24,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.ComposeView
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
@@ -164,6 +167,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private var publication: Publication? = null
     private var navigator: EpubNavigatorFragment? = null
     private val ui = ReaderUi()
+    private val note = com.sebas.zerkalo.ui.NoteState(com.sebas.zerkalo.ui.NoteMode.HIDDEN)
     private val containerId = View.generateViewId()
     private val pairId = View.generateViewId()
     private lateinit var root: FrameLayout
@@ -249,6 +253,18 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             setContent { ReaderOverlay(ui, actions) }
         }
         root.addView(overlay, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // El apunte flotante: aparece como bolita si el libro ya tiene apunte, o al mandar una frase "Al apunte"
+        if (com.sebas.zerkalo.data.Apuntes.flow(book.id).value.isNotBlank()) note.mode = com.sebas.zerkalo.ui.NoteMode.BUBBLE
+        root.addView(ComposeView(this).apply {
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                com.sebas.zerkalo.ui.ZerkaloTheme {
+                    androidx.compose.foundation.layout.Box(androidx.compose.ui.Modifier.fillMaxSize().imePadding()) {
+                        com.sebas.zerkalo.ui.FloatingNote(book.id, book.title, note, bottomSpace = 140.dp)
+                    }
+                }
+            }
+        }, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         setContentView(root)
         // El texto queda siempre dentro de la zona segura, aunque las barras se oculten (sin saltos).
         if (android.os.Build.VERSION.SDK_INT >= 28) {
@@ -1237,6 +1253,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             menu.add(Menu.NONE, 104, 2, "Traducir")
             menu.add(Menu.NONE, 105, 3, "Tarjeta")
             menu.add(Menu.NONE, 103, 4, "Copiar")
+            menu.add(Menu.NONE, 106, 5, "Al apunte")
             return true
         }
         override fun onPrepareActionMode(mode: ActionMode, menu: Menu): Boolean = false
@@ -1259,6 +1276,16 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                     nav.clearSelection()
                     val t = sel.locator.text.highlight?.trim().orEmpty()
                     if (t.isNotEmpty()) ui.cardDraft = CardDraft(t, sel.locator.toJSON().toString(), null)
+                }
+                106 -> lifecycleScope.launch {
+                    val nav = listOfNotNull(navigator, pairNav).firstOrNull { it.currentSelection() != null } ?: return@launch
+                    val sel = nav.currentSelection() ?: return@launch
+                    nav.clearSelection()
+                    val t = sel.locator.text.highlight?.trim().orEmpty()
+                    if (t.isNotEmpty()) {
+                        com.sebas.zerkalo.data.Apuntes.addQuote(book.id, t, ui.chapter.take(40))
+                        if (note.mode != com.sebas.zerkalo.ui.NoteMode.BIG) note.mode = com.sebas.zerkalo.ui.NoteMode.OPEN
+                    }
                 }
                 103 -> lifecycleScope.launch {
                     val t = navigator?.currentSelection()?.locator?.text?.highlight.orEmpty()

@@ -18,6 +18,7 @@ class ZerkaloApp : Application(), ImageLoaderFactory {
         super.onCreate()
         Prefs.init(this)
         Library.init(this)
+        com.sebas.zerkalo.data.Apuntes.init(this)
         runCatching { Library.dedupe() }.onSuccess { if (it > 0) android.util.Log.i("Zerkalo", "Repetidos quitados: $it") }
         com.sebas.zerkalo.data.Cards.init(this)
         com.sebas.zerkalo.data.Stamps.init(this)
