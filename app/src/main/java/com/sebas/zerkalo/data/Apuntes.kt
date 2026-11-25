@@ -22,10 +22,26 @@ object Apuntes {
     private val flows = HashMap<String, MutableStateFlow<String>>()
     private val saves = HashMap<String, Job>()
 
+    private lateinit var sp: android.content.SharedPreferences
+
     fun init(ctx: Context) {
         if (::dir.isInitialized) return
         dir = File(ctx.filesDir, "apuntes").apply { mkdirs() }
+        sp = ctx.getSharedPreferences("zerkalo", Context.MODE_PRIVATE)
     }
+
+    /** La bolita 記 escondida en el borde (pestañita). Vale para todos los libros, EPUB y PDF. */
+    var hidden: Boolean
+        get() = ::sp.isInitialized && sp.getBoolean("apunteOculto", false)
+        set(v) { if (::sp.isInitialized) sp.edit().putBoolean("apunteOculto", v).apply() }
+    /** En qué borde quedó: 0 izquierda, 1 derecha. */
+    var side: Int
+        get() = if (::sp.isInitialized) sp.getInt("apunteLado", 1) else 1
+        set(v) { if (::sp.isInitialized) sp.edit().putInt("apunteLado", v).apply() }
+    /** Altura de la bolita o la pestañita, como fracción de la pantalla (-1 = abajo, donde estaba siempre). */
+    var yFrac: Float
+        get() = if (::sp.isInitialized) sp.getFloat("apunteY", -1f) else -1f
+        set(v) { if (::sp.isInitialized) sp.edit().putFloat("apunteY", v).apply() }
 
     private fun file(bookId: String) = File(dir, "$bookId.txt")
 

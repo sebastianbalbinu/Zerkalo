@@ -59,19 +59,41 @@ import androidx.compose.ui.unit.sp
 import com.sebas.zerkalo.data.Apuntes
 import kotlin.math.roundToInt
 
-/** Cómo está el apunte: escondido, como bolita, como ventanita o grande para escribir con calma. */
-enum class NoteMode { HIDDEN, BUBBLE, OPEN, BIG }
+/** Cómo está el apunte: escondido del todo, como pestañita en el borde, bolita, ventanita o grande. */
+enum class NoteMode { HIDDEN, TAB, BUBBLE, OPEN, BIG }
 
 /** Estado del apunte flotante. Lo guarda quien lo muestra (lector de PDF o de EPUB). */
 class NoteState(initial: NoteMode) {
     var mode by mutableStateOf(initial)
-    /** Dónde está la ventanita o la bolita (esquina de arriba a la izquierda, en px). Sin fijar = abajo a la derecha. */
+    /** Dónde está la ventanita o la bolita (esquina de arriba a la izquierda, en px). Sin fijar = donde se dejó la última vez. */
     var pos by mutableStateOf(Offset.Unspecified)
+
+    val isOpen get() = mode == NoteMode.OPEN || mode == NoteMode.BIG
+    /** Encoger: vuelve a bolita, o a pestañita si la persona la tiene escondida. */
+    fun minimize() { mode = if (Apuntes.hidden) NoteMode.TAB else NoteMode.BUBBLE }
+    fun open() { if (!isOpen) mode = NoteMode.OPEN }
+    fun toggle() { if (isOpen) minimize() else mode = NoteMode.OPEN }
+
+    companion object {
+        /** Igual en EPUB y PDF: la bolita, o la pestañita si se escondió. */
+        fun start() = NoteState(if (Apuntes.hidden) NoteMode.TAB else NoteMode.BUBBLE)
+    }
+}
+
+/** El botón 記 de los controles: abre o cierra el apunte aunque esté vacío. */
+@Composable
+fun NoteButton(state: NoteState, size: androidx.compose.ui.unit.Dp = 44.dp) {
+    val p = LocalPalette.current
+    Box(
+        Modifier.size(size).shadow(6.dp, CircleShape).clip(CircleShape).background(p.accent).clickable { state.toggle() },
+        contentAlignment = Alignment.Center,
+    ) { androidx.compose.material3.Text("記", style = Type.title.copy(fontSize = (size.value * 0.42f).sp), color = Color.White) }
 }
 
 /**
  * El apunte flotante: una ventanita de texto que no tapa toda la pantalla, para ir pegando frases
  * del libro y escribiendo al lado mientras se lee. Se arrastra a donde estorbe menos y se encoge a una bolita 記.
+ * Si la bolita se arrastra contra un borde, queda escondida como una pestañita bermellón (como un shiori).
  * Ocupa toda la pantalla solo para poder moverse: lo que no es la ventanita deja pasar los toques al libro.
  */
 @Composable
@@ -89,24 +111,74 @@ fun FloatingNote(bookId: String, title: String, state: NoteState, modifier: Modi
     BoxWithConstraints(modifier.fillMaxSize()) {
         val maxW = with(density) { maxWidth.toPx() }
         val maxH = with(density) { maxHeight.toPx() }
+        val margin = with(density) { 12.dp.toPx() }
+        val savedY = Apuntes.yFrac.takeIf { it >= 0f }?.let { it * maxH }
+
+        // ---------- Pestañita en el borde: la bolita escondida ----------
+        if (state.mode == NoteMode.TAB) {
+            val tabW = with(density) { 15.dp.toPx() }
+            val tabH = with(density) { 68.dp.toPx() }
+            val left = Apuntes.side == 0
+            val y0 = if (state.pos != Offset.Unspecified) state.pos.y else savedY ?: (maxH - tabH - with(density) { bottomSpace.toPx() })
+            val y = y0.coerceIn(margin, (maxH - tabH - margin).coerceAtLeast(margin))
+            val x = if (left) 0f else maxW - tabW
+            val bubblePx = with(density) { 56.dp.toPx() }
+            fun showBubble() {
+                Apuntes.hidden = false
+                state.pos = Offset(if (left) margin else maxW - bubblePx - margin, y)
+                state.mode = NoteMode.BUBBLE
+            }
+            var pulled by remember { mutableStateOf(0f) }
+            Box(
+                Modifier.offset { IntOffset(x.roundToInt(), y.roundToInt()) }.size(15.dp, 68.dp)
+                    .shadow(8.dp, if (left) RoundedCornerShape(topEnd = 10.dp, bottomEnd = 10.dp) else RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp))
+                    .clip(if (left) RoundedCornerShape(topEnd = 10.dp, bottomEnd = 10.dp) else RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp))
+                    .background(p.accent)
+                    .clickable { showBubble() }
+                    .pointerInput(left) {
+                        detectDragGestures(onDragEnd = { if (kotlin.math.abs(pulled) > 30f) showBubble(); pulled = 0f }) { change, amount ->
+                            change.consume()
+                            pulled += if (left) amount.x else -amount.x
+                            val ny = ((if (state.pos != Offset.Unspecified) state.pos.y else y) + amount.y).coerceIn(margin, maxH - tabH - margin)
+                            state.pos = Offset(x, ny)
+                            Apuntes.yFrac = ny / maxH
+                        }
+                    },
+            )
+            return@BoxWithConstraints
+        }
+
         val big = state.mode == NoteMode.BIG
         val bubble = state.mode == NoteMode.BUBBLE
         val w by animateDpAsState(if (bubble) 56.dp else if (big) maxWidth - 24.dp else minOf(280.dp, maxWidth * 0.74f), label = "w")
         val h by animateDpAsState(if (bubble) 56.dp else if (big) maxHeight * 0.62f else minOf(320.dp, maxHeight * 0.48f), label = "h")
         val wPx = with(density) { w.toPx() }
         val hPx = with(density) { h.toPx() }
-        val margin = with(density) { 12.dp.toPx() }
-        val start = if (state.pos == Offset.Unspecified) Offset(maxW - wPx - margin, maxH - hPx - with(density) { bottomSpace.toPx() }) else state.pos
+        // La bolita puede llegar hasta el borde (ahí se esconde); la ventanita queda con margen.
+        val mx = if (bubble) 0f else margin
+        val defX = if (Apuntes.side == 0) margin else maxW - wPx - margin
+        val start = if (state.pos == Offset.Unspecified) Offset(defX, savedY ?: (maxH - hPx - with(density) { bottomSpace.toPx() })) else state.pos
         // Siempre dentro de la pantalla (también cuando sale el teclado y el espacio se achica)
-        val x = start.x.coerceIn(margin, (maxW - wPx - margin).coerceAtLeast(margin))
+        val x = start.x.coerceIn(mx, (maxW - wPx - mx).coerceAtLeast(mx))
         val y = start.y.coerceIn(margin, (maxH - hPx - margin).coerceAtLeast(margin))
-        val drag = Modifier.pointerInput(bookId, wPx, hPx, maxW, maxH) {
-            detectDragGestures { change, amount ->
+        val edge = with(density) { 6.dp.toPx() }
+        val drag = Modifier.pointerInput(bookId, wPx, hPx, maxW, maxH, bubble) {
+            detectDragGestures(
+                onDragEnd = {
+                    val cur = state.pos
+                    if (cur != Offset.Unspecified) Apuntes.yFrac = cur.y / maxH
+                    // Bolita contra el borde: se esconde como pestañita de ese lado
+                    if (bubble && cur != Offset.Unspecified) {
+                        if (cur.x <= edge) { Apuntes.side = 0; Apuntes.hidden = true; state.mode = NoteMode.TAB }
+                        else if (cur.x >= maxW - wPx - edge) { Apuntes.side = 1; Apuntes.hidden = true; state.mode = NoteMode.TAB }
+                    }
+                },
+            ) { change, amount ->
                 change.consume()
-                val cur = if (state.pos == Offset.Unspecified) Offset(x, y) else state.pos
+                val c = if (state.pos == Offset.Unspecified) Offset(x, y) else state.pos
                 state.pos = Offset(
-                    (cur.x + amount.x).coerceIn(margin, (maxW - wPx - margin).coerceAtLeast(margin)),
-                    (cur.y + amount.y).coerceIn(margin, (maxH - hPx - margin).coerceAtLeast(margin)),
+                    (c.x + amount.x).coerceIn(mx, (maxW - wPx - mx).coerceAtLeast(mx)),
+                    (c.y + amount.y).coerceIn(margin, (maxH - hPx - margin).coerceAtLeast(margin)),
                 )
             }
         }
@@ -140,7 +212,7 @@ fun FloatingNote(bookId: String, title: String, state: NoteState, modifier: Modi
                     " · $title", style = Type.uiSmall.copy(fontSize = 12.sp), color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
-                HeadButton("minus", "Encoger") { state.mode = NoteMode.BUBBLE }
+                HeadButton("minus", "Encoger") { state.minimize() }
                 HeadButton("full", if (big) "Achicar" else "Agrandar") { state.mode = if (big) NoteMode.OPEN else NoteMode.BIG }
             }
             // El texto: se escribe directo, como en un bloc de notas
