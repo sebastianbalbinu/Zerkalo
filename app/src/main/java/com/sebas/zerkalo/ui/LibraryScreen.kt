@@ -82,9 +82,8 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
             exact + near
         }
     }
-    var mode by rememberSaveable { mutableStateOf(Prefs.libraryMode) }
+    // Moon Reader: todos los libros juntos, el último que abriste siempre primero (el orden ya viene de "sorted").
     var estado by rememberSaveable { mutableStateOf(0) }   // 0 todos, 1 leyendo, 2 por leer, 3 leídos, 4 favoritos
-    var panel by rememberSaveable { mutableStateOf(false) } // ordenar por género, autor, idioma o etiqueta
     var quick by remember { mutableStateOf<Book?>(null) }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     LaunchedEffect(Unit) { com.sebas.zerkalo.data.Genres.backfill((ctx.applicationContext as com.sebas.zerkalo.ZerkaloApp).readium) }
@@ -93,7 +92,8 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
     val done = list.filter { it.finished }
     val favorites = list.filter { it.favorite }
     if (estado == 4 && favorites.isEmpty()) estado = 0
-    val current = if (query.isBlank() && tagSel == null) reading.firstOrNull() else null
+    // La barra de seguir: el último libro abierto que todavía no terminas
+    val current = if (query.isBlank() && tagSel == null) sorted.firstOrNull { it.lastOpened > 0 && !it.finished } else null
     val shown = when (estado) { 1 -> reading; 2 -> unread; 3 -> done; 4 -> favorites; else -> list }
     val onLong: (Book) -> Unit = { quick = it }
     // Tres libros por estante, del mismo ancho, usando toda la pantalla
@@ -108,57 +108,33 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
             contentPadding = PaddingValues(bottom = 150.dp),
         ) {
             item(key = "head") {
-                Box {
-                    Column(Modifier.padding(top = top + 18.dp)) {
-                        Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.Bottom) {
-                            Column(Modifier.weight(1f)) {
-                                Caption(SimpleDateFormat("EEEE d 'de' MMMM", Locale("es")).format(Date()))
-                                Text("Biblioteca", style = Type.display, color = p.text, modifier = Modifier.padding(top = 4.dp))
-                            }
-                            CircleButton("plus", a.importEpub, desc = "Traer libros")
-                            Spacer(Modifier.width(10.dp))
-                            CircleButton("search", { searching = !searching; if (!searching) query = "" })
-                            Spacer(Modifier.width(10.dp))
-                            CircleButton("gear", { a.open(Screen.Settings) })
+                Column(Modifier.padding(top = top + 18.dp)) {
+                    Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp), verticalAlignment = Alignment.Bottom) {
+                        Column(Modifier.weight(1f)) {
+                            Caption(SimpleDateFormat("EEEE d 'de' MMMM", Locale("es")).format(Date()))
+                            Text("Biblioteca", style = Type.display, color = p.text, maxLines = 1, softWrap = false, modifier = Modifier.padding(top = 4.dp))
                         }
-                        current?.let { HeroBook(it) }
+                        CircleButton("plus", a.importEpub, desc = "Traer libros")
+                        Spacer(Modifier.width(10.dp))
+                        CircleButton("search", { searching = !searching; if (!searching) query = "" })
+                        Spacer(Modifier.width(10.dp))
+                        CircleButton("gear", { a.open(Screen.Settings) })
                     }
+                    current?.let { ContinueBar(it) }
                 }
             }
             if (searching) item(key = "search") { SearchField(query, { query = it }, "Título o autor", Modifier.padding(start = 20.dp, end = 20.dp, top = 16.dp)) }
             if (books.isNotEmpty()) item(key = "filters") {
-                Row(Modifier.fillMaxWidth().padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
-                    androidx.compose.foundation.lazy.LazyRow(
-                        Modifier.weight(1f),
-                        contentPadding = PaddingValues(start = 20.dp, end = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        item { SmallPill("Todos ${list.size}", estado == 0) { estado = 0 } }
-                        if (reading.isNotEmpty()) item { SmallPill("Leyendo ${reading.size}", estado == 1) { estado = if (estado == 1) 0 else 1 } }
-                        if (unread.isNotEmpty()) item { SmallPill("Por leer ${unread.size}", estado == 2) { estado = if (estado == 2) 0 else 2 } }
-                        if (done.isNotEmpty()) item { SmallPill("Leídos ${done.size}", estado == 3) { estado = if (estado == 3) 0 else 3 } }
-                        if (favorites.isNotEmpty()) item { SmallPill("Favoritos ${favorites.size}", estado == 4) { estado = if (estado == 4) 0 else 4 } }
-                    }
-                    CircleButton("sort", { panel = !panel }, size = 38.dp, desc = "Ordenar")
-                    Spacer(Modifier.width(20.dp))
-                }
-            }
-            if (panel && books.isNotEmpty()) item(key = "panel") {
-                Column(Modifier.padding(top = 12.dp)) {
-                    Caption("Agrupar por", modifier = Modifier.padding(horizontal = 20.dp))
-                    androidx.compose.foundation.lazy.LazyRow(
-                        contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.padding(top = 8.dp),
-                    ) { items(LIB_MODES.size) { i -> SmallPill(LIB_MODES[i], mode == i) { mode = i; Prefs.libraryMode = i } } }
-                    if (allTags.isNotEmpty()) {
-                        Caption("Etiquetas", modifier = Modifier.padding(start = 20.dp, end = 20.dp, top = 14.dp))
-                        androidx.compose.foundation.lazy.LazyRow(
-                            contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            modifier = Modifier.padding(top = 8.dp),
-                        ) {
-                            item { SmallPill("Todas", tagSel == null) { tagSel = null } }
-                            items(allTags.size) { i -> val t = allTags[i]; SmallPill("#$t", tagSel == t) { tagSel = if (tagSel == t) null else t } }
-                        }
-                    }
+                androidx.compose.foundation.lazy.LazyRow(
+                    Modifier.fillMaxWidth().padding(top = 16.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    item { SmallPill("Todos ${list.size}", estado == 0) { estado = 0 } }
+                    if (reading.isNotEmpty()) item { SmallPill("Leyendo ${reading.size}", estado == 1) { estado = if (estado == 1) 0 else 1 } }
+                    if (unread.isNotEmpty()) item { SmallPill("Por leer ${unread.size}", estado == 2) { estado = if (estado == 2) 0 else 2 } }
+                    if (done.isNotEmpty()) item { SmallPill("Leídos ${done.size}", estado == 3) { estado = if (estado == 3) 0 else 3 } }
+                    if (favorites.isNotEmpty()) item { SmallPill("Favoritos ${favorites.size}", estado == 4) { estado = if (estado == 4) 0 else 4 } }
+                    items(allTags.size) { i -> val t = allTags[i]; SmallPill("#$t", tagSel == t) { tagSel = if (tagSel == t) null else t } }
                 }
             }
             item(key = "inbox") { LibraryInbox() }
@@ -166,26 +142,9 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
             if (books.isEmpty()) {
                 item(key = "empty") { EmptyLibrary() }
             } else {
-                // Las secciones: por estado (si se ven todos) o por género, autor o idioma
-                val sections: List<Pair<String, List<Book>>> = when {
-                    mode in 1..3 -> shelvesFor(mode, shown)
-                    estado == 0 -> listOf(
-                        "Leyendo" to (if (current != null) reading.drop(1) else reading),
-                        "Por leer" to unread,
-                        "Leídos" to done,
-                    ).filter { it.second.isNotEmpty() }
-                    else -> listOf("" to shown)
-                }
-                sections.forEach { (title, group) ->
-                    if (title.isNotEmpty()) item(key = "t-$mode-$estado-$title") {
-                        SectionTitle(title, count(group.size), modifier = Modifier.padding(top = 28.dp))
-                    }
-                    val rows = group.chunked(3)
-                    rows.forEachIndexed { r, row ->
-                        item(key = "r-$mode-$estado-$title-$r", contentType = "estante") {
-                            ShelfGrid(row, coverW, onLong)
-                        }
-                    }
+                // Una sola cuadrícula: tres libros por estante, en el orden en que los abriste
+                shown.chunked(3).forEachIndexed { r, row ->
+                    item(key = "r-$estado-$tagSel-$r-${row.first().id}", contentType = "estante") { ShelfGrid(row, coverW, onLong) }
                 }
                 if (query.isBlank() && tagSel == null && estado in listOf(0, 2)) item(key = "add") {
                     Row(
@@ -206,28 +165,6 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
         ProgressiveEdge(haze, top = false, height = 150.dp, modifier = Modifier.align(Alignment.BottomCenter))
     }
     quick?.let { BookQuickSheet(it) { quick = null } }
-}
-
-private val LIB_MODES = listOf("Estado", "Géneros", "Autores", "Idiomas")
-
-/**
- * Estantes de la biblioteca según el modo: por género, por autor o por idioma.
- * Los autores con un solo libro van juntos en "Más autores", para que cada estante se vea lleno.
- */
-private fun shelvesFor(mode: Int, books: List<Book>): List<Pair<String, List<Book>>> = when (mode) {
-    1 -> books.groupBy { b -> b.genre.takeIf { g -> com.sebas.zerkalo.data.Catalogs.TOPICS.any { it.id == g } } ?: "-" }
-        .entries.sortedWith(compareBy<Map.Entry<String, List<Book>>> { it.key == "-" }.thenByDescending { it.value.size })
-        .map { com.sebas.zerkalo.data.Genres.name(it.key) to it.value }
-    2 -> {
-        fun who(b: Book) = b.author.split(',', ';', '&').firstOrNull()?.trim().orEmpty().ifBlank { "Autor desconocido" }
-        val byAuthor = books.groupBy { who(it) }
-        val big = byAuthor.filter { it.value.size >= 2 }.entries.sortedByDescending { it.value.size }.map { it.key to it.value }
-        val rest = byAuthor.filter { it.value.size < 2 }.values.flatten().sortedBy { who(it) }
-        big + if (rest.isNotEmpty()) listOf("Más autores" to rest) else emptyList()
-    }
-    else -> books.groupBy { it.lang.take(2) }.entries.sortedByDescending { it.value.size }.map { (l, g) ->
-        (com.sebas.zerkalo.data.Catalogs.LANGS.firstOrNull { it.id == l }?.name ?: if (l.isBlank()) "Sin idioma" else l.uppercase()) to g
-    }
 }
 
 private fun count(n: Int) = if (n == 1) "1 libro" else "$n libros"
@@ -265,35 +202,34 @@ private fun EmptyLibrary() {
             Text("Tu estante está esperando", style = Type.title, color = p.text, textAlign = TextAlign.Center)
             Gap(8)
             Text(
-                "Trae tus propios EPUB o busca en el Tansu entre las bibliotecas libres del mundo.",
+                "Trae tus propios EPUB y PDF, o busca en el Tansu entre las bibliotecas libres del mundo.",
                 style = Type.body, color = p.text2, textAlign = TextAlign.Center,
             )
             Gap(20)
-            PillButton("Importar EPUB", a.importEpub, icon = "import", modifier = Modifier.fillMaxWidth())
+            PillButton("Importar EPUB o PDF", a.importEpub, icon = "import", modifier = Modifier.fillMaxWidth())
             Gap(10)
             PillButton("Abrir el Tansu", { a.goTab(1) }, ghost = true, modifier = Modifier.fillMaxWidth())
         }
     }
 }
 
-/** El libro que se está leyendo, en grande: portada, avance y el botón para seguir. */
+/** Barra delgada para volver al último libro: portada pequeña, título, avance y "Seguir". */
 @Composable
-private fun HeroBook(b: Book) {
+private fun ContinueBar(b: Book) {
     val p = LocalPalette.current
     val a = LocalActions.current
     val pct = (b.progress * 100).toInt()
-    Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 22.dp, bottom = 4.dp), verticalAlignment = Alignment.Bottom) {
-        BookCover(b, 132.dp, 198.dp, Modifier.clickable { a.open(Screen.BookDetail(b.id)) }, ribbon = true, elevation = 14.dp)
-        Spacer(Modifier.width(18.dp))
-        Column(Modifier.weight(1f)) {
-            Caption("Sigues en", accent = true)
-            Text(b.title, style = Type.title.copy(fontSize = 22.sp, lineHeight = 27.sp), color = p.text, maxLines = 3, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp))
-            Text(b.author, style = Type.uiSmall, color = p.text2, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
-            ProgressLine(b.progress.toFloat(), Modifier.fillMaxWidth().padding(top = 14.dp))
-            Text("$pct %", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp))
-            Gap(12)
-            PillButton("Seguir leyendo", { a.read(b) }, modifier = Modifier.fillMaxWidth())
+    Row(
+        Modifier.fillMaxWidth().padding(start = 20.dp, end = 20.dp, top = 18.dp).clip(RoundedCornerShape(18.dp))
+            .background(p.bg.copy(alpha = 0.82f)).clickable { a.read(b) }.padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        BookCover(b, 40.dp, 60.dp, elevation = 4.dp)
+        Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
+            Text(b.title, style = Type.title.copy(fontSize = 16.sp, lineHeight = 20.sp), color = p.text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(if (pct > 0) "$pct % · donde lo dejaste" else "Donde lo dejaste", style = Type.uiSmall, color = p.text2, maxLines = 1, modifier = Modifier.padding(top = 3.dp))
         }
+        PillButton("Seguir", { a.read(b) })
     }
 }
 
@@ -316,6 +252,9 @@ private fun ShelfGrid(row: List<Book>, w: androidx.compose.ui.unit.Dp, onLong: (
                         },
                         ribbon = b.reading,
                     )
+                    if (b.isPdf) Box(
+                        Modifier.align(Alignment.TopStart).padding(6.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xCC2E231D)).padding(horizontal = 5.dp, vertical = 1.dp),
+                    ) { Text("PDF", style = Type.uiSmall.copy(fontSize = 9.sp), color = Color(0xFFF0E6D4)) }
                     // Cuánto va, como una rayita bermellón sobre la portada
                     if (b.reading) Box(
                         Modifier.align(Alignment.BottomCenter).padding(start = 8.dp, end = 8.dp, bottom = 7.dp).fillMaxWidth()
