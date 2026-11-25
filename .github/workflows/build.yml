@@ -99,6 +99,10 @@ jobs:
       fail-fast: false
       matrix:
         api: [34, 35, 36]
+        device: [phone]
+        include:
+          - api: 35
+            device: tablet
     steps:
       - uses: actions/checkout@v4
 
@@ -112,10 +116,12 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
-      - name: Probar en emulador Android ${{ matrix.api }}
+      - name: Probar en emulador Android ${{ matrix.api }} (${{ matrix.device }})
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api }}
+          profile: ${{ matrix.device == 'tablet' && 'pixel_tablet' || '' }}
+          avd-name: zk-${{ matrix.device }}
           arch: x86_64
           target: google_apis
           ram-size: 4096M
@@ -129,7 +135,7 @@ jobs:
       - name: Renombrar capturas
         if: always()
         run: |
-          for f in shot1.png shot2.png shot3.png shot4.png shot5.png shot6.png shot7.png shot8.png shot9.png logcat.txt metricas.txt; do [ -f "$f" ] && mv "$f" "api${{ matrix.api }}-$f"; done; ls
+          for f in shot1.png shot2.png shot3.png shot4.png shot5.png shot6.png shot7.png shot8.png shot9.png logcat.txt metricas.txt; do [ -f "$f" ] && mv "$f" "api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-$f"; done; ls
 
       - name: Publicar capturas de la prueba
         if: always()
@@ -141,17 +147,17 @@ jobs:
           name: Prueba ${{ github.run_number }}
           prerelease: true
           files: |
-            api${{ matrix.api }}-shot1.png
-            api${{ matrix.api }}-shot2.png
-            api${{ matrix.api }}-shot3.png
-            api${{ matrix.api }}-shot4.png
-            api${{ matrix.api }}-shot5.png
-            api${{ matrix.api }}-shot6.png
-            api${{ matrix.api }}-shot7.png
-            api${{ matrix.api }}-shot8.png
-            api${{ matrix.api }}-shot9.png
-            api${{ matrix.api }}-logcat.txt
-            api${{ matrix.api }}-metricas.txt
+            api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot1.png
+            api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot2.png
+            api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot3.png
+            api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot4.png
+            api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot5.png
+            api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot6.png
+            api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot7.png
+            api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot8.png
+            api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot9.png
+            api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-logcat.txt
+            api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-metricas.txt
 
   publicar:
     needs: probar

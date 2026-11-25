@@ -100,7 +100,9 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
     val onLong: (Book) -> Unit = { quick = it }
     // Tres libros por estante, del mismo ancho, usando toda la pantalla
     val screenW = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
-    val coverW = ((screenW - 40.dp - 28.dp) / 3).coerceIn(84.dp, 150.dp)
+    // En tablet (o celular acostado) caben más por estante: tapas de unos 120–150 dp
+    val perRow = ((screenW - 40.dp + 14.dp) / (130.dp + 14.dp)).toInt().coerceIn(3, 8)
+    val coverW = ((screenW - 40.dp - 14.dp * (perRow - 1)) / perRow).coerceIn(84.dp, 150.dp)
 
     LaunchedEffect(Unit) { onReady() }
 
@@ -146,8 +148,8 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
                 item(key = "empty") { EmptyLibrary() }
             } else {
                 // Una sola cuadrícula: tres libros por estante, en el orden en que los abriste
-                shown.chunked(3).forEachIndexed { r, row ->
-                    item(key = "r-$estado-$tagSel-$r-${row.first().id}", contentType = "estante") { ShelfGrid(row, coverW, onLong) }
+                shown.chunked(perRow).forEachIndexed { r, row ->
+                    item(key = "r-$estado-$tagSel-$perRow-$r-${row.first().id}", contentType = "estante") { ShelfGrid(row, coverW, onLong) }
                 }
                 if (query.isBlank() && tagSel == null && estado in listOf(0, 2)) item(key = "add") {
                     Row(

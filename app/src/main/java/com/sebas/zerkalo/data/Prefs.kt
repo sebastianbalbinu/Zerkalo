@@ -45,7 +45,11 @@ data class ReaderSettings(
     val respectCamera: Boolean = true, // el margen de arriba empieza debajo de la cámara (si no, desde el borde)
     val customInkLight: Int = 0xFF3A3350.toInt(), // tinta propia para papeles claros (Crema, Sepia)
     val continuous: Boolean = false,   // desplazamiento continuo: todo el libro seguido, como en Books
+    val align: Int = 2,          // alineación: 0 izquierda, 1 justificado siempre, 2 automático (justifica si la línea es larga)
 )
+
+/** Cambia la alineación (y el viejo "justificar", que se sigue guardando para los libros y los trazos de antes). */
+fun ReaderSettings.withAlign(a: Int) = copy(align = a, justify = a != 0)
 
 data class OpdsCatalog(val name: String, val url: String)
 
@@ -65,7 +69,7 @@ data class InkColor(val name: String, val argb: Int) {
  */
 fun ReaderSettings.look(): String = listOf(
     font, size, lineHeight, margin, vMargin, spacing, paragraph, justify, layout, dyslexia, fullscreen, mmLeft, mmRight, mmTop, mmBottom,
-).joinToString("~")
+).joinToString("~") + if (align == 1) "~j" else "" // "justificado siempre" solo se anota si se eligió (así los trazos de antes no cambian)
 
 /** Los mismos ajustes, pero con la letra y los márgenes de [look]. */
 fun ReaderSettings.withLook(look: String): ReaderSettings {
@@ -76,7 +80,8 @@ fun ReaderSettings.withLook(look: String): ReaderSettings {
             font = v[0].toInt(), size = v[1].toInt(), lineHeight = v[2].toFloat(), margin = v[3].toInt(), vMargin = v[4].toInt(),
             spacing = v[5].toInt(), paragraph = v[6].toInt(), justify = v[7].toBoolean(), layout = v[8].toInt(), dyslexia = v[9].toBoolean(),
             fullscreen = v[10].toBoolean(), mmLeft = v[11].toFloat(), mmRight = v[12].toFloat(), mmTop = v[13].toFloat(), mmBottom = v[14].toFloat(),
-        )
+            align = if (v.getOrNull(15) == "j") 1 else if (v[7].toBoolean()) 2 else 0,
+        ).let { if (it.layout == 2) it.copy(layout = 1) else it }
     }.getOrDefault(this)
 }
 
@@ -99,11 +104,12 @@ object Prefs {
             breaks = sp.getBoolean("rBreaks", false), dyslexia = sp.getBoolean("rDys", false),
             fullscreen = sp.getBoolean("rFull", false), vMargin = sp.getInt("rVMargin", 1),
             autoSpeed = sp.getFloat("rAutoSpeed", 30f), autoPage = sp.getFloat("rAutoPage", 40f),
-            layout = sp.getInt("rLayout", 1), markStyle = sp.getInt("rMarkStyle", 0),
+            layout = sp.getInt("rLayout", 1).let { if (it == 2) 1 else it }, markStyle = sp.getInt("rMarkStyle", 0),
             veil = sp.getFloat("rVeil", 0f), info = sp.getBoolean("rInfo", true),
             mmLeft = sp.getFloat("rMmL", 4f), mmRight = sp.getFloat("rMmR", 4f), mmTop = sp.getFloat("rMmT", 1.5f), mmBottom = sp.getFloat("rMmB", 2f),
             respectCamera = sp.getBoolean("rCam", true),
             customInkLight = sp.getInt("rInkL", 0xFF3A3350.toInt()), continuous = sp.getBoolean("rCont", false),
+            align = sp.getInt("rAlign", if (sp.getBoolean("rJustify", true)) 2 else 0),
         ).let { r ->
             // "Desplazamiento" se unió a "Continuo": quien lo usaba pasa a Continuo
             if (r.scroll && !r.continuous) r.copy(continuous = true) else r
@@ -146,7 +152,7 @@ object Prefs {
             .putFloat("rAutoSpeed", r.autoSpeed).putFloat("rAutoPage", r.autoPage)
             .putInt("rLayout", r.layout).putInt("rMarkStyle", r.markStyle).putFloat("rVeil", r.veil).putBoolean("rInfo", r.info)
             .putFloat("rMmL", r.mmLeft).putFloat("rMmR", r.mmRight).putFloat("rMmT", r.mmTop).putFloat("rMmB", r.mmBottom).putBoolean("rCam", r.respectCamera)
-            .putInt("rInkL", r.customInkLight).putBoolean("rCont", r.continuous).apply()
+            .putInt("rInkL", r.customInkLight).putBoolean("rCont", r.continuous).putInt("rAlign", r.align).apply()
     }
 
     fun setCatalogs(list: List<OpdsCatalog>) {

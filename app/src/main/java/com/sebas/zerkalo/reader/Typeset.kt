@@ -23,10 +23,11 @@ data class PagePad(val top: Float = 0f, val bottom: Float = 0f, val paper: Int =
 
 object Typeset {
     fun script(r: ReaderSettings, lang: String, pad: PagePad = PagePad(), nonce: Long = 0): String {
-        val justify = r.justify && !r.dyslexia
+        val align = Fit.align(r)
+        val justify = align != 0
         val c = pad.paper
         val rgb = "${(c shr 16) and 255},${(c shr 8) and 255},${c and 255}"
-        val opts = """{"mode":${r.layout},"justify":$justify,"lang":"${lang.replace("\"", "")}","scroll":${r.scroll},""" +
+        val opts = """{"mode":${r.layout},"justify":$justify,"align":$align,"minJ":${Fit.AUTO_JUSTIFY},"lang":"${lang.replace("\"", "")}","scroll":${r.scroll},""" +
             """"size":${r.size},"padTop":${pad.top},"padBottom":${pad.bottom},"padLeft":${pad.left},"padRight":${pad.right},"paper":"$rgb","n":$nonce}"""
         return JS.replace("__OPTS__", opts)
     }
@@ -182,12 +183,23 @@ window.__zkRun = function(){
       set(e, 'text-align-last', 'auto'); set(e, 'hyphens', 'manual'); set(e, '-webkit-hyphens', 'manual');
       continue;
     }
-    if (cs.textAlign === 'justify' || cs.textAlignLast === 'justify') {
-      var narrow = (O.mode === 0 || O.mode === 1) && e.clientWidth > 0 && (perLine(e, cs) < 42 || O.size >= 183);
-      if (!O.justify || narrow) {
+    var ta = cs.textAlign;
+    // Justificado (siempre): los párrafos de texto se justifican con guiones en cualquier modo;
+    // los títulos y lo centrado o a la derecha se respetan.
+    if (O.align === 1) {
+      var textBlock = /^(P|LI|BLOCKQUOTE|DD)$/.test(e.tagName) || (e.tagName === 'DIV' && !e.querySelector('p,div,li,h1,h2,h3,h4,h5,h6,table'));
+      if (textBlock && !e.closest('h1,h2,h3,h4,h5,h6') && (ta === 'justify' || ta === 'start' || ta === 'left')) {
+        set(e, 'text-align', 'justify');
+        if (O.lang) { set(e, 'hyphens', 'auto'); set(e, '-webkit-hyphens', 'auto'); }
+      }
+      continue;
+    }
+    if (ta === 'justify' || cs.textAlignLast === 'justify') {
+      // Automático: justifica si caben las letras suficientes; si no, a la izquierda con guiones
+      var narrow = O.align === 2 && (O.mode === 0 || O.mode === 1) && e.clientWidth > 0 && perLine(e, cs) < O.minJ;
+      if (O.align === 0 || narrow) {
         set(e, 'text-align', 'left'); set(e, 'text-align-last', 'auto');
-        // Letra grande: a la izquierda pero con guiones, así el borde derecho no queda tan desparejo
-        var hy = narrow && O.justify && O.size >= 150 && O.lang ? 'auto' : 'manual';
+        var hy = narrow && O.lang ? 'auto' : 'manual';
         set(e, 'hyphens', hy); set(e, '-webkit-hyphens', hy);
       }
     }

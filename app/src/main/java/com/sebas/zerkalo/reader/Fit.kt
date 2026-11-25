@@ -1,0 +1,80 @@
+package com.sebas.zerkalo.reader
+
+import android.content.Context
+import android.graphics.Paint
+import android.graphics.Typeface
+import com.sebas.zerkalo.data.ReaderSettings
+
+/**
+ * "Ajustada a tu pantalla": mide cuántas letras caben en cada línea con tu letra, tu tamaño y tu pantalla,
+ * y acomoda márgenes e interlineado para que la línea quede cómoda (unas 50 a 70 letras, ideal 60).
+ *
+ * Lo que dicen los estudios de lectura: líneas de 50–75 letras son las más cómodas; con menos, el ojo
+ * salta demasiado; con más, cuesta encontrar la línea siguiente. Las líneas largas piden más interlineado.
+ */
+object Fit {
+    const val MIN_CPL = 52           // menos que esto: se achican los márgenes
+    const val IDEAL = 60
+    const val MAX_REM = 34.0         // ancho máximo del texto (en "rem", crece con la letra): ~66 letras
+    const val MIN_MM = 1.5f          // nunca menos margen que esto (salvo que tú lo pongas)
+    const val AUTO_JUSTIFY = 34      // "Automático" justifica desde 34 letras por línea (con guiones no deja huecos)
+    private const val SAMPLE = "de la conquista del infinito y lo desconocido"
+
+    private val faces = HashMap<Int, Typeface>()
+
+    private fun typeface(ctx: Context, index: Int): Typeface = faces.getOrPut(index) {
+        runCatching {
+            GoogleFonts.get(ctx, index)?.let { g -> GoogleFonts.file(ctx, g, "regular")?.let { Typeface.createFromFile(it) } }
+                ?: ReaderFonts.getOrNull(index)?.let { f -> FontFiles.regular(ctx, f)?.let { Typeface.createFromAsset(ctx.assets, "fonts/$it") } }
+        }.getOrNull() ?: Typeface.SERIF
+    }
+
+    /** Ancho de una letra promedio, en píxeles reales, con la letra y el tamaño elegidos. */
+    fun charPx(ctx: Context, r: ReaderSettings, density: Float): Float {
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        p.typeface = typeface(ctx, r.font)
+        p.textSize = 16f * r.size / 100f * density
+        val extra = listOf(0f, 0.06f, 0.14f).getOrElse(Letra.spacing(r)) { 0f } * p.textSize
+        return p.measureText(SAMPLE) / SAMPLE.length + extra
+    }
+
+    /** Ancho máximo del texto en píxeles (como hace el motor de páginas en tabletas y pantallas anchas). */
+    fun capPx(r: ReaderSettings, density: Float) = (MAX_REM * 16 * r.size / 100 * density).toFloat()
+
+    /** Letras por línea con un ancho de texto dado. */
+    fun cpl(ctx: Context, r: ReaderSettings, textPx: Float, density: Float): Int =
+        (minOf(textPx, capPx(r, density)) / charPx(ctx, r, density)).toInt().coerceAtLeast(1)
+
+    /**
+     * Cuánto achicar los márgenes de los lados (1 = como los pusiste). En "Ajustada" se calcula para llegar
+     * a [MIN_CPL]; en los otros modos solo se achican con letra grande, como antes.
+     */
+    fun sideFactor(ctx: Context, r: ReaderSettings, screenPx: Float, insetsPx: Float, mmPx: Float, density: Float): Float {
+        if (r.layout != 1) return Letra.sideK(r.size)
+        val userPx = (r.mmLeft + r.mmRight) * mmPx
+        if (userPx <= 0f) return 1f
+        val cw = charPx(ctx, r, density)
+        val text = screenPx - insetsPx - userPx
+        if (minOf(text, capPx(r, density)) / cw >= MIN_CPL) return 1f
+        val room = screenPx - insetsPx - MIN_CPL * cw
+        val minPx = minOf(userPx, 2 * MIN_MM * mmPx)
+        return (room.coerceAtLeast(minPx) / userPx).coerceIn(minPx / userPx, 1f)
+    }
+
+    /** Interlineado: en "Ajustada" sigue el largo de la línea (cortas: más junto; largas: más aire). */
+    fun lineHeight(r: ReaderSettings, cpl: Int): Float {
+        if (r.layout != 1 || r.dyslexia || cpl <= 0) return Letra.lineHeight(r)
+        val adj = ((cpl - IDEAL) * 0.004f).coerceIn(-0.15f, 0.08f)
+        return (r.lineHeight + adj).coerceAtLeast(minOf(r.lineHeight, 1.3f))
+    }
+
+    /** Alineación efectiva: el modo dislexia siempre a la izquierda. */
+    fun align(r: ReaderSettings) = if (r.dyslexia) 0 else r.align
+
+    fun label(cpl: Int): String = when {
+        cpl < 35 -> "corta"
+        cpl < 50 -> "algo corta"
+        cpl <= 75 -> "cómoda"
+        else -> "larga"
+    }
+}

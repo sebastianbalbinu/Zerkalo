@@ -155,6 +155,7 @@ class ReaderUi {
     var camX by mutableFloatStateOf(0.5f)   // centro de la cámara (0 izquierda, 1 derecha)
     var camHalf by mutableFloatStateOf(0f)  // medio ancho de la cámara, en dp
     var typeTab by mutableIntStateOf(0)     // pestaña abierta en las opciones de lectura
+    var cpl by mutableIntStateOf(0)           // letras por línea (aprox.) con los ajustes de ahora
     var fadeTop by mutableFloatStateOf(0f)    // desplazamiento: alto (dp) de la zona difuminada de arriba
     var fadeBottom by mutableFloatStateOf(0f) // y de abajo
     var pairSwap by mutableStateOf(false)       // la pareja va arriba (o a la izquierda)
@@ -448,6 +449,24 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
      * avance) y el texto empieza justo debajo; abajo llega hasta el borde de la pantalla.
      * El espacio de arriba y abajo crece con el tamaño de la letra (estrechos, normales o amplios).
      */
+    /**
+     * Medida de la línea: (cuánto achicar los márgenes de los lados, letras por línea) con la letra,
+     * el tamaño y la pantalla de ahora. También actualiza el indicador del menú.
+     */
+    private fun fit(r: ReaderSettings = ui.settings): Pair<Float, Int> {
+        val dm = resources.displayMetrics
+        val xdpi = dm.xdpi.takeIf { it in 100f..900f } ?: dm.densityDpi.toFloat()
+        val mmPx = xdpi / 25.4f
+        val w = (runCatching { root.width }.getOrDefault(0).takeIf { it > 0 } ?: dm.widthPixels).toFloat()
+        val i = lastInsets?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+        val ins = ((i?.left ?: 0) + (i?.right ?: 0)).toFloat()
+        val side = runCatching { Fit.sideFactor(this, r, w, ins, mmPx, dm.density) }.getOrDefault(1f)
+        val text = w - ins - (r.mmLeft + r.mmRight) * side * mmPx
+        val cpl = runCatching { Fit.cpl(this, r, text, dm.density) }.getOrDefault(0)
+        if (r == ui.settings) ui.cpl = cpl
+        return side to cpl
+    }
+
     private fun applyMargins() {
         val insets = lastInsets ?: return
         val r = ui.settings
@@ -456,8 +475,9 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         // Milímetros reales de la pantalla (si el teléfono informa mal sus puntos por pulgada, se usa la densidad)
         val xdpi = dm.xdpi.takeIf { it in 100f..900f } ?: dm.densityDpi.toFloat()
         val ydpi = dm.ydpi.takeIf { it in 100f..900f } ?: dm.densityDpi.toFloat()
-        // Con letra grande los lados se achican, para que la línea no quede de tres palabras
-        val side = Letra.sideK(r.size)
+        // Ajustada: los lados se achican lo justo para que la línea tenga unas 52+ letras (otros modos: solo con letra grande)
+        val (side, cplNow) = fit(r)
+        Log.i("Zerkalo", "ZK_FIT ${cplNow} letras/línea · márgenes x${"%.2f".format(side)} · ${Letra.pt(r.size)} pt · modo ${r.layout} · alineación ${r.align}")
         fun mmX(v: Float) = (v * side * xdpi / 25.4f).toInt()
         fun mmY(v: Float) = (v * ydpi / 25.4f).toInt()
         val cam = if (r.respectCamera) i.top else 0
@@ -766,11 +786,11 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             }
         }
         val override = r.layout != 0 && r.layout != 3
-        val justify = r.justify && !r.dyslexia
+        val justify = Fit.align(r) != 0
         val sb = StringBuilder(faces)
         sb.append(":root{--zk-pt:${scrollPadTop}px;--zk-pb:${scrollPadBottom + 18f}px}")
         sb.append("html{font-size:${r.size}% !important;background:${hex(p.bg)} !important;-webkit-text-size-adjust:100% !important;overflow-anchor:auto;overflow-x:hidden !important;touch-action:pan-y}")
-        sb.append("body{margin:0 !important;padding:0 ${scrollPadRight}px 0 ${scrollPadLeft}px !important;box-sizing:border-box !important;background:${hex(p.bg)} !important;color:${hex(p.text)} !important;line-height:${Letra.lineHeight(r)} !important;overflow-wrap:break-word")
+        sb.append("body{margin:0 !important;padding:0 ${scrollPadRight}px 0 ${scrollPadLeft}px !important;box-sizing:border-box !important;background:${hex(p.bg)} !important;color:${hex(p.text)} !important;line-height:${Fit.lineHeight(r, fit(r).second)} !important;overflow-wrap:break-word")
         if (fam != null) sb.append(";font-family:'$fam',serif !important")
         sb.append("}")
         sb.append("section.zk-ch *{color:inherit !important;background-color:transparent !important}")
@@ -778,6 +798,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         sb.append("section.zk-ch a{text-decoration:none !important;border-bottom:1px solid currentColor}")
         sb.append("section.zk-ch + section.zk-ch{margin-top:2.6em !important}")
         sb.append(".zk-body{margin:0 !important;padding:0 !important}")
+        // Como en el modo Páginas: el texto nunca más ancho que ~66 letras (en tabletas y pantallas anchas)
+        sb.append("section.zk-ch{max-width:${Fit.MAX_REM}rem !important;margin-left:auto !important;margin-right:auto !important}")
         if (override) {
             if (fam != null) sb.append("section.zk-ch *:not(code):not(pre):not(kbd){font-family:inherit !important}")
             sb.append("section.zk-ch p,section.zk-ch li,section.zk-ch div,section.zk-ch blockquote{line-height:inherit !important}")
@@ -1316,10 +1338,10 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             textColor = RColor(p.text.toArgb()),
             fontFamily = fam?.let { FontFamily(it) },
             fontSize = r.size / 100.0,
-            lineHeight = Letra.lineHeight(r).toDouble(),
+            lineHeight = Fit.lineHeight(r, fit(r).second).toDouble(),
             pageMargins = pageMargins(r),
-            textAlign = if (r.justify && !r.dyslexia) TextAlign.JUSTIFY else TextAlign.START,
-            hyphens = r.justify && !r.dyslexia,
+            textAlign = if (Fit.align(r) != 0) TextAlign.JUSTIFY else TextAlign.START,
+            hyphens = Fit.align(r) != 0,
             // Original: manda el diseño del libro (Zerkalo solo corrige lo que se rompe y respeta tu justificado)
             publisherStyles = r.layout == 0 || r.layout == 3,
             scroll = r.scroll,
@@ -1416,7 +1438,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         }
         if (old.brightness != r.brightness) applyBrightness(r.brightness)
         if (old.veil != r.veil) applyVeil()
-        if (Letra.sideK(old.size) != Letra.sideK(r.size)) applyMargins()
+        if (fit(old).first != fit(r).first) applyMargins() else fit(r)
         if (old.mmLeft != r.mmLeft || old.mmRight != r.mmRight || old.mmTop != r.mmTop || old.mmBottom != r.mmBottom || old.scroll != r.scroll || old.respectCamera != r.respectCamera) {
             applyMargins()
             if (old.copy(mmLeft = r.mmLeft, mmRight = r.mmRight, mmTop = r.mmTop, mmBottom = r.mmBottom, respectCamera = r.respectCamera) == r) {

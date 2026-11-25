@@ -69,6 +69,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.sebas.zerkalo.data.Mark
+import com.sebas.zerkalo.data.withAlign
 import com.sebas.zerkalo.ui.Caption
 import com.sebas.zerkalo.ui.EnsoImage
 import com.sebas.zerkalo.ui.Fonts
@@ -1014,13 +1015,6 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                 Label("Interlineado")
                 val lhs = listOf(1.4f, 1.6f, 1.85f)
                 Segmented(listOf("Compacto", "Medio", "Amplio"), lhs.indexOfFirst { kotlin.math.abs(it - s.lineHeight) < 0.05f }.coerceAtLeast(0), { act.settings(s.copy(lineHeight = lhs[it])) })
-                Row(Modifier.fillMaxWidth().padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text("Justificar el texto", style = Type.ui, color = p.text)
-                        Text(if (s.justify) "Con guiones, como un libro impreso. Los poemas y las líneas angostas no se justifican" else "Apagado en todo el libro: alineado a la izquierda", style = Type.uiSmall, color = p.text2)
-                    }
-                    ZSwitch(s.justify) { act.settings(s.copy(justify = it)) }
-                }
                 InkPicker(ui, act)
                 Label("Espacio entre párrafos")
                 Segmented(listOf("Como el libro", "Separados", "Aireados"), s.paragraph, { act.settings(s.copy(paragraph = it)) })
@@ -1032,26 +1026,51 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                     s.dyslexia,
                 ) { on ->
                     act.settings(
-                        if (on) ui.settings.copy(dyslexia = true, font = 6, spacing = 1, justify = false, lineHeight = 1.85f, paragraph = maxOf(ui.settings.paragraph, 1))
-                        else ui.settings.copy(dyslexia = false, spacing = 0, justify = true, lineHeight = 1.6f),
+                        if (on) ui.settings.withAlign(0).copy(dyslexia = true, font = 6, spacing = 1, lineHeight = 1.85f, paragraph = maxOf(ui.settings.paragraph, 1))
+                        else ui.settings.withAlign(2).copy(dyslexia = false, spacing = 0, lineHeight = 1.6f),
                     )
                 }
             }
             // ---------- Página: cómo se arma la página ----------
             1 -> {
                 Label("Diagramación")
-                val order = listOf(3, 0, 1, 2)
-                Segmented(listOf("Ninguna", "Original", "Zerkalo", "Mía"), order.indexOf(s.layout).coerceAtLeast(0), { act.settings(s.copy(layout = order[it])) })
+                val order = listOf(3, 0, 1)
+                Segmented(listOf("Ninguna", "Original", "Ajustada"), order.indexOf(s.layout).let { if (it < 0) 2 else it }, { act.settings(s.copy(layout = order[it])) })
                 Text(
                     when (s.layout) {
                         3 -> "El libro tal cual, sin ningún arreglo de Zerkalo."
                         0 -> "El diseño de la editorial. Zerkalo solo arregla lo que se rompe en el teléfono: versalitas, palabras de otro tamaño y huecos en líneas angostas."
-                        2 -> "Tus ajustes se aplican a todo el libro, sin reglas automáticas."
-                        else -> "Diagramación cuidada: poemas verso a verso, títulos proporcionados y justificado solo donde queda bien."
+                        else -> "A tu pantalla y a tu letra: márgenes e interlineado se acomodan para que cada línea tenga unas 50–70 letras. Poemas verso a verso, títulos proporcionados."
+                    },
+                    style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp),
+                )
+                // Letras por línea: lo que más influye en leer cómodo y rápido
+                if (ui.cpl > 0) {
+                    val ok = ui.cpl in 50..75
+                    Row(
+                        Modifier.fillMaxWidth().padding(top = 10.dp).clip(RoundedCornerShape(12.dp)).background(p.card.copy(alpha = 0.7f)).padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box(Modifier.size(8.dp).clip(CircleShape).background(if (ok) Color(0xFF7FA35A) else p.accent))
+                        Text("≈ ${ui.cpl} letras por línea · ${Fit.label(ui.cpl)}", style = Type.uiSmall.copy(fontSize = 13.sp), color = p.text, modifier = Modifier.padding(start = 10.dp))
+                    }
+                }
+                Label("Alineación")
+                val align = if (s.dyslexia) 0 else s.align
+                Segmented(listOf("Izquierda", "Justificado", "Automático"), align, { act.settings(ui.settings.withAlign(it).copy(dyslexia = false)) })
+                Text(
+                    when {
+                        s.layout == 3 -> "En Ninguna manda el libro: la alineación no se cambia."
+                        s.dyslexia -> "El modo dislexia usa siempre texto a la izquierda."
+                        align == 0 -> "Todo a la izquierda, sin guiones. Es lo más fácil para quien tiene dislexia."
+                        align == 1 -> "Siempre justificado, con guiones para que no queden huecos. Títulos y poemas se respetan."
+                        ui.cpl in 1 until Fit.AUTO_JUSTIFY -> "Ahora tus líneas son cortas (menos de ${Fit.AUTO_JUSTIFY} letras): queda a la izquierda con guiones. Se justifica solo si achicas la letra o los márgenes."
+                        else -> "Justifica cuando caben ${Fit.AUTO_JUSTIFY} letras o más por línea; si no, a la izquierda con guiones."
                     },
                     style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp),
                 )
                 Label("Márgenes", "en milímetros")
+                if (s.layout == 1) Text("En Ajustada son el máximo: si la letra es grande, Zerkalo los achica lo justo.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(bottom = 6.dp))
                 // Atajos que llenan los cuatro valores; luego se afina cada lado
                 val presets = listOf(Triple("Estrechos", 2.5f, 0.8f), Triple("Normales", 4f, 1.5f), Triple("Amplios", 7f, 4f))
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

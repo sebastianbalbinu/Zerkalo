@@ -61,6 +61,7 @@ sleep 4
 $T adb exec-out screencap -p > shot9.png
 $T adb logcat -d > logcat-full.txt
 {
+  echo "-- Medida de línea --"; grep -E "ZK_FIT" logcat-full.txt | sed 's/^.*Zerkalo *: //' | tail -4
   echo "-- Letras de Google --"; grep -E "ZK_GFONT" logcat-full.txt | sed 's/^.*Zerkalo *: //' | head -10
   echo "== Android $($T adb shell getprop ro.build.version.release) =="
   echo "-- Tansu (fuentes y tiempos) --"; grep -E "ZK_TANSU|ZK_FUENTE|ZK_INDICE" logcat-full.txt | sed 's/^.*Zerkalo *: //' | head -40
