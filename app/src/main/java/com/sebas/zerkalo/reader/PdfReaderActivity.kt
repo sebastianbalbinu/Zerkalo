@@ -181,18 +181,18 @@ class PdfReaderActivity : AppCompatActivity() {
                 val text = sel.text.toString()
                 val bounds = sel.bounds
                 // Al apunte va primero: es lo que más se usa mientras se estudia
-                components.add(0, SelectionMenuComponent("zk-apunte", "Al apunte", null) { s ->
+                components.add(0, SelectionMenuComponent("zk-apunte", "Al apunte", null) {
                     val where = bounds.firstOrNull()?.let { "pág. ${it.pageNum + 1}" } ?: "pág. ${page + 1}"
                     Apuntes.addQuote(book.id, text, where)
                     if (note.mode == NoteMode.BUBBLE || note.mode == NoteMode.HIDDEN) note.mode = NoteMode.OPEN
-                    s.close(); pdfView.clearCurrentSelection()
+                    close(); pdfView.clearCurrentSelection()
                 })
-                components.add(1, SelectionMenuComponent("zk-subrayar", "Subrayar", null) { s ->
+                components.add(1, SelectionMenuComponent("zk-subrayar", "Subrayar", null) {
                     marks.addAll(bounds); saveMarks(); paintHighlights()
-                    s.close(); pdfView.clearCurrentSelection()
+                    close(); pdfView.clearCurrentSelection()
                 })
-                components.add(SelectionMenuComponent("zk-buscar", "Buscar", null) { s ->
-                    s.close(); pdfView.clearCurrentSelection()
+                components.add(SelectionMenuComponent("zk-buscar", "Buscar", null) {
+                    close(); pdfView.clearCurrentSelection()
                     query = text.trim().take(80); searching = true; search()
                 })
             }
