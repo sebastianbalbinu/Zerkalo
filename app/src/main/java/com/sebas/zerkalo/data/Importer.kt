@@ -85,10 +85,16 @@ object Importer {
                 }
             }
             val id = newId()
-            val dest = File(Library.booksDir, "$id.epub")
+            val type = runCatching { ctx.contentResolver.getType(uri) }.getOrNull().orEmpty()
+            val tmp = File(Library.booksDir, "$id.tmp")
             val input = ctx.contentResolver.openInputStream(uri) ?: return@withContext Result.failure(ImportError("No se pudo leer el archivo"))
-            input.use { inp -> dest.outputStream().use { inp.copyTo(it) } }
-            fromFile(core, dest, id, key = "local:$id", source = "Importado", fallbackTitle = display.removeSuffix(".epub"))
+            input.use { inp -> tmp.outputStream().use { inp.copyTo(it) } }
+            // ¿PDF? Por el nombre, por el tipo o por cómo empieza el archivo ("%PDF")
+            val pdf = display.endsWith(".pdf", true) || type == "application/pdf" || looksPdf(tmp)
+            val dest = File(Library.booksDir, if (pdf) "$id.pdf" else "$id.epub")
+            tmp.renameTo(dest)
+            if (pdf) fromPdf(dest, id, display.substringBeforeLast('.'))
+            else fromFile(core, dest, id, key = "local:$id", source = "Importado", fallbackTitle = display.removeSuffix(".epub"))
         } catch (e: SecurityException) {
             Result.failure(ImportError("La otra app no dio permiso para leer el archivo"))
         } catch (e: Exception) {
@@ -105,6 +111,55 @@ object Importer {
             fromFile(core, dest, id, key = "local:$id", source = "Importado", fallbackTitle = src.name.removeSuffix(".epub"))
         } catch (e: Exception) {
             Result.failure(ImportError("No se pudo copiar ${src.name}: ${e.message}"))
+        }
+    }
+
+    private fun looksPdf(f: File): Boolean = runCatching {
+        f.inputStream().use { i -> val b = ByteArray(5); i.read(b) == 5 && String(b, Charsets.US_ASCII) == "%PDF-" }
+    }.getOrDefault(false)
+
+    /** Título legible a partir del nombre del archivo: sin guiones bajos ni puntos raros. */
+    private fun titleFromName(n: String) = n.replace('_', ' ').replace(Regex("\\s+"), " ").trim().ifBlank { "Documento PDF" }
+
+    /**
+     * Registra un PDF: la portada es la primera página. Android trae su propio lector de PDF
+     * (PdfRenderer), así que no hace falta nada más para dibujarla.
+     */
+    suspend fun fromPdf(file: File, id: String, name: String): Result<Book> = withContext(Dispatchers.IO) {
+        try {
+            var pages = 0
+            var cover: String? = null
+            android.os.ParcelFileDescriptor.open(file, android.os.ParcelFileDescriptor.MODE_READ_ONLY).use { fd ->
+                android.graphics.pdf.PdfRenderer(fd).use { r ->
+                    pages = r.pageCount
+                    if (pages > 0) r.openPage(0).use { pg ->
+                        val w = 480
+                        val h = (pg.height * w.toFloat() / pg.width.coerceAtLeast(1)).toInt().coerceIn(200, 1200)
+                        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+                        bmp.eraseColor(android.graphics.Color.WHITE)
+                        pg.render(bmp, null, null, android.graphics.pdf.PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                        File(Library.coversDir, "$id.jpg").outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 86, it) }
+                        cover = "$id.jpg"
+                    }
+                }
+            }
+            if (pages == 0) { file.delete(); return@withContext Result.failure(ImportError("El PDF está vacío")) }
+            val book = Book(
+                id = id, key = "local:$id", title = titleFromName(name), author = "", source = "PDF",
+                file = file.name, cover = cover, genre = "-",
+            )
+            Library.twinOf(book.title, book.author, book.id)?.takeIf { it.isPdf }?.let { twin ->
+                file.delete(); cover?.let { File(Library.coversDir, it).delete() }
+                return@withContext Result.success(twin)
+            }
+            Library.upsert(book)
+            Result.success(book)
+        } catch (e: SecurityException) {
+            file.delete()
+            Result.failure(ImportError("Este PDF tiene contraseña y no se puede abrir"))
+        } catch (e: Exception) {
+            file.delete()
+            Result.failure(ImportError("No se pudo abrir el PDF: ${e.message}"))
         }
     }
 

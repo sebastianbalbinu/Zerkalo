@@ -2,6 +2,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- El lector de PDF de Google pide Android 9; en teléfonos más viejos Zerkalo avisa y no lo abre. -->
+    <uses-sdk tools:overrideLibrary="androidx.pdf, androidx.pdf.core, androidx.pdf.document.service" />
+
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
@@ -56,6 +59,19 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="application/epub+zip" />
             </intent-filter>
+            <!-- PDF abiertos o compartidos desde otras apps -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="application/pdf" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="application/pdf" />
+            </intent-filter>
             <!-- Imagen compartida desde el navegador: portada para un libro -->
             <intent-filter android:label="Portada en Zerkalo">
                 <action android:name="android.intent.action.SEND" />
@@ -68,6 +84,13 @@
             android:name=".reader.ReaderActivity"
             android:exported="false"
             android:theme="@style/Theme.Zerkalo.Reader"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode|screenLayout|smallestScreenSize|density" />
+
+        <activity
+            android:name=".reader.PdfReaderActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Zerkalo.Pdf"
+            android:windowSoftInputMode="adjustResize"
             android:configChanges="orientation|screenSize|keyboardHidden|uiMode|screenLayout|smallestScreenSize|density" />
 
         <service

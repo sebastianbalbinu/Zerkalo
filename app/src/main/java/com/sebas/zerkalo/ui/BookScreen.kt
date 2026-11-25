@@ -292,11 +292,11 @@ private fun ShareSheet(book: Book, onClose: () -> Unit) {
                 runCatching {
                     val dir = java.io.File(ctx.cacheDir, "compartir").apply { mkdirs(); listFiles()?.forEach { it.delete() } }
                     val name = (book.title.take(60) + if (book.author.isNotBlank()) " - " + book.author.take(40) else "")
-                        .replace(Regex("[\\/:*?\"<>|]"), " ").trim() + ".epub"
+                        .replace(Regex("[\\/:*?\"<>|]"), " ").trim() + (if (book.isPdf) ".pdf" else ".epub")
                     val out = java.io.File(dir, name)
                     java.io.File(Library.booksDir, book.file).copyTo(out, overwrite = true)
                     val uri = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".archivos", out)
-                    val send = Intent(Intent.ACTION_SEND).setType("application/epub+zip").putExtra(Intent.EXTRA_STREAM, uri)
+                    val send = Intent(Intent.ACTION_SEND).setType(if (book.isPdf) "application/pdf" else "application/epub+zip").putExtra(Intent.EXTRA_STREAM, uri)
                         .putExtra(Intent.EXTRA_TEXT, "Te comparto «${book.title}» 📖").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     ctx.startActivity(Intent.createChooser(send, "Enviar libro"))
                 }.onFailure { a.toast("No se pudo preparar el archivo") }

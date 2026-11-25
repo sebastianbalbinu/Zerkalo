@@ -115,6 +115,7 @@ object AppEvents {
 }
 
 fun openReader(ctx: Context, book: Book) {
+    if (book.isPdf) { ctx.startActivity(Intent(ctx, com.sebas.zerkalo.reader.PdfReaderActivity::class.java).putExtra("id", book.id)); return }
     ctx.startActivity(Intent(ctx, ReaderActivity::class.java).putExtra("id", book.id).putExtra("continuo", AppEvents.testContinuous))
 }
 
@@ -161,6 +162,15 @@ fun ZerkaloRoot(onReady: () -> Unit) {
     val toOpen by AppEvents.openBook.collectAsState()
     LaunchedEffect(toOpen, books) {
         val id = toOpen ?: return@LaunchedEffect
+        // Prueba automática del lector de PDF: trae un PDF corto que viene dentro de la app
+        if (id == "prueba-pdf" && books.none { it.id == id }) {
+            withContext(Dispatchers.IO) {
+                val dest = File(Library.booksDir, "prueba-pdf.pdf")
+                ctx.assets.open("prueba.pdf").use { inp -> dest.outputStream().use { inp.copyTo(it) } }
+                Importer.fromPdf(dest, "prueba-pdf", "Prueba de PDF").onFailure { Log.e("Zerkalo", "ZK_PDF prueba: ${it.message}") }
+            }
+            return@LaunchedEffect
+        }
         books.firstOrNull { it.id == id }?.let { AppEvents.openBook.value = null; openReader(ctx, it) }
     }
     val wantTab by AppEvents.tab.collectAsState()
@@ -247,7 +257,7 @@ fun ZerkaloRoot(onReady: () -> Unit) {
             Toast(Modifier.align(Alignment.BottomCenter))
         }
         if (importSheet) ImportSheet(
-            onPickFiles = { importSheet = false; picker.launch(arrayOf("application/epub+zip", "application/octet-stream", "application/zip")) },
+            onPickFiles = { importSheet = false; picker.launch(arrayOf("application/epub+zip", "application/pdf", "application/octet-stream", "application/zip")) },
             onClose = { importSheet = false },
         )
         coverFor?.let { uri -> PickBookForCover(uri) { coverFor = null } }

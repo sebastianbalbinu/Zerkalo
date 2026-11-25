@@ -80,6 +80,9 @@ dependencies {
     implementation("org.readium.kotlin-toolkit:readium-streamer:$readium")
     implementation("org.readium.kotlin-toolkit:readium-navigator:$readium")
 
+    // Lector de PDF de Google (zoom, búsqueda y selección de texto; Apache 2.0). Se usa desde Android 9.
+    implementation("androidx.pdf:pdf-document-service:1.0.0-beta01")
+    implementation("com.google.android.material:material:1.13.0")
     // Interfaz nativa
     val compose = "1.9.4"
     implementation("androidx.compose.ui:ui:$compose")

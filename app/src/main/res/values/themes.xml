@@ -12,6 +12,17 @@
     <style name="Theme.Zerkalo.Reader">
         <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="28">shortEdges</item>
     </style>
+    <!-- Lector de PDF: el visor de Google pide un tema Material (para sus avisos y la barra de páginas) -->
+    <style name="Theme.Zerkalo.Pdf" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowBackground">@color/fondo</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">@bool/claro</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="28">shortEdges</item>
+        <item name="colorPrimary">@color/shu</item>
+        <item name="colorAccent">@color/shu</item>
+        <item name="android:textColorHighlight">#38C4432A</item>
+    </style>
     <color name="fondo">#F7F2E8</color>
     <color name="shu">#C4432A</color>
     <bool name="claro">true</bool>

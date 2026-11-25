@@ -42,6 +42,14 @@ sleep 3
 [ -n "$W" ] && for i in 1 2 3 4 5 6; do $T adb shell input swipe $((W/2)) $((H*75/100)) $((W/2)) $((H*25/100)) 300; sleep 1; done
 sleep 3
 $T adb exec-out screencap -p > shot5.png
+# Lector de PDF: abre un PDF corto, mantiene presionado un texto (menú con "Al apunte") y toma fotos
+$T adb shell am start -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir prueba-pdf
+for i in $(seq 1 30); do $T adb logcat -d | grep -q ZK_PDF_READY && break; sleep 2; done
+sleep 3
+$T adb exec-out screencap -p > shot6.png
+[ -n "$W" ] && $T adb shell input swipe $((W*30/100)) $((W*14/100 + H*6/100)) $((W*30/100)) $((W*14/100 + H*6/100)) 1200
+sleep 3
+$T adb exec-out screencap -p > shot7.png
 $T adb logcat -d > logcat-full.txt
 {
   echo "== Android $($T adb shell getprop ro.build.version.release) =="
@@ -51,4 +59,4 @@ $T adb logcat -d > logcat-full.txt
 } > metricas.txt
 cat metricas.txt
 { $T adb shell getprop ro.build.version.release; grep -E "ZK_|FATAL|AndroidRuntime|Zerkalo" logcat-full.txt | tail -300; } > logcat.txt
-grep -q "ZK_READY" logcat-full.txt && grep -q "ZK_READER_OK" logcat-full.txt && grep -q "ZK_CONT_OK" logcat-full.txt && ! grep -q "FATAL EXCEPTION" logcat-full.txt
+grep -q "ZK_READY" logcat-full.txt && grep -q "ZK_READER_OK" logcat-full.txt && grep -q "ZK_CONT_OK" logcat-full.txt && grep -q "ZK_PDF_READY" logcat-full.txt && ! grep -q "FATAL EXCEPTION" logcat-full.txt

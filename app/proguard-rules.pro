@@ -19,3 +19,7 @@
 -dontwarn org.jspecify.**
 -dontwarn com.google.re2j.**
 
+
+# Lector de PDF (androidx.pdf): su servicio aislado se comunica por AIDL; se conserva completo.
+-keep class androidx.pdf.** { *; }
+-dontwarn androidx.pdf.**

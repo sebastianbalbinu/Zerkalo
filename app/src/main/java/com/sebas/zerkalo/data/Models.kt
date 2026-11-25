@@ -46,6 +46,8 @@ data class Book(
 ) {
     val reading get() = progress > 0.0 && finishedAt == 0L
     val finished get() = finishedAt > 0L
+    /** Los PDF se abren con su propio lector (zoom, búsqueda y apunte), no con el de EPUB. */
+    val isPdf get() = file.endsWith(".pdf", ignoreCase = true)
 
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("key", key).put("title", title).put("author", author).put("lang", lang)
