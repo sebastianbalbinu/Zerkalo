@@ -34,8 +34,15 @@ class ContinuousView(ctx: Context, private val pub: Publication, private val cb:
     interface Callbacks {
         /** El capítulo [index] está a la altura de la lectura, a [progression] (0..1) de su largo. */
         fun onPosition(index: Int, progression: Double)
-        /** Toque fuera de un enlace: [fx] es la posición horizontal (0 izquierda, 1 derecha). */
-        fun onTap(fx: Float)
+        /**
+         * Toque fuera de un enlace: [fx] y [fy] van de 0 a 1 (izquierda→derecha, arriba→abajo);
+         * [x] e [y] son el punto en píxeles de la pantalla (para traducir la palabra tocada).
+         */
+        fun onTap(fx: Float, fy: Float, x: Float, y: Float)
+        /** Se tocó un subrayado o una nota adhesiva. */
+        fun onMark(id: String) {}
+        /** Se eligió una opción del menú de texto seleccionado; [json] describe la selección (o null si no había). */
+        fun onSelection(id: Int, json: String?) {}
         /** Se agregó un capítulo a la página (hay que volver a diagramar). */
         fun onLoaded(index: Int)
         /** Ya se ve el punto de partida. */
@@ -135,7 +142,11 @@ class ContinuousView(ctx: Context, private val pub: Publication, private val cb:
             pending = null
         }
         @JavascriptInterface fun pos(i: Int, p: Double) = main.post { cb.onPosition(i, p) }
-        @JavascriptInterface fun tap(fx: Float) = main.post { cb.onTap(fx) }
+        @JavascriptInterface fun tap(fx: Float, fy: Float, x: Float, y: Float) = main.post {
+            val dp = resources.displayMetrics.density
+            cb.onTap(fx, fy, x * dp, y * dp)
+        }
+        @JavascriptInterface fun mark(id: String) = main.post { cb.onMark(id) }
         @JavascriptInterface fun loaded(i: Int) = main.post { cb.onLoaded(i) }
         @JavascriptInterface fun ready() = main.post { cb.onReady() }
     }
@@ -147,6 +158,39 @@ class ContinuousView(ctx: Context, private val pub: Publication, private val cb:
     }
 
     fun js(code: String) { if (shellReady) evaluateJavascript(code, null) }
+
+    /** El menú del texto seleccionado: el mismo que en el modo Páginas (lo más usado primero). */
+    var menu: List<Pair<Int, String>> = emptyList()
+
+    override fun startActionMode(callback: android.view.ActionMode.Callback, type: Int): android.view.ActionMode? {
+        if (menu.isEmpty()) return super.startActionMode(callback, type)
+        val wrap = object : android.view.ActionMode.Callback2() {
+            override fun onCreateActionMode(mode: android.view.ActionMode, m: android.view.Menu): Boolean {
+                callback.onCreateActionMode(mode, m)
+                m.clear()
+                menu.forEachIndexed { i, (id, title) -> m.add(android.view.Menu.NONE, id, i, title) }
+                return true
+            }
+            override fun onPrepareActionMode(mode: android.view.ActionMode, m: android.view.Menu): Boolean = false
+            override fun onActionItemClicked(mode: android.view.ActionMode, item: android.view.MenuItem): Boolean {
+                val id = item.itemId
+                // Primero se lee la selección (al cerrar el menú se borra) y después se cierra
+                evaluateJavascript("window.zk ? zk.sel() : ''") { raw ->
+                    val s = runCatching { org.json.JSONTokener(raw).nextValue() as? String }.getOrNull()?.takeIf { it.isNotBlank() }
+                    mode.finish()
+                    cb.onSelection(id, s)
+                }
+                return true
+            }
+            override fun onDestroyActionMode(mode: android.view.ActionMode) { callback.onDestroyActionMode(mode) }
+            override fun onGetContentRect(mode: android.view.ActionMode, view: android.view.View, outRect: android.graphics.Rect) {
+                if (callback is android.view.ActionMode.Callback2) callback.onGetContentRect(mode, view, outRect) else super.onGetContentRect(mode, view, outRect)
+            }
+        }
+        return super.startActionMode(wrap, type)
+    }
+
+    fun clearSelection() = js("window.getSelection && window.getSelection().removeAllRanges();")
 
     fun applyCss(css: String) = js("zk.css(${JSONObject.quote(css)});")
     fun go(index: Int, progression: Double) = js("zk.go($index, $progression);")
@@ -232,14 +276,22 @@ function markIn(root, m) {
   if (start < 0) return;
   var end = start, need = text.length, seen = 0;
   while (end < flat.length && seen < need) { if (!(flat.charAt(end) === ' ' && flat.charAt(end - 1) === ' ')) seen++; end++; }
+  var lastMk = null;
   for (var q = nodes.length - 1; q >= 0; q--) {
     var a = nodes[q], len = a.n.nodeValue.length, s0 = Math.max(start, a.s), e0 = Math.min(end, a.s + len);
     if (s0 >= e0) continue;
     try {
       var r = d.createRange(); r.setStart(a.n, s0 - a.s); r.setEnd(a.n, e0 - a.s);
       var mk = d.createElement('mark'); mk.className = 'zk-hl'; mk.style.cssText = 'background:' + m.c + ' !important;color:inherit !important;border-radius:2px';
+      if (m.id) mk.setAttribute('data-id', m.id);
       r.surroundContents(mk);
+      if (!lastMk) lastMk = mk;
     } catch (e) {}
+  }
+  // Nota adhesiva: un papelito al final de la frase
+  if (m.k === 's' && lastMk && lastMk.parentNode) {
+    var ic = d.createElement('span'); ic.className = 'zk-stk'; ic.setAttribute('data-id', m.id);
+    lastMk.parentNode.insertBefore(ic, lastMk.nextSibling);
   }
 }
 
@@ -326,7 +378,10 @@ d.addEventListener('click', function(ev){
   }
   var sel = window.getSelection && window.getSelection();
   if (sel && !sel.isCollapsed) return;
-  ZKA.tap(ev.clientX / Math.max(1, window.innerWidth));
+  // Tocar un subrayado o una nota adhesiva la abre
+  var mkd = ev.target.closest && ev.target.closest('.zk-stk,mark.zk-hl[data-id]');
+  if (mkd) { ev.preventDefault(); ZKA.mark(mkd.getAttribute('data-id')); return; }
+  ZKA.tap(ev.clientX / Math.max(1, window.innerWidth), ev.clientY / Math.max(1, window.innerHeight), ev.clientX, ev.clientY);
 }, true);
 
 function scrollToIn(s, p) {
@@ -374,8 +429,21 @@ window.zk = {
     var visible = window.innerHeight - pad() - (parseFloat(getComputedStyle(d.documentElement).getPropertyValue('--zk-pb')) || 0);
     window.scrollBy({ top: dir * Math.max(lh * 3, visible - lh * 1.5), behavior: 'smooth' });
   },
+  // El texto seleccionado: capítulo, punto del capítulo y las palabras de antes y después (para ubicarlo siempre)
+  sel: function() {
+    var s = window.getSelection && window.getSelection();
+    if (!s || s.isCollapsed || !s.rangeCount) return '';
+    var r = s.getRangeAt(0), el = r.startContainer.nodeType === 1 ? r.startContainer : r.startContainer.parentElement;
+    var sc = el && el.closest('section.zk-ch'); if (!sc) return '';
+    var pre = d.createRange(); pre.setStart(sc, 0); pre.setEnd(r.startContainer, r.startOffset);
+    var post = d.createRange(); post.setStart(r.endContainer, r.endOffset); post.setEnd(sc, sc.childNodes.length);
+    var sr = sc.getBoundingClientRect(), rr = r.getBoundingClientRect();
+    return JSON.stringify({ i: +sc.getAttribute('data-i'), t: s.toString(), b: pre.toString().slice(-200), a: post.toString().slice(0, 200),
+      p: Math.max(0, Math.min(1, (rr.top - sr.top) / Math.max(1, sr.height))) });
+  },
   marks: function(list) {
     Z.marks = list || [];
+    [].slice.call(d.querySelectorAll('.zk-stk')).forEach(function(x){ x.remove(); });
     [].slice.call(d.querySelectorAll('mark.zk-hl')).forEach(function(m){ var p = m.parentNode; while (m.firstChild) p.insertBefore(m.firstChild, m); p.removeChild(m); p.normalize(); });
     secs().forEach(function(s){ var url = s.getAttribute('data-href'); Z.marks.filter(function(m){ return m.h === url; }).forEach(function(m){ markIn(s, m); }); });
   }

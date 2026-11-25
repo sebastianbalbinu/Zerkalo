@@ -40,8 +40,10 @@ object InkStore {
         if (!::dir.isInitialized) return out
         runCatching {
             val o = JSONObject(file(bookId).readText())
-            for (k in o.keys()) {
-                val a = o.getJSONArray(k)
+            for (k0 in o.keys()) {
+                val a = o.getJSONArray(k0)
+                // Claves de EPUB de la versión 1.0.74: los ajustes iban separados con "-"; ahora con "~"
+                val k = k0.split("|").let { p -> if (k0.startsWith("e|") && p.size >= 5 && !p[3].contains("~")) (p.take(3) + p[3].replace("-", "~") + p.drop(4)).joinToString("|") else k0 }
                 out[k] = (0 until a.length()).map { i ->
                     val s = a.getJSONObject(i)
                     val p = s.getJSONArray("p")

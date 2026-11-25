@@ -104,7 +104,10 @@ object Prefs {
             mmLeft = sp.getFloat("rMmL", 4f), mmRight = sp.getFloat("rMmR", 4f), mmTop = sp.getFloat("rMmT", 1.5f), mmBottom = sp.getFloat("rMmB", 2f),
             respectCamera = sp.getBoolean("rCam", true),
             customInkLight = sp.getInt("rInkL", 0xFF3A3350.toInt()), continuous = sp.getBoolean("rCont", false),
-        )
+        ).let { r ->
+            // "Desplazamiento" se unió a "Continuo": quien lo usaba pasa a Continuo
+            if (r.scroll && !r.continuous) r.copy(continuous = true) else r
+        }
         inks.value = runCatching {
             val a = JSONArray(sp.getString("inks", null) ?: "")
             (0 until a.length()).map { a.getJSONObject(it).let { o -> InkColor(o.optString("n"), o.optInt("c")) } }
@@ -113,6 +116,13 @@ object Prefs {
             val a = JSONArray(sp.getString("opds", "[]"))
             (0 until a.length()).map { a.getJSONObject(it).let { o -> OpdsCatalog(o.getString("name"), o.getString("url")) } }
         }.getOrDefault(emptyList())
+    }
+
+    /** Avisos de "trazos con otra letra" que la persona cerró con la ✕ (no vuelven a salir). */
+    fun inkHintHidden(bookId: String, what: String) = sp.getStringSet("inkHide_$bookId", emptySet())?.contains(what) == true
+    fun hideInkHint(bookId: String, what: String) {
+        val now = sp.getStringSet("inkHide_$bookId", emptySet()).orEmpty() + what
+        sp.edit().putStringSet("inkHide_$bookId", now).apply()
     }
 
     /** Letra y márgenes propios de un libro (null = usa los de todos los libros). */

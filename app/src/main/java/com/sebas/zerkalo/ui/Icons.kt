@@ -54,6 +54,12 @@ object Ic {
         "pause" to "M8.5 5.5v13M15.5 5.5v13",
         "escuchar" to "M4.5 15.5v-3.5a7.5 7.5 0 0 1 15 0v3.5M4.5 15.5a2 2 0 0 1 2-2h1.2v6.5H6.5a2 2 0 0 1-2-2zM19.5 15.5a2 2 0 0 0-2-2h-1.2v6.5h1.2a2 2 0 0 0 2-2z",
         "sort" to "M7 4.5v15M4 7.5l3-3 3 3M17 19.5v-15M14 16.5l3 3 3-3",
+        // Herramientas: plumilla, marcador, papelito con la esquina doblada, borrador y dos páginas juntas
+        "pluma" to "M12 20.5L6.8 11.2 12 3.5l5.2 7.7zM12 20.5v-7.6" + c(12f, 11.4f, 1.3f),
+        "resaltador" to "M15.2 3.8l5 5-8.4 8.4-5-5zM6.8 12.2l-2.3 4.6 2.7 2.7 4.6-2.3M13.5 20.5h7",
+        "nota-adhesiva" to "M5 4.5h14v9.8l-5.2 5.2H5zM19 14.3h-3.7a1.5 1.5 0 0 0-1.5 1.5v3.7M8.3 9h7.4M8.3 12.3h4.6",
+        "borrar" to "M10 20h9.5M4.6 14.3l9-9a1.6 1.6 0 0 1 2.3 0l3.3 3.3a1.6 1.6 0 0 1 0 2.3L11 19.1a1.6 1.6 0 0 1-1.1.5H7.3a1.6 1.6 0 0 1-1.1-.5l-1.6-1.6a1.6 1.6 0 0 1 0-2.3zM9 9.9l5.1 5.1",
+        "lado" to rr(3.5f, 4.5f, 7.5f, 15f, 1.6f) + rr(13f, 4.5f, 7.5f, 15f, 1.6f) + "M5.8 8.5h3M5.8 11.5h3M15.3 8.5h3M15.3 11.5h3",
         "tag" to "M3.5 12.2V4.5a1 1 0 0 1 1-1h7.7l8.3 8.3-8.7 8.7zM8.2 8.2h.01",
         "auto" to "M5 6l6.5 6L5 18M12.5 6l6.5 6-6.5 6",
         "full" to "M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5",

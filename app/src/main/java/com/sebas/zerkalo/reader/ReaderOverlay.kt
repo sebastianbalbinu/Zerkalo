@@ -245,7 +245,7 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                     Spacer(Modifier.width(8.dp))
                     RoundPill("aa", { ui.sheet = "type" })
                     Spacer(Modifier.width(8.dp))
-                    RoundPill("", { ui.sheet = "tools" }, active = ui.inking || ui.studyTap, glyph = "✎")
+                    RoundPill("pluma", { ui.sheet = "tools" }, active = ui.inking || ui.studyTap)
                     Spacer(Modifier.width(8.dp))
                     // El apunte: se abre aunque esté vacío, para escribir sin citar
                     RoundPill("", act.openNote, active = true, glyph = "記")
@@ -270,7 +270,7 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                     style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(start = 6.dp),
                 )
                 Text("Verlos", style = Type.uiSmall, color = p.accent)
-                Box(Modifier.padding(start = 8.dp).size(22.dp).clip(CircleShape).clickable { ui.inkOther = null }, contentAlignment = Alignment.Center) {
+                Box(Modifier.padding(start = 8.dp).size(22.dp).clip(CircleShape).clickable { act.hideInkHint() }, contentAlignment = Alignment.Center) {
                     ZIcon("close", p.text2, 12.dp)
                 }
             }
@@ -798,18 +798,18 @@ private fun ToolsSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
         Caption("Herramientas", accent = true)
         Spacer(Modifier.height(12.dp))
         Row(Modifier.fillMaxWidth()) {
-            com.sebas.zerkalo.ui.ToolTile("✎", "Pluma", Modifier.weight(1f)) { onClose(); act.ink(com.sebas.zerkalo.ui.InkTool.PEN) }
-            com.sebas.zerkalo.ui.ToolTile("▌", "Resaltador", Modifier.weight(1f)) { onClose(); act.ink(com.sebas.zerkalo.ui.InkTool.MARKER) }
-            com.sebas.zerkalo.ui.ToolTile("▤", "Nota adhesiva", Modifier.weight(1f), tint = com.sebas.zerkalo.ui.StickyPaper) {
+            com.sebas.zerkalo.ui.ToolTile("pluma", "Pluma", Modifier.weight(1f)) { onClose(); act.ink(com.sebas.zerkalo.ui.InkTool.PEN) }
+            com.sebas.zerkalo.ui.ToolTile("resaltador", "Resaltador", Modifier.weight(1f)) { onClose(); act.ink(com.sebas.zerkalo.ui.InkTool.MARKER) }
+            com.sebas.zerkalo.ui.ToolTile("nota-adhesiva", "Nota adhesiva", Modifier.weight(1f), tint = com.sebas.zerkalo.ui.StickyPaper) {
                 onClose(); ui.say("Mantén presionada una frase y elige «Nota adhesiva»")
             }
-            com.sebas.zerkalo.ui.ToolTile("⌫", "Borrar", Modifier.weight(1f)) { onClose(); act.ink(com.sebas.zerkalo.ui.InkTool.ERASER) }
+            com.sebas.zerkalo.ui.ToolTile("borrar", "Borrar", Modifier.weight(1f)) { onClose(); act.ink(com.sebas.zerkalo.ui.InkTool.ERASER) }
         }
         Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-            com.sebas.zerkalo.ui.ToolTile("⇪", "Exportar", Modifier.weight(1f)) { onClose(); act.export() }
-            com.sebas.zerkalo.ui.ToolTile("♪", "Escuchar", Modifier.weight(1f)) { ui.sheet = "listen" }
-            com.sebas.zerkalo.ui.ToolTile("文", "Traducir", Modifier.weight(1f), active = ui.studyTap) { onClose(); act.toggleStudy() }
-            com.sebas.zerkalo.ui.ToolTile("⧉", "Lado a lado", Modifier.weight(1f), active = ui.pairOn) { ui.sheet = "pair" }
+            com.sebas.zerkalo.ui.ToolTile("share", "Exportar", Modifier.weight(1f)) { onClose(); act.export() }
+            com.sebas.zerkalo.ui.ToolTile("escuchar", "Escuchar", Modifier.weight(1f)) { ui.sheet = "listen" }
+            com.sebas.zerkalo.ui.ToolTile("translate", "Traducir", Modifier.weight(1f), active = ui.studyTap) { onClose(); act.toggleStudy() }
+            com.sebas.zerkalo.ui.ToolTile("lado", "Lado a lado", Modifier.weight(1f), active = ui.pairOn) { ui.sheet = "pair" }
         }
     }
 }
@@ -946,18 +946,17 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                     s.respectCamera,
                 ) { act.settings(ui.settings.copy(respectCamera = it)) }
                 Text(
-                    "En desplazamiento, el margen de arriba y el de abajo son la zona donde el texto se difumina al pasar.",
+                    "En Continuo, el margen de arriba y el de abajo son la zona donde el texto se difumina al pasar.",
                     style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp),
                 )
                 Label("Pasar página")
                 Segmented(
-                    listOf("Páginas", "Desplazamiento", "Continuo"), if (s.continuous) 2 else if (s.scroll) 1 else 0,
-                    { act.settings(s.copy(scroll = it >= 1, continuous = it == 2)) },
+                    listOf("Páginas", "Continuo"), if (s.continuous || s.scroll) 1 else 0,
+                    { act.settings(s.copy(scroll = it == 1, continuous = it == 1)) },
                 )
                 Text(
                     when {
-                        s.continuous -> "Todo el libro seguido, como en Books: bajas y encuentras todo. Por ahora, traducir tocando, dos idiomas y subrayar nuevo funcionan en Páginas y Desplazamiento."
-                        s.scroll -> "Capítulo por capítulo; al final del capítulo, sigue deslizando."
+                        s.continuous || s.scroll -> "Todo el libro seguido, como en Books: bajas con el dedo y encuentras todo, sin cortes entre capítulos."
                         else -> "Como un libro de papel: una página a la vez."
                     },
                     style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp),

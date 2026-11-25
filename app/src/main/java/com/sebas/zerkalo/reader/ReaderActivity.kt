@@ -263,17 +263,32 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val k = inkKey() ?: run { ui.inkOther = null; return }
         val parts = k.split("|")
         val href = parts.getOrNull(1) ?: return
+        val prog = parts.getOrNull(2)?.toDoubleOrNull() ?: return
         val mine = parts.getOrNull(3) ?: return
         val counts = iv.counts()
-        if (counts.keys.any { it.startsWith("e|$href|") && it.split("|").getOrNull(3) == mine }) { ui.inkOther = null; return }
-        val other = counts.filter { (key, _) -> key.startsWith("e|$href|") && key.split("|").getOrNull(3) != mine }
-            .entries.groupBy { it.key.split("|").getOrNull(3).orEmpty() }
-            .mapValues { e -> e.value.sumOf { it.value } }.maxByOrNull { it.value }
-        ui.inkOther = other?.let { it.value to it.key.substringBeforeLast("~") }
+        // Solo cerca de esta página (con otra letra, la página empieza en otro punto del capítulo)
+        val near = counts.filter { (key, _) ->
+            val p = key.split("|")
+            p.getOrNull(0) == "e" && p.getOrNull(1) == href && p.getOrNull(3) != mine && (p.getOrNull(3)?.contains("~") == true) &&
+                abs((p.getOrNull(2)?.toDoubleOrNull() ?: -1.0) - prog) < 0.04
+        }
+        if (near.isEmpty() || counts.containsKey(k)) { ui.inkOther = null; return }
+        val best = near.entries.groupBy { it.key.split("|")[3] }.mapValues { e -> e.value.sumOf { it.value } }.maxByOrNull { it.value } ?: return
+        val look = best.key.substringBeforeLast("~")
+        // La ✕ lo cierra para siempre (para ese capítulo y esa letra)
+        if (Prefs.inkHintHidden(book.id, "$href|$look")) { ui.inkOther = null; return }
+        ui.inkOther = best.value to look
+    }
+
+    private fun hideInkHint() {
+        val o = ui.inkOther ?: return
+        val href = inkKey()?.split("|")?.getOrNull(1) ?: return
+        Prefs.hideInkHint(book.id, "$href|${o.second}")
+        ui.inkOther = null
     }
 
     private fun toggleInk() {
-        if (!inkUi.on && inkKey() == null) { ui.say("La pluma funciona en modo páginas, no en desplazamiento"); return }
+        if (!inkUi.on && inkKey() == null) { ui.say("La pluma funciona en Páginas (en Continuo llega pronto)"); return }
         inkUi.on = !inkUi.on
         ui.inking = inkUi.on
         if (inkUi.on) { setControls(false); note.minimize() }
@@ -494,7 +509,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private fun togglePairLink() {
         ui.pairLinked = !ui.pairLinked; Prefs.pairLinked = ui.pairLinked
         ui.say(if (ui.pairLinked) "Casadas: pasan página juntas" else "Separadas: cada una a su ritmo")
-        if (ui.pairLinked) navigator?.currentLocator?.value?.let { syncPair(it, force = true) }
+        if (ui.pairLinked) (navigator?.currentLocator?.value ?: contLoc)?.let { syncPair(it, force = true) }
     }
 
     private fun swapPair() {
@@ -523,7 +538,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         ui.lang = book.lang.ifBlank { pub.metadata.languages.firstOrNull().orEmpty() }.ifBlank { "en" }
         ui.toc = flatten(pub.tableOfContents, 0)
         val initial = book.locator?.let { runCatching { Locator.fromJSON(JSONObject(it)) }.getOrNull() }
-        if (ui.settings.continuous) { openContinuous(pub, initial); return }
+        // "Desplazamiento" ya no existe: todo lo que baja con el dedo se lee en Continuo
+        if (ui.settings.continuous || ui.settings.scroll) { openContinuous(pub, initial); return }
         val factory = EpubNavigatorFactory(pub, EpubNavigatorFactory.Configuration(defaults = EpubDefaults(pageMargins = 1.2)))
         supportFragmentManager.fragmentFactory = factory.createFragmentFactory(
             initialLocator = initial,
@@ -584,7 +600,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         ui.loading = false
         Log.i("Zerkalo", "ZK_READER_OK ${book.title}")
         refreshPairInfo()
-        if (cont == null && ui.hasPair && Prefs.pairOn(book.id)) showPair(true)
+        if (ui.hasPair && Prefs.pairOn(book.id)) showPair(true)
         lifecycleScope.launch { delay(1600); setControls(false) }
     }
 
@@ -599,18 +615,27 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                 contLoc = loc
                 onLocator(loc, turn = !first)
             }
-            override fun onTap(fx: Float) {
+            override fun onTap(fx: Float, fy: Float, x: Float, y: Float) {
                 lastTouch = System.currentTimeMillis()
                 when {
                     ui.lookup != null -> ui.lookup = null
+                    // Modo traducir: tocar una palabra la traduce (los bordes siguen pasando página)
+                    ui.studyTap && fy in 0.1f..0.9f && fx in 0.16f..0.84f -> lifecycleScope.launch { if (!contLookUp(x, y)) setControls(!ui.controls) }
                     fx < 0.28f -> contPage(-1)
                     fx > 0.72f -> contPage(1)
                     else -> setControls(!ui.controls)
                 }
             }
+            override fun onMark(id: String) {
+                val m = ui.marks.firstOrNull { it.id == id } ?: return
+                if (m.type == "sticky") sticky = m else ui.activeMark = m
+            }
+            override fun onSelection(id: Int, json: String?) { contSelection(id, json) }
             override fun onLoaded(index: Int) { contTypeset() }
             override fun onReady() { Log.i("Zerkalo", "ZK_CONT_OK ${book.title}") }
         })
+        // El mismo menú de texto seleccionado que en Páginas
+        v.menu = listOf(101 to "Subrayar", 107 to "Nota adhesiva", 106 to "Al apunte", 103 to "Copiar", 104 to "Traducir", 105 to "Tarjeta")
         cont = v
         mainContainer.visibility = View.GONE
         panes.addView(v, 0)
@@ -627,6 +652,45 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val base = list?.getOrNull(((list.size - 1) * progression).toInt().coerceIn(0, (list.size - 1).coerceAtLeast(0)))
             ?: pub.readingOrder.getOrNull(index)?.let { pub.locatorFromLink(it) } ?: return null
         return base.copyWithLocations(progression = progression)
+    }
+
+    /** Una opción del menú de texto seleccionado en el modo continuo. */
+    private fun contSelection(id: Int, json: String?) {
+        val o = json?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return
+        val t = o.optString("t").trim()
+        if (t.isEmpty()) return
+        val base = locatorAt(o.optInt("i"), o.optDouble("p", 0.0)) ?: return
+        // El mismo tipo de marca que en Páginas: así un subrayado hecho aquí se ve también allá
+        val loc = base.copy(text = Locator.Text(before = o.optString("b"), highlight = t, after = o.optString("a")))
+        cont?.clearSelection()
+        when (id) {
+            101 -> saveHighlight(loc, Prefs.lastInk, "")
+            107 -> {
+                val m = Mark(
+                    id = "n" + System.currentTimeMillis().toString(36), bookId = book.id, type = "sticky",
+                    locator = loc.toJSON().toString(), text = t, chapter = ui.chapter,
+                    progress = loc.locations.totalProgression ?: ui.progress.toDouble(),
+                )
+                Library.putMark(m); refreshMarks(); sticky = m
+            }
+            106 -> { com.sebas.zerkalo.data.Apuntes.addQuote(book.id, t, ui.chapter.take(40)); note.open() }
+            103 -> (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("Zerkalo", t))
+            104 -> startLookup(t, o.optString("b").takeLast(160) + t + o.optString("a").take(160), ui.lang, loc.toJSON().toString())
+            105 -> ui.cardDraft = CardDraft(t, loc.toJSON().toString(), null)
+        }
+    }
+
+    /** Traducir tocando en el modo continuo: la palabra que está bajo el dedo ([x], [y] en píxeles). */
+    private suspend fun contLookUp(x: Float, y: Float): Boolean {
+        val v = cont ?: return false
+        val js = WORD_AT_POINT.replace("__X__", x.toString()).replace("__Y__", y.toString())
+        val raw = kotlinx.coroutines.suspendCancellableCoroutine<String?> { k -> v.evaluateJavascript(js) { r -> if (k.isActive) k.resumeWith(Result.success(r)) } }
+        if (raw.isNullOrBlank() || raw == "null") return false
+        val o = runCatching { JSONObject(raw) }.getOrNull() ?: return false
+        val word = o.optString("w").trim()
+        if (word.isEmpty()) return false
+        startLookup(word, o.optString("s"), ui.lang, contLoc?.toJSON()?.toString().orEmpty())
+        return true
     }
 
     private fun contPage(dir: Int) {
@@ -653,7 +717,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private fun contMarks(): org.json.JSONArray {
         val v = cont
         val a = org.json.JSONArray()
-        for (m in ui.marks.filter { it.type == "hl" }) {
+        for (m in ui.marks.filter { it.type == "hl" || it.type == "sticky" }) {
             val loc = runCatching { Locator.fromJSON(JSONObject(m.locator)) }.getOrNull() ?: continue
             val pub = publication ?: continue
             val i = resourceIndex(pub, loc).takeIf { it >= 0 } ?: continue
@@ -661,7 +725,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             a.put(
                 JSONObject().put("h", v?.urlOf(i) ?: (ContinuousView.BASE + pub.readingOrder[i].url().toString().substringBefore('#')))
                     .put("t", loc.text.highlight ?: m.text).put("b", loc.text.before.orEmpty())
-                    .put("c", "rgba(${(c.red * 255).toInt()},${(c.green * 255).toInt()},${(c.blue * 255).toInt()},0.38)"),
+                    .put("c", if (m.type == "sticky") "transparent" else "rgba(${(c.red * 255).toInt()},${(c.green * 255).toInt()},${(c.blue * 255).toInt()},0.38)")
+                    .put("id", m.id).put("k", if (m.type == "sticky") "s" else "h"),
             )
         }
         return a
@@ -708,6 +773,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         }
         listOf(null, 0.06, 0.14).getOrNull(r.spacing)?.let { sb.append("section.zk-ch{letter-spacing:${it}em !important;word-spacing:${it * 2.5}em !important}") }
         sb.append("::selection{background:rgba(196,67,42,0.28)}")
+        // Papelito de las notas adhesivas, al final de su frase
+        sb.append(".zk-stk{display:inline-block;width:.85em;height:.85em;margin-left:.2em;background:#EFD995 !important;border-radius:2px 2px 6px 2px;transform:rotate(-6deg) translateY(-.45em);box-shadow:1px 2px 4px rgba(0,0,0,.35);vertical-align:baseline;cursor:pointer}")
         return sb.toString()
     }
 
@@ -1481,6 +1548,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         export = { ui.sheet = "export" },
         ownLook = { on -> setOwnLook(on) },
         useLook = { look -> updateSettings(ui.settings.withLook(look)); ui.inkOther = null },
+        hideInkHint = { hideInkHint() },
         exportEpub = { exportEpub() },
         exportInk = { exportInkPages() },
         exportNote = { com.sebas.zerkalo.ui.shareTxt(this, book.title, com.sebas.zerkalo.data.Apuntes.flow(book.id).value) },
@@ -1521,7 +1589,6 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         openInks = { ui.activeMark = null; ui.sheet = "inks" },
         turn = { d -> turn(navigator, d) },
         toggleStudy = toggle@{
-            if (cont != null) { ui.say("Traducir tocando llega pronto al modo continuo"); return@toggle }
             ui.studyTap = !ui.studyTap; Prefs.studyTap = ui.studyTap
             ui.say(if (ui.studyTap) "Toca una palabra para traducirla" else "Modo estudio apagado")
             if (ui.studyTap) setControls(false)
@@ -1537,7 +1604,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         pairCandidates = { Library.books.value.filter { it.id != book.id }.sortedWith(compareByDescending<Book> { it.author.isNotBlank() && it.author == book.author }.thenByDescending { it.lang.isNotBlank() && it.lang != book.lang }.thenByDescending { it.lastOpened }) },
         setPair = { other -> setPair(other) },
         togglePair = { showPair(!ui.pairOn) },
-        syncPair = { navigator?.currentLocator?.value?.let { syncPair(it, force = true) } },
+        syncPair = { (navigator?.currentLocator?.value ?: contLoc)?.let { syncPair(it, force = true) } },
         togglePairLink = { togglePairLink() },
         swapPair = { swapPair() },
         setPairRatio = { setPairRatio(it) },
@@ -1707,7 +1774,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             pairLang = other.lang.ifBlank { pub.metadata.languages.firstOrNull().orEmpty() }.ifBlank { "en" }
             ui.pairLangLabel = pairLang.take(2).uppercase()
             ignorePairUntil = System.currentTimeMillis() + 2_000
-            val start = navigator?.currentLocator?.value?.let { mapLocator(it, publication ?: pub, pub) }
+            val start = (navigator?.currentLocator?.value ?: contLoc)?.let { mapLocator(it, publication ?: pub, pub) }
                 ?: other.locator?.let { runCatching { Locator.fromJSON(JSONObject(it)) }.getOrNull() }
             val ff = EpubNavigatorFactory(pub, EpubNavigatorFactory.Configuration(defaults = EpubDefaults(pageMargins = 1.2)))
                 .createFragmentFactory(initialLocator = start, initialPreferences = preferences(ui.settings, ui.palette), listener = this@ReaderActivity, configuration = navConfig())
@@ -1720,7 +1787,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             pairJob = lifecycleScope.launch { repeatOnLifecycle(Lifecycle.State.STARTED) { frag.currentLocator.collect { typeset(frag); syncMain(it) } } }
             ui.pairOn = true; Prefs.setPairOn(book.id, true)
             pairPositions = runCatching { pub.positionsByReadingOrder() }.getOrDefault(emptyList())
-            navigator?.currentLocator?.value?.let { syncPair(it, force = true) }
+            (navigator?.currentLocator?.value ?: contLoc)?.let { syncPair(it, force = true) }
         }
     }
 
@@ -1762,6 +1829,18 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     /** Al pasar página en la pareja, el libro principal la sigue (si están casadas). */
     private fun syncMain(loc: Locator) {
         if (!ui.pairLinked || System.currentTimeMillis() < ignorePairUntil) return
+        // Modo continuo: el libro principal va al mismo punto, sin mover los controles
+        if (navigator == null && cont != null) {
+            val pp = pairPub ?: return
+            val mp = publication ?: return
+            val target = mapLocator(loc, pp, mp) ?: return
+            val i = resourceIndex(mp, target).takeIf { it >= 0 } ?: return
+            val cur = contLoc
+            if (cur != null && cur.href.toString() == target.href.toString() && abs((cur.locations.progression ?: 0.0) - (target.locations.progression ?: 0.0)) < 0.01) return
+            ignoreMainUntil = System.currentTimeMillis() + 900
+            cont?.go(i, target.locations.progression ?: 0.0)
+            return
+        }
         val nav = navigator ?: return
         val pp = pairPub ?: return
         val mp = publication ?: return
@@ -1826,6 +1905,7 @@ class ReaderActions(
     val export: () -> Unit = {},
     val ownLook: (Boolean) -> Unit = {},
     val useLook: (String) -> Unit = {},
+    val hideInkHint: () -> Unit = {},
     val exportEpub: () -> Unit = {},
     val exportInk: () -> Unit = {},
     val exportNote: () -> Unit = {},

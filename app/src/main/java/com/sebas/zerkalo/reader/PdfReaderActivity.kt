@@ -520,10 +520,7 @@ class PdfReaderActivity : AppCompatActivity() {
                 ) {
                     CircleButton("toc", { goTo = true }, size = 44.dp, desc = "Ir a la página")
                     CircleButton("aa", { lightSheet = true }, size = 44.dp, desc = "Aspecto")
-                    Box(
-                        Modifier.size(44.dp).clip(CircleShape).background(p.surface.copy(alpha = if (p.isDark) 0.85f else 1f)).clickable { tools = true },
-                        contentAlignment = Alignment.Center,
-                    ) { Text("✎", style = Type.title.copy(fontSize = 19.sp), color = p.text) }
+                    CircleButton("pluma", { tools = true }, size = 44.dp, desc = "Herramientas")
                     com.sebas.zerkalo.ui.NoteButton(note, 44.dp)
                 }
             }
@@ -608,18 +605,18 @@ class PdfReaderActivity : AppCompatActivity() {
                 com.sebas.zerkalo.ui.Caption("Herramientas", accent = true)
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth()) {
-                    com.sebas.zerkalo.ui.ToolTile("✎", "Pluma", Modifier.weight(1f)) { tools = false; ink(com.sebas.zerkalo.ui.InkTool.PEN) }
-                    com.sebas.zerkalo.ui.ToolTile("▌", "Resaltador", Modifier.weight(1f)) { tools = false; ink(com.sebas.zerkalo.ui.InkTool.MARKER) }
-                    com.sebas.zerkalo.ui.ToolTile("▤", "Nota adhesiva", Modifier.weight(1f), tint = com.sebas.zerkalo.ui.StickyPaper) {
+                    com.sebas.zerkalo.ui.ToolTile("pluma", "Pluma", Modifier.weight(1f)) { tools = false; ink(com.sebas.zerkalo.ui.InkTool.PEN) }
+                    com.sebas.zerkalo.ui.ToolTile("resaltador", "Resaltador", Modifier.weight(1f)) { tools = false; ink(com.sebas.zerkalo.ui.InkTool.MARKER) }
+                    com.sebas.zerkalo.ui.ToolTile("nota-adhesiva", "Nota adhesiva", Modifier.weight(1f), tint = com.sebas.zerkalo.ui.StickyPaper) {
                         tools = false; controls = false; placing = true
                     }
-                    com.sebas.zerkalo.ui.ToolTile("⌫", "Borrar", Modifier.weight(1f)) { tools = false; ink(com.sebas.zerkalo.ui.InkTool.ERASER) }
+                    com.sebas.zerkalo.ui.ToolTile("borrar", "Borrar", Modifier.weight(1f)) { tools = false; ink(com.sebas.zerkalo.ui.InkTool.ERASER) }
                 }
                 Row(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                    com.sebas.zerkalo.ui.ToolTile("⇪", "Exportar", Modifier.weight(1f)) { tools = false; exporting = true }
-                    com.sebas.zerkalo.ui.ToolTile("⌕", "Buscar", Modifier.weight(1f)) { tools = false; searching = true }
-                    com.sebas.zerkalo.ui.ToolTile("☼", "Luz", Modifier.weight(1f)) { tools = false; lightSheet = true }
-                    com.sebas.zerkalo.ui.ToolTile("#", "Ir a página", Modifier.weight(1f)) { tools = false; goTo = true }
+                    com.sebas.zerkalo.ui.ToolTile("share", "Exportar", Modifier.weight(1f)) { tools = false; exporting = true }
+                    com.sebas.zerkalo.ui.ToolTile("search", "Buscar", Modifier.weight(1f)) { tools = false; searching = true }
+                    com.sebas.zerkalo.ui.ToolTile("sun", "Luz", Modifier.weight(1f)) { tools = false; lightSheet = true }
+                    com.sebas.zerkalo.ui.ToolTile("toc", "Ir a página", Modifier.weight(1f)) { tools = false; goTo = true }
                 }
             }
         }

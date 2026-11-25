@@ -102,8 +102,11 @@ fun InkPill(ui: InkUi, onUndo: () -> Unit, onDone: () -> Unit, modifier: Modifie
                     },
                     contentAlignment = Alignment.Center,
                 ) { Box(Modifier.size(22.dp, 3.dp).clip(RoundedCornerShape(2.dp)).background(p.text2.copy(alpha = 0.5f))) }
-                val glyph = when (ui.tool) { InkTool.PEN -> "✎"; InkTool.MARKER -> "▌"; InkTool.ERASER -> "⌫" }
-                Round(glyph, p.accent, Color.White) { open = if (open == "tool") null else "tool" }
+                val icon = when (ui.tool) { InkTool.PEN -> "pluma"; InkTool.MARKER -> "resaltador"; InkTool.ERASER -> "borrar" }
+                Box(
+                    Modifier.size(40.dp).clip(CircleShape).background(p.accent).clickable { open = if (open == "tool") null else "tool" },
+                    contentAlignment = Alignment.Center,
+                ) { ZIcon(icon, Color.White, 21.dp) }
                 Box(
                     Modifier.size(40.dp).clip(CircleShape).background(p.surface).clickable { open = if (open == "color") null else "color" },
                     contentAlignment = Alignment.Center,
@@ -136,15 +139,15 @@ private fun ToolChip(label: String, on: Boolean, onClick: () -> Unit) {
     ) { Text(label, style = Type.uiSmall.copy(fontSize = 13.sp), color = if (on) Color.White else p.text) }
 }
 
-/** Cuadrito para la bandeja de herramientas: un ícono o letra grande y su nombre debajo. */
+/** Cuadrito para la bandeja de herramientas: un ícono de trazo fino (como el resto de la app) y su nombre debajo. */
 @Composable
-fun ToolTile(glyph: String, label: String, modifier: Modifier = Modifier, active: Boolean = false, tint: Color? = null, onClick: () -> Unit) {
+fun ToolTile(icon: String, label: String, modifier: Modifier = Modifier, active: Boolean = false, tint: Color? = null, onClick: () -> Unit) {
     val p = LocalPalette.current
     Column(modifier.clip(RoundedCornerShape(14.dp)).clickable(onClick = onClick).padding(vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         Box(
             Modifier.size(54.dp).clip(RoundedCornerShape(16.dp)).background(tint ?: if (active) p.accent else p.card.copy(alpha = 0.8f)),
             contentAlignment = Alignment.Center,
-        ) { Text(glyph, style = Type.title.copy(fontSize = 21.sp), color = if (active) Color.White else if (tint != null) Color(0xFF3B2B1A) else p.text) }
+        ) { ZIcon(icon, if (active) Color.White else if (tint != null) Color(0xFF3B2B1A) else p.text, 27.dp) }
         Text(label, style = Type.uiSmall.copy(fontSize = 11.5.sp), color = p.text2, maxLines = 1, modifier = Modifier.padding(top = 6.dp).width(76.dp), textAlign = androidx.compose.ui.text.style.TextAlign.Center)
     }
 }
