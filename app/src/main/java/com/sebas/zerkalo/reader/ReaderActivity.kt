@@ -872,7 +872,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                 val faces = GFontInject.dataUrls(this@ReaderActivity, ui.settings.font)
                 if (faces.isNotEmpty()) addFontFamilyDeclaration(FontFamily(g.family)) {
                     faces.forEach { (url, italic, bold) ->
-                        org.readium.r2.shared.util.AbsoluteUrl(url)?.let { u ->
+                        org.readium.r2.shared.util.Url(url)?.let { u ->
                             addFontFace {
                                 addSource(u)
                                 setFontStyle(if (italic) org.readium.r2.navigator.epub.css.FontStyle.ITALIC else org.readium.r2.navigator.epub.css.FontStyle.NORMAL)

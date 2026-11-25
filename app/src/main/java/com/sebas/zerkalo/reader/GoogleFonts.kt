@@ -183,9 +183,15 @@ object GoogleFonts {
             val q = URLEncoder.encode(family, "UTF-8").replace("%20", "+")
             val tries = listOf("$q:ital,wght@0,400;0,700;1,400", "$q:wght@400;700", q)
             var css: String? = null
-            for (t in tries) {
-                css = runCatching { get("https://fonts.googleapis.com/css2?family=$t") }.getOrNull()
-                if (css != null && css.contains("@font-face")) break
+            // Dos vueltas: si el internet falla un momento, se intenta de nuevo
+            run vueltas@{
+                repeat(2) { vuelta ->
+                    if (vuelta > 0) Thread.sleep(1500)
+                    for (t in tries) {
+                        css = runCatching { get("https://fonts.googleapis.com/css2?family=$t") }.getOrNull()
+                        if (css?.contains("@font-face") == true) return@vueltas
+                    }
+                }
             }
             if (css == null || !css.contains("@font-face")) throw IllegalStateException("No encontré «$family» en Google Fonts")
             val target = File(dir(ctx), slug(family)).apply { mkdirs() }
