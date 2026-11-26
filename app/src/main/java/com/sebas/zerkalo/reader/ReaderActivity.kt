@@ -96,6 +96,9 @@ import org.readium.r2.navigator.preferences.Color as RColor
 /** Una entrada del índice, ya aplanada. */
 data class TocEntry(val title: String, val link: Link, val depth: Int)
 
+/** Dirección de un archivo del libro, limpia para comparar (sin #, sin %C3%A1, sin "./"). */
+fun hnorm(s: String): String = android.net.Uri.decode(s.substringBefore('#')).replace("/./", "/").removePrefix("./")
+
 
 /** Colores de letra para papel oscuro. El último lo elige la persona. */
 val InkNames = listOf("Original", "Azul claro", "Blanco cálido", "Gris perla", "Ámbar suave", "Mío")
@@ -170,6 +173,12 @@ class ReaderUi {
     var edgeReady by mutableStateOf(false)        // ya basta con soltar para cambiar de capítulo
     var auto by mutableStateOf(false)             // avance automático encendido
     var tocTab by mutableIntStateOf(0)
+    var tocMade by mutableStateOf(false) // el índice lo armó Zerkalo (el libro no traía)
+    // La lupa: buscar en todo el libro
+    var findQuery by mutableStateOf("")
+    var findHits by mutableStateOf<List<BookText.Hit>?>(null)
+    var findBusy by mutableStateOf(false)
+    var findTitles by mutableStateOf<Map<Int, String>>(emptyMap())
     val tocState = androidx.compose.foundation.lazy.LazyListState()
     val marksState = androidx.compose.foundation.lazy.LazyListState()
     var marksFilter by mutableStateOf<Int?>(null)
@@ -597,6 +606,17 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         publication = pub
         ui.lang = book.lang.ifBlank { pub.metadata.languages.firstOrNull().orEmpty() }.ifBlank { "en" }
         ui.toc = flatten(pub.tableOfContents, 0)
+        bookText = BookText(pub)
+        if (ui.toc.isEmpty() && pub.readingOrder.isNotEmpty()) {
+            // El libro no trae índice: se arma uno con sus partes, y luego con el primer título de cada una
+            ui.tocMade = true
+            ui.toc = pub.readingOrder.mapIndexed { i, l -> TocEntry(l.title?.trim()?.takeIf { it.isNotEmpty() } ?: "Parte ${i + 1}", l, 0) }
+            lifecycleScope.launch {
+                val bt = bookText ?: return@launch
+                val named = pub.readingOrder.mapIndexed { i, l -> TocEntry(l.title?.trim()?.takeIf { it.isNotEmpty() } ?: bt.heading(i) ?: "Parte ${i + 1}", l, 0) }
+                ui.toc = named
+            }
+        }
         val initial = book.locator?.let { runCatching { Locator.fromJSON(JSONObject(it)) }.getOrNull() }
         // "Desplazamiento" ya no existe: todo lo que baja con el dedo se lee en Continuo
         if (ui.settings.continuous || ui.settings.scroll) { openContinuous(pub, initial); return }
@@ -693,6 +713,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             override fun onSelection(id: Int, json: String?) { contSelection(id, json) }
             override fun onLoaded(index: Int) { contTypeset() }
             override fun onReady() { Log.i("Zerkalo", "ZK_CONT_OK ${book.title}") }
+            override fun onMissing(url: String) { ui.say("Ese capítulo no está dentro del libro") }
         })
         // El mismo menú de texto seleccionado que en Páginas
         v.menu = listOf(101 to "Subrayar", 107 to "Nota adhesiva", 106 to "Al apunte", 103 to "Copiar", 104 to "Traducir", 105 to "Tarjeta")
@@ -832,7 +853,11 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         if (fam != null) sb.append(";font-family:'$fam',serif !important")
         sb.append("}")
         sb.append("section.zk-ch *{color:inherit !important;background-color:transparent !important}")
-        sb.append("section.zk-ch img,section.zk-ch svg,section.zk-ch video{max-width:100% !important;height:auto !important}")
+        sb.append("section.zk-ch img,section.zk-ch svg,section.zk-ch video{max-width:100% !important;height:auto !important;max-height:92vh !important;object-fit:contain}")
+        // Hojas de estilo de portadas que fijan el alto o esconden el resto: en el rollo continuo, todo baja
+        sb.append("html{overflow-y:auto !important;height:auto !important}body{overflow:visible !important;height:auto !important;min-height:0 !important;position:static !important}")
+        sb.append("section.zk-ch{position:relative}section.zk-skip{height:0}")
+        sb.append("mark.zk-find{background:rgba(226,190,82,.55) !important;color:inherit !important;border-radius:3px;box-shadow:0 0 0 3px rgba(226,190,82,.55);transition:background 1s}")
         sb.append("section.zk-ch a{text-decoration:none !important;border-bottom:1px solid currentColor}")
         sb.append("section.zk-ch + section.zk-ch{margin-top:2.6em !important}")
         sb.append(".zk-body{margin:0 !important;padding:0 !important}")
@@ -1030,8 +1055,51 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private fun pubOf(nav: EpubNavigatorFragment): Publication? = if (nav === pairNav) pairPub else publication
 
     private fun resourceIndex(pub: Publication, loc: Locator): Int {
-        val href = loc.href.toString().substringBefore('#')
-        return pub.readingOrder.indexOfFirst { it.url().toString().substringBefore('#') == href }
+        val href = hnorm(loc.href.toString())
+        return pub.readingOrder.indexOfFirst { hnorm(it.url().toString()) == href }
+    }
+
+    // ---------------- la lupa ----------------
+    private var bookText: BookText? = null
+    private var findJob: kotlinx.coroutines.Job? = null
+
+    private fun findInBook(q: String) {
+        ui.findQuery = q
+        findJob?.cancel()
+        if (q.trim().length < 2) { ui.findHits = null; ui.findBusy = false; return }
+        val bt = bookText ?: return
+        ui.findBusy = true
+        findJob = lifecycleScope.launch {
+            delay(350) // se espera a que termine de escribir
+            val hits = runCatching { bt.search(q) }.getOrDefault(emptyList())
+            // El capítulo de cada resultado: la última entrada del índice que empieza en esa parte o antes
+            val pub = publication
+            if (pub != null) {
+                val starts = ui.toc.map { e -> e to pub.readingOrder.indexOfFirst { hnorm(it.url().toString()) == hnorm(e.link.url().toString()) } }.filter { it.second >= 0 }.sortedBy { it.second }
+                ui.findTitles = hits.map { it.chapter }.distinct().associateWith { c -> starts.lastOrNull { it.second <= c }?.first?.title ?: "Parte ${c + 1}" }
+            }
+            ui.findHits = hits
+            ui.findBusy = false
+        }
+    }
+
+    private fun goToHit(h: BookText.Hit) {
+        val pub = publication ?: return
+        ui.sheet = null; setControls(false)
+        val c = cont
+        if (c != null) { c.find(h.chapter, BookText.fold(h.match), h.nth); return }
+        val nav = navigator ?: return
+        val base = pub.locatorFromLink(pub.readingOrder[h.chapter]) ?: return
+        val loc = base.copy(
+            locations = base.locations.copy(progression = h.progression),
+            text = Locator.Text(before = h.before.removePrefix("…").takeLast(40), highlight = h.match, after = h.after.removeSuffix("…").take(40)),
+        )
+        nav.go(loc, animated = false)
+        lifecycleScope.launch {
+            runCatching { nav.applyDecorations(listOf(Decoration(id = "lupa", locator = loc, style = Decoration.Style.Highlight(tint = 0xFFE2BE52.toInt()))), "lupa") }
+            delay(3500)
+            runCatching { nav.applyDecorations(emptyList(), "lupa") }
+        }
     }
 
     private fun neighborTitle(nav: EpubNavigatorFragment, dir: Int): String {
@@ -1100,8 +1168,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val byTitle = entries.indexOfLast { it.title == ui.chapter }
         if (byTitle >= 0) return byTitle
         val loc = navigator?.currentLocator?.value ?: contLoc ?: return 0
-        val href = loc.href.toString().substringBefore('#')
-        return entries.indexOfLast { it.link.href.toString().substringBefore('#').let { h -> h.isNotEmpty() && (href.endsWith(h) || h.endsWith(href)) } }.coerceAtLeast(0)
+        val href = hnorm(loc.href.toString())
+        return entries.indexOfLast { hnorm(it.link.href.toString()).let { h -> h.isNotEmpty() && (href.endsWith(h) || h.endsWith(href)) } }.coerceAtLeast(0)
     }
 
     /** El capítulo del audiolibro que corresponde a donde vas leyendo. */
@@ -1313,8 +1381,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     }
 
     private fun chapterFor(loc: Locator): String? {
-        val href = loc.href.toString().substringBefore('#')
-        return ui.toc.lastOrNull { it.link.href.toString().substringBefore('#').let { h -> h.isNotEmpty() && (href.endsWith(h) || h.endsWith(href)) } }?.title
+        val href = hnorm(loc.href.toString())
+        return ui.toc.lastOrNull { hnorm(it.link.href.toString()).let { h -> h.isNotEmpty() && (href.endsWith(h) || h.endsWith(href)) } }?.title
     }
 
     private fun chapterLeft(pos: Int?): String {
@@ -1666,6 +1734,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             else { navigator?.go(l, animated = false); setControls(false) }
         },
         settings = { updateSettings(it) },
+        find = { findInBook(it) },
+        goHit = { goToHit(it) },
         removeMark = { Library.removeMark(it.id); ui.activeMark = null; refreshMarks() },
         saveNote = { loc, note -> saveHighlight(loc, 1, note); ui.noteFor = null },
         recolor = { m, c -> Prefs.lastInk = c; Library.putMark(m.copy(color = c)); ui.activeMark = null; refreshMarks() },
@@ -2018,6 +2088,8 @@ class ReaderActions(
     val toggleShiori: () -> Unit,
     val go: (Locator) -> Unit,
     val goLink: (Link) -> Unit,
+    val find: (String) -> Unit,
+    val goHit: (BookText.Hit) -> Unit,
     val settings: (ReaderSettings) -> Unit,
     val removeMark: (Mark) -> Unit,
     val saveNote: (Locator, String) -> Unit,

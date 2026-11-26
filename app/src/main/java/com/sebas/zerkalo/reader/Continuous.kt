@@ -47,6 +47,8 @@ class ContinuousView(ctx: Context, private val pub: Publication, private val cb:
         fun onLoaded(index: Int)
         /** Ya se ve el punto de partida. */
         fun onReady()
+        /** El índice apuntó a un archivo que el libro no tiene. */
+        fun onMissing(url: String) {}
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -152,6 +154,7 @@ class ContinuousView(ctx: Context, private val pub: Publication, private val cb:
         @JavascriptInterface fun mark(id: String) = main.post { cb.onMark(id) }
         @JavascriptInterface fun loaded(i: Int) = main.post { cb.onLoaded(i) }
         @JavascriptInterface fun ready() = main.post { cb.onReady() }
+        @JavascriptInterface fun missing(url: String) = main.post { cb.onMissing(url) }
     }
 
     /** Todo el libro va hacia abajo: nunca se deja correr hacia los lados (cortaría el texto). */
@@ -198,6 +201,7 @@ class ContinuousView(ctx: Context, private val pub: Publication, private val cb:
     fun applyCss(css: String) = js("zk.css(${JSONObject.quote(css)});")
     fun go(index: Int, progression: Double) = js("zk.go($index, $progression);")
     fun goHref(url: String) = js("zk.goHref(${JSONObject.quote(url)});")
+    fun find(index: Int, query: String, nth: Int) = js("zk.find($index, ${JSONObject.quote(query)}, $nth);")
     fun page(dir: Int) = js("zk.page($dir);")
     fun setMarks(marks: JSONArray) = js("zk.marks($marks);")
 
@@ -298,10 +302,44 @@ function markIn(root, m) {
   }
 }
 
+// Dirección limpia para comparar (algunos libros escriben el mismo archivo con tildes o con %C3%A1)
+function nrm(u) { u = String(u || '').split('#')[0]; try { u = decodeURIComponent(u); } catch (e) {} return u.replace(/\/\.\//g, '/'); }
+function idxOf(u) {
+  var n = nrm(u), i = Z.ch.indexOf(u.split('#')[0]);
+  if (i >= 0) return i;
+  for (var k = 0; k < Z.ch.length; k++) if (nrm(Z.ch[k]) === n) return k;
+  var f = n.split('/').pop();
+  for (var k2 = 0; k2 < Z.ch.length; k2++) if (nrm(Z.ch[k2]).split('/').pop() === f) return k2;
+  return -1;
+}
+
+// Lo que el libro trae y rompe el rollo continuo (portadas "a pantalla completa", cajas fijas): se suelta
+function tame(inner) {
+  var all = inner.querySelectorAll('*'), vh = window.innerHeight;
+  for (var k = 0; k < all.length && k < 4000; k++) {
+    var e = all[k], cs = getComputedStyle(e);
+    if (cs.position === 'fixed' || cs.position === 'absolute' || cs.position === 'sticky') e.style.setProperty('position', 'static', 'important');
+    if (cs.overflowY === 'hidden' || cs.overflowY === 'scroll' || cs.overflowY === 'auto') e.style.setProperty('overflow', 'visible', 'important');
+    var tag = e.tagName.toLowerCase();
+    if (tag !== 'img' && tag !== 'svg' && tag !== 'image' && e.getBoundingClientRect().height > vh * 1.6 && !(e.textContent || '').trim()) e.style.setProperty('height', 'auto', 'important');
+  }
+}
+
+// Un capítulo que no se pudo abrir: queda un espacio vacío y la lectura sigue con el siguiente
+function placeholder(i) {
+  if (sec(i)) return;
+  var s = d.createElement('section'); s.className = 'zk-ch zk-skip'; s.setAttribute('data-i', i); s.setAttribute('data-href', Z.ch[i]);
+  var next = secs().filter(function(x){ return +x.getAttribute('data-i') > i; })[0];
+  if (next) d.body.insertBefore(s, next); else d.body.appendChild(s);
+}
+
 function load(i, where) {
   if (i < 0 || i >= Z.ch.length || sec(i)) return Promise.resolve(false);
-  var url = Z.ch[i];
-  return fetch(url).then(function(r){ return r.text(); }).then(function(t){
+  var url = Z.ch[i], done = false;
+  // Si tarda demasiado, se sigue sin él (nunca más "cargando" para siempre)
+  var late = new Promise(function(res){ setTimeout(function(){ if (!done) { done = true; console.error('capitulo ' + i + ': tardó demasiado'); placeholder(i); } res(true); }, 8000); });
+  var work = fetch(url).then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); }).then(function(t){
+    if (done || sec(i)) return true;
     var xml = /\.x?html?$/i.test(url) && t.indexOf('<?xml') >= 0;
     var doc = new DOMParser().parseFromString(t, xml ? 'application/xhtml+xml' : 'text/html');
     if (doc.getElementsByTagName('parsererror').length) doc = new DOMParser().parseFromString(t, 'text/html');
@@ -323,10 +361,15 @@ function load(i, where) {
       var next = list.filter(function(x){ return +x.getAttribute('data-i') > i; })[0];
       if (next) d.body.insertBefore(s, next); else d.body.appendChild(s);
     }
+    try { tame(inner); } catch (e) {}
     Z.marks.filter(function(m){ return m.h === url; }).forEach(function(m){ markIn(inner, m); });
+    // Las imágenes cambian el alto al cargar: se vuelve a revisar qué falta pegar
+    [].slice.call(inner.querySelectorAll('img')).forEach(function(im){ if (!im.complete) im.addEventListener('load', function(){ setTimeout(keep, 60); }, { once: true }); });
+    done = true;
     ZKA.loaded(i);
     return true;
-  }).catch(function(e){ console.error('capitulo ' + i + ': ' + e); return false; });
+  }).catch(function(e){ console.error('capitulo ' + i + ': ' + e); if (!done) { done = true; placeholder(i); } return true; });
+  return Promise.race([work, late]);
 }
 
 // El elemento que está a la altura de la lectura (justo debajo del margen de arriba)
@@ -354,8 +397,9 @@ function keep() {
   var list = secs(); if (!list.length) return;
   var h = window.innerHeight, first = list[0], last = list[list.length - 1];
   var job = null;
-  if (last.getBoundingClientRect().bottom < h * 3) job = load(+last.getAttribute('data-i') + 1, 1);
-  else if (first.getBoundingClientRect().top > -h * 1.5) job = load(+first.getAttribute('data-i') - 1, -1);
+  var li = +last.getAttribute('data-i'), fi = +first.getAttribute('data-i');
+  if (li < Z.ch.length - 1 && last.getBoundingClientRect().bottom < h * 3) job = load(li + 1, 1);
+  else if (fi > 0 && first.getBoundingClientRect().top > -h * 1.5) job = load(fi - 1, -1);
   else if (list.length > 6) {
     // Demasiados capítulos pegados: se quita el más lejano (si es de arriba, sin mover lo que se lee)
     var a = list[0].getBoundingClientRect(), b = list[list.length - 1].getBoundingClientRect();
@@ -408,6 +452,33 @@ window.zk = {
     });
   },
   css: function(css) { d.getElementById('zk-base').textContent = css; },
+  // Ir a un resultado de la lupa: la vez [n] que aparece [q] (ya sin tildes ni mayúsculas) en el capítulo [i]
+  find: function(i, q, n) {
+    var then = function(){
+      var s = sec(i); if (!s) return;
+      var fold = function(c){ return c.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().charAt(0) || c; };
+      var w = d.createTreeWalker(s, NodeFilter.SHOW_TEXT, null), nodes = [], text = '', node;
+      while ((node = w.nextNode())) { nodes.push([node, text.length]); var v = node.nodeValue; for (var k = 0; k < v.length; k++) text += fold(v[k]); }
+      var at = -1, from = 0;
+      for (var c = 0; c <= n; c++) { at = text.indexOf(q, from); if (at < 0) break; from = at + 1; }
+      if (at < 0) { scrollToIn(s, 0); return; }
+      var a = null, b = null;
+      for (var j = 0; j < nodes.length; j++) {
+        var st = nodes[j][1], len = nodes[j][0].nodeValue.length;
+        if (!a && at < st + len) a = [nodes[j][0], at - st];
+        if (at + q.length <= st + len) { b = [nodes[j][0], at + q.length - st]; break; }
+      }
+      if (!a || !b) return;
+      var r = d.createRange(); r.setStart(a[0], a[1]); r.setEnd(b[0], b[1]);
+      var box = r.getBoundingClientRect();
+      window.scrollTo(0, window.scrollY + box.top - window.innerHeight * 0.35);
+      try { var m = d.createElement('mark'); m.className = 'zk-find'; r.surroundContents(m);
+        setTimeout(function(){ var p = m.parentNode; if (!p) return; while (m.firstChild) p.insertBefore(m.firstChild, m); p.removeChild(m); p.normalize(); }, 3500);
+      } catch (e) { var sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(r); setTimeout(function(){ sel.removeAllRanges(); }, 2500); }
+      report();
+    };
+    if (sec(i)) then(); else { zk.go(i, 0); setTimeout(then, 700); }
+  },
   go: function(i, p) {
     var s = sec(i);
     if (s) { scrollToIn(s, p); report(); return; }
@@ -417,8 +488,8 @@ window.zk = {
     load(i, 1).then(function(){ var t = sec(i); if (t) scrollToIn(t, p); setTimeout(function(){ if (t) scrollToIn(t, p); Z.busy = false; Z.started = true; keep(); report(); }, 150); });
   },
   goHref: function(url) {
-    var base = url.split('#')[0], frag = url.split('#')[1], i = Z.ch.indexOf(base);
-    if (i < 0) return;
+    var frag = url.split('#')[1], i = idxOf(url);
+    if (i < 0) { ZKA.missing(url); return; }
     var then = function(){
       var s = sec(i); if (!s) return;
       var t = frag ? s.querySelector('[id="' + frag.replace(/"/g, '') + '"],[name="' + frag.replace(/"/g, '') + '"]') : null;
