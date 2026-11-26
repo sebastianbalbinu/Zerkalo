@@ -1045,12 +1045,12 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
             1 -> {
                 Label("Diagramación", info = Info.LAYOUT)
                 val order = listOf(3, 0, 1)
-                Segmented(listOf("Ninguna", "Original", "Ajustada"), order.indexOf(s.layout).let { if (it < 0) 2 else it }, { act.settings(s.copy(layout = order[it])) })
+                Segmented(listOf("Ninguna", "Original", "Zerkalo"), order.indexOf(s.layout).let { if (it < 0) 2 else it }, { act.settings(s.copy(layout = order[it])) })
                 Text(
                     when (s.layout) {
                         3 -> "El libro tal cual, sin ningún arreglo de Zerkalo."
                         0 -> "El diseño de la editorial. Zerkalo solo arregla lo que se rompe en el teléfono: versalitas, palabras de otro tamaño y huecos en líneas angostas."
-                        else -> "A tu pantalla y a tu letra: el interlineado sigue el largo de la línea, títulos proporcionados y poemas verso a verso. Tus márgenes no los toca."
+                        else -> "La de siempre: en celular el texto va a la izquierda y sin palabras cortadas, cómodo como JW Library. Títulos proporcionados, poemas verso a verso. Tus márgenes no los toca."
                     },
                     style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp),
                 )
@@ -1064,8 +1064,8 @@ private fun TypeSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
                         s.dyslexia -> "El modo dislexia usa siempre texto a la izquierda."
                         align == 0 -> "Todo a la izquierda, sin guiones. Es lo más fácil para quien tiene dislexia."
                         align == 1 -> "Siempre justificado, con guiones para que no queden huecos. Títulos y poemas se respetan."
-                        ui.cpl in 1 until Fit.AUTO_JUSTIFY -> "Ahora tus líneas son cortas (menos de ${Fit.AUTO_JUSTIFY} letras): queda a la izquierda con guiones. Se justifica solo si achicas la letra o los márgenes."
-                        else -> "Justifica cuando caben ${Fit.AUTO_JUSTIFY} letras o más por línea; si no, a la izquierda con guiones."
+                        ui.cpl in 1 until Fit.AUTO_JUSTIFY -> "En celular queda a la izquierda y sin cortar palabras, lo más cómodo con líneas cortas. Se justifica solo en pantallas anchas (${Fit.AUTO_JUSTIFY} letras o más por línea)."
+                        else -> "Justifica cuando caben ${Fit.AUTO_JUSTIFY} letras o más por línea (tablet); si no, a la izquierda sin cortar palabras."
                     },
                     style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 8.dp),
                 )
@@ -1175,7 +1175,7 @@ private fun TypeHome(ui: ReaderUi, act: ReaderActions) {
     Text("¿Cómo quieres leer hoy?", style = Type.title.copy(fontSize = 21.sp), color = p.text)
     Text("Un toque y queda listo. Después puedes afinar.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 3.dp))
     val goals = listOf(
-        Triple("Leer de corrido", "Líneas cómodas, Continuo, texto parejo", 0),
+        Triple("Leer de corrido", "Líneas cómodas, Continuo, sin cortes", 0),
         Triple("Estudiar y retener", "Páginas, más aire, letra de libro", 1),
         Triple("Descansar la vista", "Letra grande, papel cálido", 2),
         Triple("Dislexia", "Letra clara, más espacio, a la izquierda", 3),
@@ -1536,7 +1536,7 @@ class Info(val text: String, val tips: List<String> = emptyList()) {
             listOf("Dislexia: Amplio"),
         )
         val LAYOUT = Info(
-            "Ninguna: el libro tal cual. Original: el diseño de la editorial, con arreglos mínimos. Ajustada: Zerkalo acomoda interlineado, títulos y poemas a tu pantalla y a tu letra (tus márgenes no los toca).",
+            "Ninguna: el libro tal cual. Original: el diseño de la editorial, con arreglos mínimos. Zerkalo: texto a la izquierda y sin palabras cortadas, como JW Library; además acomoda interlineado, títulos y poemas a tu pantalla y a tu letra (tus márgenes no los toca).",
         )
         val ALIGN = Info(
             "Justificado deja los dos bordes parejos, como un libro. A la izquierda el borde derecho queda irregular, pero el espacio entre palabras es siempre igual. Para la velocidad casi no hay diferencia; con dislexia, a la izquierda es más fácil.",

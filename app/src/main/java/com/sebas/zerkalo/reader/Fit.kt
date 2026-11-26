@@ -17,7 +17,7 @@ object Fit {
     const val IDEAL = 60
     const val MAX_REM = 34.0         // ancho máximo del texto (en "rem", crece con la letra): ~66 letras
     const val MIN_MM = 2.5f          // nunca menos margen que esto (salvo que tú lo pongas)
-    const val AUTO_JUSTIFY = 34      // "Automático" justifica desde 34 letras por línea (con guiones no deja huecos)
+    const val AUTO_JUSTIFY = 50      // "Automático" justifica solo desde 50 letras por línea (tablet); en celular queda a la izquierda, como JW Library
     private const val SAMPLE = "de la conquista del infinito y lo desconocido"
 
     private val faces = HashMap<Int, Typeface>()
@@ -77,9 +77,9 @@ object Fit {
 
     /** Interlineado: en "Ajustada" sigue el largo de la línea (cortas: más junto; largas: más aire). */
     fun lineHeight(r: ReaderSettings, cpl: Int): Float {
-        if (r.layout != 1 || r.dyslexia || cpl <= 0) return Letra.lineHeight(r)
-        val adj = ((cpl - IDEAL) * 0.004f).coerceIn(-0.15f, 0.08f)
-        return (r.lineHeight + adj).coerceAtLeast(minOf(r.lineHeight, 1.3f))
+        // Líneas cortas (celular) conservan tu interlineado: es lo que las hace cómodas. Solo las largas ganan aire.
+        if (r.layout != 1 || r.dyslexia || cpl <= IDEAL) return Letra.lineHeight(r)
+        return Letra.lineHeight(r) + ((cpl - IDEAL) * 0.004f).coerceAtMost(0.08f)
     }
 
     /** Alineación efectiva: el modo dislexia siempre a la izquierda. */

@@ -200,8 +200,8 @@ window.__zkRun = function(){
       var narrow = O.align === 2 && (O.mode === 0 || O.mode === 1) && e.clientWidth > 0 && perLine(e, cs) < O.minJ;
       if (O.align === 0 || narrow) {
         set(e, 'text-align', 'left'); set(e, 'text-align-last', 'auto');
-        var hy = narrow && O.lang ? 'auto' : 'manual';
-        set(e, 'hyphens', hy); set(e, '-webkit-hyphens', hy);
+        // Como antes (y como JW Library): a la izquierda y sin cortar palabras
+        set(e, 'hyphens', 'manual'); set(e, '-webkit-hyphens', 'manual');
       }
     }
   }
