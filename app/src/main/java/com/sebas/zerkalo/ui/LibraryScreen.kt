@@ -66,7 +66,29 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
 
     // Los documentos (PDF abiertos desde otra app) no van a los estantes: tienen su propia lista
-    val sorted = remember(books) { books.filter { !it.doc }.sortedByDescending { maxOf(it.lastOpened, it.addedAt) } }
+    var sortBy by remember { mutableStateOf(com.sebas.zerkalo.data.Prefs.librarySort) }
+    var filters by remember { mutableStateOf(LibFilter()) }
+    var filterSheet by remember { mutableStateOf(false) }
+    val audios by com.sebas.zerkalo.data.AudioStore.books.collectAsState()
+    val withAudio = remember(audios) { audios.mapNotNull { it.linkedBook }.toSet() }
+    val sorted = remember(books, sortBy, filters, withAudio) {
+        val now = System.currentTimeMillis()
+        val all = books.filter { !it.doc }.filter { b ->
+            (filters.genres.isEmpty() || b.genre in filters.genres) &&
+                (filters.authors.isEmpty() || b.author in filters.authors) &&
+                (filters.langs.isEmpty() || b.lang.take(2) in filters.langs) &&
+                (!filters.audio || b.id in withAudio) &&
+                (filters.recentDays == 0 || now - b.addedAt <= filters.recentDays * 86_400_000L)
+        }
+        when (sortBy) {
+            1 -> all.sortedByDescending { it.addedAt }
+            2 -> all.sortedBy { com.sebas.zerkalo.data.Catalogs.norm(it.title) }
+            3 -> all.sortedWith(compareBy({ com.sebas.zerkalo.data.Fuzzy.surname(it.author).ifEmpty { "~" } }, { com.sebas.zerkalo.data.Catalogs.norm(it.title) }))
+            4 -> all.sortedWith(compareByDescending<Book> { if (it.finished) -1.0 else it.progress }.thenByDescending { it.lastOpened })
+            5 -> all.sortedWith(compareByDescending<Book> { it.finishedAt }.thenByDescending { it.lastOpened })
+            else -> all.sortedByDescending { maxOf(it.lastOpened, it.addedAt) }
+        }
+    }
     val docCount = remember(books) { books.count { it.doc } }
     var tagSel by rememberSaveable { mutableStateOf<String?>(null) }
     val allTags = remember(books) { books.flatMap { it.tags }.distinct().sortedBy { it.lowercase() } }
@@ -122,6 +144,11 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
                         Spacer(Modifier.width(10.dp))
                         CircleButton("search", { searching = !searching; if (!searching) query = "" })
                         Spacer(Modifier.width(10.dp))
+                        Box {
+                            CircleButton("sort", { filterSheet = true }, desc = "Ordenar y filtrar")
+                            if (filters.count > 0 || sortBy != 0) Box(Modifier.align(Alignment.TopEnd).size(10.dp).clip(androidx.compose.foundation.shape.CircleShape).background(p.accent))
+                        }
+                        Spacer(Modifier.width(10.dp))
                         CircleButton("gear", { a.open(Screen.Settings) })
                     }
                     current?.let { ContinueBar(it) }
@@ -142,6 +169,20 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
                     items(allTags.size) { i -> val t = allTags[i]; SmallPill("#$t", tagSel == t) { tagSel = if (tagSel == t) null else t } }
                 }
             }
+            // Lo que está puesto, con su ✕: así siempre se sabe por qué no aparece un libro
+            if (filters.count > 0 || sortBy != 0) item(key = "active") {
+                androidx.compose.foundation.lazy.LazyRow(
+                    Modifier.fillMaxWidth().padding(top = 10.dp),
+                    contentPadding = PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    if (sortBy != 0) item { SmallPill(SORTS[sortBy] + "  ✕", true) { sortBy = 0; com.sebas.zerkalo.data.Prefs.librarySort = 0 } }
+                    items(filters.chips(books).size) { i ->
+                        val (label, drop) = filters.chips(books)[i]
+                        SmallPill("$label  ✕", true) { filters = drop() }
+                    }
+                    if (filters.count > 1) item { SmallPill("Limpiar todo", false) { filters = LibFilter() } }
+                }
+            }
             item(key = "inbox") { LibraryInbox() }
 
             if (books.isEmpty()) {
@@ -149,7 +190,7 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
             } else {
                 // Una sola cuadrícula: tres libros por estante, en el orden en que los abriste
                 shown.chunked(perRow).forEachIndexed { r, row ->
-                    item(key = "r-$estado-$tagSel-$perRow-$r-${row.first().id}", contentType = "estante") { ShelfGrid(row, coverW, onLong) }
+                    item(key = "r-$estado-$tagSel-$sortBy-${filters.hashCode()}-$perRow-$r-${row.first().id}", contentType = "estante") { ShelfGrid(row, coverW, onLong) }
                 }
                 if (query.isBlank() && tagSel == null && estado in listOf(0, 2)) item(key = "add") {
                     Row(
@@ -161,12 +202,20 @@ fun LibraryScreen(haze: HazeState, onReady: () -> Unit) {
                         Text("Buscar más libros en el Tansu", style = Type.ui, color = p.text2, modifier = Modifier.padding(start = 12.dp))
                     }
                 }
+                if (query.isBlank() && shown.isEmpty() && filters.count > 0) item(key = "nofilter") {
+                    Text("Ningún libro cumple estos filtros.", style = Type.ui, color = p.text2, modifier = Modifier.fillMaxWidth().padding(40.dp), textAlign = TextAlign.Center)
+                }
                 if (query.isNotBlank() && list.isEmpty()) item(key = "none") {
                     Text("Nada con «$query» en tu estante.", style = Type.ui, color = p.text2, modifier = Modifier.fillMaxWidth().padding(40.dp), textAlign = TextAlign.Center)
                 }
             }
         }
         CollapsingTop("Biblioteca", listState, Modifier.align(Alignment.TopCenter))
+        if (filterSheet) FilterSheet(
+            books.filter { !it.doc }, sortBy, filters, withAudio, estado, tagSel, allTags,
+            onSort = { sortBy = it; com.sebas.zerkalo.data.Prefs.librarySort = it },
+            onFilters = { filters = it }, onEstado = { estado = it }, onTag = { tagSel = it },
+        ) { filterSheet = false }
         ProgressiveEdge(haze, top = false, height = 150.dp, modifier = Modifier.align(Alignment.BottomCenter))
     }
     quick?.let { BookQuickSheet(it) { quick = null } }
@@ -257,6 +306,9 @@ private fun ShelfGrid(row: List<Book>, w: androidx.compose.ui.unit.Dp, onLong: (
                         },
                         ribbon = b.reading,
                     )
+                    if (b.lastOpened == 0L && System.currentTimeMillis() - b.addedAt < 3 * 86_400_000L) Box(
+                        Modifier.align(Alignment.TopEnd).padding(6.dp).clip(RoundedCornerShape(5.dp)).background(LocalPalette.current.accent).padding(horizontal = 5.dp, vertical = 1.dp),
+                    ) { Text("Nuevo", style = Type.uiSmall.copy(fontSize = 9.sp), color = Color(0xFFF7F1E6)) }
                     if (b.isPdf) Box(
                         Modifier.align(Alignment.TopStart).padding(6.dp).clip(RoundedCornerShape(5.dp)).background(Color(0xCC2E231D)).padding(horizontal = 5.dp, vertical = 1.dp),
                     ) { Text("PDF", style = Type.uiSmall.copy(fontSize = 9.sp), color = Color(0xFFF0E6D4)) }
@@ -349,4 +401,105 @@ private fun LibraryInbox() {
             }
         }
     }
+}
+
+
+private val SORTS = listOf("Último leído", "Recién añadidos", "Título A–Z", "Autor A–Z", "Más avanzado", "Terminados hace poco")
+
+/** Los filtros de la biblioteca (se pueden combinar). */
+data class LibFilter(
+    val genres: Set<String> = emptySet(),
+    val authors: Set<String> = emptySet(),
+    val langs: Set<String> = emptySet(),
+    val audio: Boolean = false,
+    val recentDays: Int = 0,
+) {
+    val count get() = genres.size + authors.size + langs.size + (if (audio) 1 else 0) + (if (recentDays > 0) 1 else 0)
+
+    /** Cada filtro puesto, con lo que queda al quitarlo. */
+    fun chips(books: List<Book>): List<Pair<String, () -> LibFilter>> = buildList {
+        genres.forEach { g -> add((com.sebas.zerkalo.data.Catalogs.TOPICS.firstOrNull { it.id == g }?.name ?: if (g == "-" || g.isBlank()) "Sin género" else g) to { copy(genres = genres - g) }) }
+        authors.forEach { au -> add(au.ifBlank { "Sin autor" } to { copy(authors = authors - au) }) }
+        langs.forEach { l -> add((com.sebas.zerkalo.data.Catalogs.LANGS.firstOrNull { it.id == l }?.name ?: l.uppercase()) to { copy(langs = langs - l) }) }
+        if (audio) add("Con audiolibro" to { copy(audio = false) })
+        if (recentDays > 0) add((if (recentDays <= 7) "Añadidos esta semana" else "Añadidos este mes") to { copy(recentDays = 0) })
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+private fun FilterSheet(
+    books: List<Book>, sortBy: Int, f: LibFilter, withAudio: Set<String>, estado: Int, tagSel: String?, tags: List<String>,
+    onSort: (Int) -> Unit, onFilters: (LibFilter) -> Unit, onEstado: (Int) -> Unit, onTag: (String?) -> Unit, onClose: () -> Unit,
+) {
+    val p = LocalPalette.current
+    androidx.compose.material3.ModalBottomSheet(
+        onDismissRequest = onClose, sheetState = androidx.compose.material3.rememberModalBottomSheetState(skipPartiallyExpanded = true), containerColor = p.surface,
+    ) {
+        LazyColumn(Modifier.fillMaxWidth().padding(horizontal = 22.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("Ordenar y filtrar", style = Type.title.copy(fontSize = 21.sp), color = p.text, modifier = Modifier.weight(1f))
+                    if (f.count > 0 || sortBy != 0 || estado != 0 || tagSel != null) Text(
+                        "Limpiar", style = Type.ui, color = p.accent,
+                        modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { onFilters(LibFilter()); onSort(0); onEstado(0); onTag(null) }.padding(8.dp),
+                    )
+                }
+            }
+            item { FilterGroup("Ordenar por") { SORTS.forEachIndexed { i, s -> SmallPill(s, sortBy == i) { onSort(i) } } } }
+            item {
+                FilterGroup("Estado") {
+                    listOf("Todos", "Leyendo", "Por leer", "Leídos", "Favoritos").forEachIndexed { i, s -> SmallPill(s, estado == i) { onEstado(i) } }
+                }
+            }
+            item {
+                FilterGroup("Añadidos") {
+                    SmallPill("Cuando sea", f.recentDays == 0) { onFilters(f.copy(recentDays = 0)) }
+                    SmallPill("Esta semana", f.recentDays == 7) { onFilters(f.copy(recentDays = 7)) }
+                    SmallPill("Este mes", f.recentDays == 30) { onFilters(f.copy(recentDays = 30)) }
+                }
+            }
+            if (withAudio.isNotEmpty()) item {
+                FilterGroup("Audio") { SmallPill("Con audiolibro unido", f.audio) { onFilters(f.copy(audio = !f.audio)) } }
+            }
+            val genres = books.map { it.genre }.filter { it.isNotBlank() }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }
+            if (genres.size > 1) item {
+                FilterGroup("Género") {
+                    genres.forEach { (g, n) ->
+                        val name = com.sebas.zerkalo.data.Catalogs.TOPICS.firstOrNull { it.id == g }?.name ?: if (g == "-") "Sin género" else g
+                        SmallPill("$name $n", g in f.genres) { onFilters(f.copy(genres = if (g in f.genres) f.genres - g else f.genres + g)) }
+                    }
+                }
+            }
+            val langs = books.map { it.lang.take(2) }.filter { it.isNotBlank() }.groupingBy { it }.eachCount().entries.sortedByDescending { it.value }
+            if (langs.size > 1) item {
+                FilterGroup("Idioma") {
+                    langs.forEach { (l, n) ->
+                        val name = com.sebas.zerkalo.data.Catalogs.LANGS.firstOrNull { it.id == l }?.name ?: l.uppercase()
+                        SmallPill("$name $n", l in f.langs) { onFilters(f.copy(langs = if (l in f.langs) f.langs - l else f.langs + l)) }
+                    }
+                }
+            }
+            val authors = books.map { it.author.trim() }.filter { it.isNotBlank() }.groupingBy { it }.eachCount().entries
+                .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+            if (authors.size > 1) item {
+                FilterGroup("Autor") {
+                    authors.take(40).forEach { (au, n) -> SmallPill(if (n > 1) "$au $n" else au, au in f.authors) { onFilters(f.copy(authors = if (au in f.authors) f.authors - au else f.authors + au)) } }
+                }
+            }
+            if (tags.isNotEmpty()) item {
+                FilterGroup("Etiquetas") { tags.forEach { t -> SmallPill("#$t", tagSel == t) { onTag(if (tagSel == t) null else t) } } }
+            }
+            item {
+                PillButton("Ver libros", onClose, Modifier.fillMaxWidth().padding(top = 22.dp))
+            }
+        }
+    }
+}
+
+@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+private fun FilterGroup(title: String, content: @Composable () -> Unit) {
+    Caption(title, accent = true, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp))
+    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) { content() }
 }

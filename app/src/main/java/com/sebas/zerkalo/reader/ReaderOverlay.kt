@@ -243,6 +243,8 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                         Text(fmt(ui.minutesToday), style = Type.ui.copy(fontSize = 15.sp), color = p.bg, modifier = Modifier.padding(start = 8.dp))
                     }
                     Spacer(Modifier.weight(1f))
+                    RoundPill("search", { ui.sheet = "find" })
+                    Spacer(Modifier.width(8.dp))
                     RoundPill("toc", { ui.sheet = "toc" })
                     Spacer(Modifier.width(8.dp))
                     RoundPill("aa", { ui.sheet = "type" })
@@ -321,6 +323,7 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
 
     when (ui.sheet) {
         "toc" -> TocSheet(ui, act) { ui.sheet = null }
+        "find" -> FindSheet(ui, act) { ui.sheet = null }
         "type" -> TypeSheet(ui, act) { ui.sheet = null }
         "luz" -> LightSheet(ui, act) { ui.sheet = null }
         "fonts" -> FontSheet(ui, act) { ui.sheet = "type" }
@@ -415,6 +418,7 @@ private fun TocSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
         LazyColumn(Modifier.heightIn(max = 520.dp), state = if (tab == 0) ui.tocState else ui.marksState) {
             if (tab == 0) {
                 if (ui.toc.isEmpty()) item { Text("Este libro no trae índice.", style = Type.ui, color = p.text2, modifier = Modifier.padding(12.dp)) }
+                if (ui.tocMade) item { Text("Este libro no traía índice: Zerkalo armó uno con sus partes.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) }
                 items(ui.toc) { t ->
                     val cur = t.title == ui.chapter
                     Text(
@@ -1785,3 +1789,43 @@ private fun RoundBtn(label: String, on: () -> Unit) {
         Text(label, style = Type.ui, color = p.text)
     }
 }
+
+
+/** La lupa: buscar una palabra o frase en todo el libro, sin importar tildes ni mayúsculas. */
+@Composable
+private fun FindSheet(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
+    val p = LocalPalette.current
+    Sheet(onClose) {
+        Text("Buscar en el libro", style = Type.title.copy(fontSize = 20.sp), color = p.text)
+        com.sebas.zerkalo.ui.SearchField(ui.findQuery, { act.find(it) }, "Palabra o frase", Modifier.fillMaxWidth().padding(top = 10.dp)) { act.find(ui.findQuery) }
+        val hits = ui.findHits
+        when {
+            ui.findBusy -> Text("Buscando…", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 12.dp))
+            hits == null -> Text("Escribe al menos dos letras. No importan las tildes ni las mayúsculas.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 12.dp))
+            hits.isEmpty() -> Text("No aparece «${ui.findQuery.trim()}» en este libro.", style = Type.ui, color = p.text2, modifier = Modifier.padding(top = 12.dp))
+            else -> {
+                Text(if (hits.size >= 300) "Más de 300 resultados: escribe algo más largo para afinar." else "${hits.size} ${if (hits.size == 1) "resultado" else "resultados"}", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                LazyColumn(Modifier.heightIn(max = 460.dp)) {
+                    items(hits.size) { k ->
+                        val h = hits[k]
+                        val chapter = ui.findTitles[h.chapter] ?: "Parte ${h.chapter + 1}"
+                        if (k == 0 || hits[k - 1].chapter != h.chapter) Text(
+                            chapter, style = Type.uiSmall.copy(fontWeight = FontWeight.SemiBold), color = p.accent, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.padding(top = 12.dp, bottom = 2.dp, start = 6.dp),
+                        )
+                        Text(
+                            androidx.compose.ui.text.buildAnnotatedString {
+                                append(h.before)
+                                pushStyle(androidx.compose.ui.text.SpanStyle(background = Color(0x66E2BE52), fontWeight = FontWeight.SemiBold, color = p.text)); append(h.match); pop()
+                                append(h.after)
+                            },
+                            style = Type.body.copy(fontSize = 15.sp), color = p.text2, maxLines = 3, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { act.goHit(h) }.padding(horizontal = 6.dp, vertical = 9.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+

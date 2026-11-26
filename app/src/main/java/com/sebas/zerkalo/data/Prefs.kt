@@ -192,6 +192,11 @@ object Prefs {
         get() = sp.getBoolean("stampsIntroHidden", false)
         set(v) { sp.edit().putBoolean("stampsIntroHidden", v).apply() }
 
+    /** Cómo se ordena la biblioteca: 0 último leído, 1 recién añadidos, 2 título, 3 autor, 4 más avanzado, 5 terminados hace poco. */
+    var librarySort: Int
+        get() = sp.getInt("librarySort", 0)
+        set(v) { sp.edit().putInt("librarySort", v).apply() }
+
     var studyTap: Boolean
         get() = sp.getBoolean("studyTap", false)
         set(v) { sp.edit().putBoolean("studyTap", v).apply() }
