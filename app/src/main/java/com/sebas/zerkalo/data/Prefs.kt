@@ -46,6 +46,11 @@ data class ReaderSettings(
     val customInkLight: Int = 0xFF3A3350.toInt(), // tinta propia para papeles claros (Crema, Sepia)
     val continuous: Boolean = false,   // desplazamiento continuo: todo el libro seguido, como en Books
     val align: Int = 2,          // alineación: 0 izquierda, 1 justificado siempre, 2 automático (justifica si la línea es larga)
+    val cpl: Int = 0,            // letras por línea como máximo: 0 = automático (~66); 25..80 si lo eliges tú
+    val weight: Int = 0,         // grosor de la letra: 0 normal, 1 media, 2 gruesa (sirve al sol y con la vista cansada)
+    val texture: Boolean = true, // textura del papel (si el papel tiene una)
+    val noteButton: Boolean = true, // botón del apunte (記) en la barra de abajo
+    val wpm: Int = 250,          // guía de lectura rápida: palabras por minuto
 )
 
 /** Cambia la alineación (y el viejo "justificar", que se sigue guardando para los libros y los trazos de antes). */
@@ -69,7 +74,7 @@ data class InkColor(val name: String, val argb: Int) {
  */
 fun ReaderSettings.look(): String = listOf(
     font, size, lineHeight, margin, vMargin, spacing, paragraph, justify, layout, dyslexia, fullscreen, mmLeft, mmRight, mmTop, mmBottom,
-).joinToString("~") + if (align == 1) "~j" else "" // "justificado siempre" solo se anota si se eligió (así los trazos de antes no cambian)
+).joinToString("~") + (if (align == 1) "~j" else "") + (if (cpl > 0) "~c$cpl" else "") // lo nuevo solo se anota si se eligió (así los trazos de antes no cambian)
 
 /** Los mismos ajustes, pero con la letra y los márgenes de [look]. */
 fun ReaderSettings.withLook(look: String): ReaderSettings {
@@ -80,7 +85,8 @@ fun ReaderSettings.withLook(look: String): ReaderSettings {
             font = v[0].toInt(), size = v[1].toInt(), lineHeight = v[2].toFloat(), margin = v[3].toInt(), vMargin = v[4].toInt(),
             spacing = v[5].toInt(), paragraph = v[6].toInt(), justify = v[7].toBoolean(), layout = v[8].toInt(), dyslexia = v[9].toBoolean(),
             fullscreen = v[10].toBoolean(), mmLeft = v[11].toFloat(), mmRight = v[12].toFloat(), mmTop = v[13].toFloat(), mmBottom = v[14].toFloat(),
-            align = if (v.getOrNull(15) == "j") 1 else if (v[7].toBoolean()) 2 else 0,
+            align = if (v.drop(15).contains("j")) 1 else if (v[7].toBoolean()) 2 else 0,
+            cpl = v.drop(15).firstOrNull { it.startsWith("c") }?.drop(1)?.toIntOrNull() ?: 0,
         ).let { if (it.layout == 2) it.copy(layout = 1) else it }
     }.getOrDefault(this)
 }
@@ -110,6 +116,8 @@ object Prefs {
             respectCamera = sp.getBoolean("rCam", true),
             customInkLight = sp.getInt("rInkL", 0xFF3A3350.toInt()), continuous = sp.getBoolean("rCont", false),
             align = sp.getInt("rAlign", if (sp.getBoolean("rJustify", true)) 2 else 0),
+            cpl = sp.getInt("rCpl", 0), weight = sp.getInt("rWeight", 0), texture = sp.getBoolean("rTex", true),
+            noteButton = sp.getBoolean("rNoteBtn", true), wpm = sp.getInt("rWpm", 250),
         ).let { r ->
             // "Desplazamiento" se unió a "Continuo": quien lo usaba pasa a Continuo
             if (r.scroll && !r.continuous) r.copy(continuous = true) else r
@@ -160,7 +168,8 @@ object Prefs {
             .putFloat("rAutoSpeed", r.autoSpeed).putFloat("rAutoPage", r.autoPage)
             .putInt("rLayout", r.layout).putInt("rMarkStyle", r.markStyle).putFloat("rVeil", r.veil).putBoolean("rInfo", r.info)
             .putFloat("rMmL", r.mmLeft).putFloat("rMmR", r.mmRight).putFloat("rMmT", r.mmTop).putFloat("rMmB", r.mmBottom).putBoolean("rCam", r.respectCamera)
-            .putInt("rInkL", r.customInkLight).putBoolean("rCont", r.continuous).putInt("rAlign", r.align).apply()
+            .putInt("rInkL", r.customInkLight).putBoolean("rCont", r.continuous).putInt("rAlign", r.align)
+            .putInt("rCpl", r.cpl).putInt("rWeight", r.weight).putBoolean("rTex", r.texture).putBoolean("rNoteBtn", r.noteButton).putInt("rWpm", r.wpm).apply()
     }
 
     fun setCatalogs(list: List<OpdsCatalog>) {
@@ -193,6 +202,21 @@ object Prefs {
         set(v) { sp.edit().putBoolean("stampsIntroHidden", v).apply() }
 
     /** Cómo se ordena la biblioteca: 0 último leído, 1 recién añadidos, 2 título, 3 autor, 4 más avanzado, 5 terminados hace poco. */
+    /** El perfil de lectura en uso (id) y si cambia solo según la hora. */
+    var profile: String
+        get() = sp.getString("profile", "") ?: ""
+        set(v) { sp.edit().putString("profile", v).apply() }
+    var profileAuto: Boolean
+        get() = sp.getBoolean("profileAuto", false)
+        set(v) { sp.edit().putBoolean("profileAuto", v).apply() }
+    /** Horas del cambio automático: Día desde, Noche desde, Oscuro total desde. */
+    var profileHours: List<Int>
+        get() = (sp.getString("profileHours", "7,19,22") ?: "7,19,22").split(',').mapNotNull { it.toIntOrNull() }.takeIf { it.size == 3 } ?: listOf(7, 19, 22)
+        set(v) { sp.edit().putString("profileHours", v.joinToString(",")).apply() }
+    var profilesJson: String
+        get() = sp.getString("profiles", "") ?: ""
+        set(v) { sp.edit().putString("profiles", v).apply() }
+
     var librarySort: Int
         get() = sp.getInt("librarySort", 0)
         set(v) { sp.edit().putInt("librarySort", v).apply() }

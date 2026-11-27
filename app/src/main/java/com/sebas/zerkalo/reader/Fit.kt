@@ -39,7 +39,10 @@ object Fit {
     }
 
     /** Ancho máximo del texto en píxeles (como hace el motor de páginas en tabletas y pantallas anchas). */
-    fun capPx(r: ReaderSettings, density: Float) = (MAX_REM * 16 * r.size / 100 * density).toFloat()
+    fun capPx(r: ReaderSettings, density: Float) = (maxRem(r) * 16 * r.size / 100 * density).toFloat()
+
+    /** Ancho máximo del texto en "rem": automático (~66 letras) o las letras por línea que elegiste. */
+    fun maxRem(r: ReaderSettings): Double = if (r.cpl in 20..90) MAX_REM * r.cpl / 66.0 else MAX_REM
 
     /** Letras por línea con un ancho de texto dado. */
     fun cpl(ctx: Context, r: ReaderSettings, textPx: Float, density: Float): Int =

@@ -19,7 +19,7 @@ import com.sebas.zerkalo.data.ReaderSettings
  * cambian los ajustes, sin tocar el texto (los subrayados guardados siguen en su sitio).
  */
 /** Desplazamiento: espacio dentro de la página arriba y abajo (px de CSS) y el color del papel para el desenfoque. */
-data class PagePad(val top: Float = 0f, val bottom: Float = 0f, val paper: Int = 0, val left: Float = 0f, val right: Float = 0f)
+data class PagePad(val top: Float = 0f, val bottom: Float = 0f, val paper: Int = 0, val left: Float = 0f, val right: Float = 0f, val tex: String = "")
 
 object Typeset {
     fun script(r: ReaderSettings, lang: String, pad: PagePad = PagePad(), nonce: Long = 0): String {
@@ -28,7 +28,8 @@ object Typeset {
         val c = pad.paper
         val rgb = "${(c shr 16) and 255},${(c shr 8) and 255},${c and 255}"
         val opts = """{"mode":${r.layout},"justify":$justify,"align":$align,"minJ":${Fit.AUTO_JUSTIFY},"lang":"${lang.replace("\"", "")}","scroll":${r.scroll},""" +
-            """"size":${r.size},"lite":${com.sebas.zerkalo.data.Prefs.blurLite()},"padTop":${pad.top},"padBottom":${pad.bottom},"padLeft":${pad.left},"padRight":${pad.right},"paper":"$rgb","n":$nonce}"""
+            """"size":${r.size},"lite":${com.sebas.zerkalo.data.Prefs.blurLite()},"padTop":${pad.top},"padBottom":${pad.bottom},"padLeft":${pad.left},"padRight":${pad.right},"paper":"$rgb","n":$nonce,""" +
+            """"maxRem":${Fit.maxRem(r)},"weight":${r.weight},"tex":${org.json.JSONObject.quote(pad.tex)}}"""
         return JS.replace("__OPTS__", opts)
     }
 
@@ -112,6 +113,11 @@ window.__zkRun = function(){
     set(b, 'padding-left', O.padLeft + 'px'); set(b, 'padding-right', O.padRight + 'px'); set(b, 'box-sizing', 'border-box');
   }
   window.__zkEdges(O.scroll ? O.padTop + 10 : 0, O.scroll ? O.padBottom + 18 : 0, O.paper, !!O.lite);
+  // Letras por línea (el largo máximo de la línea), grosor de la letra y textura del papel: en todos los modos
+  if (!O.scroll && O.maxRem) d.documentElement.style.setProperty('--RS__maxLineLength', O.maxRem + 'rem', 'important');
+  var stroke = [0, 0.28, 0.55][O.weight] || 0;
+  if (stroke) edge += 'body{-webkit-text-stroke:' + stroke + 'px currentColor !important}';
+  if (O.tex) edge += 'html{background-image:url("' + O.tex + '") !important;background-size:512px auto !important;background-repeat:repeat !important;background-attachment:local !important}body{background-color:transparent !important}';
   if (O.mode === 3) { st.textContent = edge; return 'ninguna'; }
   var css = 'img,svg,video{max-width:100% !important;height:auto !important;object-fit:contain}img{max-height:92vh}' +
     'table{max-width:100% !important}pre{white-space:pre-wrap !important}';

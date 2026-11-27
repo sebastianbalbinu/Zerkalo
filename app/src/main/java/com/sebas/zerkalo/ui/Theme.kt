@@ -68,8 +68,17 @@ val SepiaPalette = Palette(
     text = Color(0xFF3B2A1A), text2 = Color(0xFF6A5640), line = Color(0x1F3B2A1A), isDark = false, wood = Wood.KEYAKI,
 )
 val GrisPalette = Palette(
-    "Gris", bg = Color(0xFF2B2D30), surface = Color(0xFF35383C), card = Color(0xFF43474C),
-    text = Color(0xFFDAD6CF), text2 = Color(0xFFA9A49C), line = Color(0x24DAD6CF), isDark = true, wood = Wood.NONE,
+    "Gris", bg = Color(0xFF4A433C), surface = Color(0xFF554D45), card = Color(0xFF625950),
+    text = Color(0xFFE6DFD4), text2 = Color(0xFFB5ADA1), line = Color(0x24E6DFD4), isDark = true, wood = Wood.NONE,
+)
+
+val WashiPalette = Palette(
+    "Washi", bg = Color(0xFFF1EADB), surface = Color(0xFFE7DECB), card = Color(0xFFD9CDB6),
+    text = Color(0xFF2B241E), text2 = Color(0xFF5A4C40), line = Color(0x1F2B241E), isDark = false, wood = Wood.KEYAKI,
+)
+val KraftPalette = Palette(
+    "Kraft", bg = Color(0xFFD9C6A5), surface = Color(0xFFCDB894), card = Color(0xFFBFA883),
+    text = Color(0xFF2A1F14), text2 = Color(0xFF55432F), line = Color(0x222A1F14), isDark = false, wood = Wood.KEYAKI,
 )
 
 val LocalPalette = staticCompositionLocalOf { Chashitsu }

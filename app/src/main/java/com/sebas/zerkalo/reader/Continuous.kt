@@ -82,6 +82,11 @@ class ContinuousView(ctx: Context, private val pub: Publication, private val cb:
                     path.startsWith("__gfont/") -> GoogleFonts.webFile(context, path)?.let { f ->
                         WebResourceResponse(if (f.extension == "woff2") "font/woff2" else "font/ttf", null, f.inputStream())
                     }
+                    path.startsWith("__tex/") -> runCatching {
+                        val name = path.removePrefix("__tex/").substringBefore('?')
+                        val type = when { name.endsWith(".webp") -> "image/webp"; name.endsWith(".png") -> "image/png"; else -> "image/jpeg" }
+                        WebResourceResponse(type, null, context.assets.open("papel/$name"))
+                    }.getOrNull()
                     path.startsWith("__font/") -> runCatching {
                         val name = path.removePrefix("__font/").substringBefore('?')
                         WebResourceResponse("font/ttf", null, context.assets.open("fonts/$name"))
