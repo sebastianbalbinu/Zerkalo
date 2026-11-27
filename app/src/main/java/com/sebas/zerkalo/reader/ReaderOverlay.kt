@@ -1113,7 +1113,7 @@ private fun originalInk(s: com.sebas.zerkalo.data.ReaderSettings, dark: Boolean)
     !dark && s.paper == 3 -> Color(0xFF3B2A1A)
     !dark -> Color(0xFF2E231D)
     s.paper == 2 -> Color(0xFFE9CDA4)
-    s.paper == 4 -> Color(0xFFDAD6CF)
+    s.paper == 4 -> Color(0xFFE6DFD4)
     else -> Color(0xFFF0E6D4)
 }
 
@@ -1590,7 +1590,7 @@ private fun paperSwatch(id: Int): Pair<Color, Color> = when (id) {
     1 -> Color(0xFF2E231D) to Color(0xFFF0E6D4)
     2 -> Color(0xFF000000) to Color(0xFFE9CDA4)
     3 -> Color(0xFFF0E2C6) to Color(0xFF3B2A1A)
-    4 -> Color(0xFF2B2D30) to Color(0xFFDAD6CF)
+    4 -> Color(0xFF4A433C) to Color(0xFFE6DFD4)
     5 -> Color(0xFFF1EADB) to Color(0xFF2B241E)
     6 -> Color(0xFFD9C6A5) to Color(0xFF2A1F14)
     else -> Color(0xFFF7F2E8) to Color(0xFF2E231D)
