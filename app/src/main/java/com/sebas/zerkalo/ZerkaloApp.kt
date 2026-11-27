@@ -20,6 +20,7 @@ class ZerkaloApp : Application(), ImageLoaderFactory {
         // ni archivos de la app, así que no se prepara nada: solo dibuja el PDF.
         if (android.os.Build.VERSION.SDK_INT >= 28 && android.os.Process.isIsolated()) return
         Prefs.init(this)
+        com.sebas.zerkalo.data.Profiles.init()
         Library.init(this)
         com.sebas.zerkalo.data.Apuntes.init(this)
         com.sebas.zerkalo.data.InkStore.init(this)

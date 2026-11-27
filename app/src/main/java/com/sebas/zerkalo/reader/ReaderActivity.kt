@@ -56,6 +56,8 @@ import com.sebas.zerkalo.ui.Palette
 import com.sebas.zerkalo.ui.SumiPalette
 import com.sebas.zerkalo.ui.SepiaPalette
 import com.sebas.zerkalo.ui.GrisPalette
+import com.sebas.zerkalo.ui.WashiPalette
+import com.sebas.zerkalo.ui.KraftPalette
 import android.view.KeyEvent
 import android.view.HapticFeedbackConstants
 import com.sebas.zerkalo.ui.highlightColor
@@ -172,6 +174,9 @@ class ReaderUi {
     var edgeHint by mutableStateOf<String?>(null) // aviso al llegar al borde de un capítulo (desplazamiento)
     var edgeReady by mutableStateOf(false)        // ya basta con soltar para cambiar de capítulo
     var auto by mutableStateOf(false)             // avance automático encendido
+    var guide by mutableStateOf(false)            // guía de lectura rápida avanzando
+    var setTab by mutableIntStateOf(0)            // hoja de ajustes: 0 Luz, 1 Letra, 2 Página, 3 Ayudas
+    var profile by mutableStateOf("")             // perfil en uso (id)
     var tocTab by mutableIntStateOf(0)
     var tocMade by mutableStateOf(false) // el índice lo armó Zerkalo (el libro no traía)
     // La lupa: buscar en todo el libro
@@ -369,6 +374,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         // La prueba automática abre el libro en modo continuo sin cambiar los ajustes guardados
         if (intent.getBooleanExtra("continuo", false)) ui.settings = ui.settings.copy(scroll = true, continuous = true)
         intent.getStringExtra("hoja")?.let { h -> lifecycleScope.launch { delay(6000); ui.sheet = h } }
+        ui.profile = Prefs.profile
         ui.palette = paletteFor(ui.settings)
         highRefresh()
         // El margen de los lados (dentro de la página) desde el principio, para que el libro no salte al abrir
@@ -677,6 +683,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             }
         }
         followAudio()
+        watchProfileHours()
         ui.loading = false
         Log.i("Zerkalo", "ZK_READER_OK ${book.title}")
         refreshPairInfo()
@@ -790,7 +797,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     /** Vuelve a diagramar todo lo pegado (al agregar un capítulo o cambiar un ajuste). */
     private fun contTypeset() {
         val v = cont ?: return
-        val pad = PagePad(scrollPadTop, scrollPadBottom, ui.palette.bg.toArgb(), scrollPadLeft, scrollPadRight)
+        val pad = PagePad(scrollPadTop, scrollPadBottom, ui.palette.bg.toArgb(), scrollPadLeft, scrollPadRight, texUrl(true))
         v.evaluateJavascript(Typeset.script(ui.settings.copy(scroll = true), ui.lang, pad, System.nanoTime()), null)
     }
 
@@ -814,6 +821,18 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     }
 
     /** Letra, tamaño, colores y espacios del modo continuo (lo que en los otros modos hace Readium). */
+    /** El papel que se ve ahora (con "según la hora" y "como la app" ya resueltos). */
+    private fun paperNow(): Int = when (ui.palette.name) {
+        "Crema" -> 0; "Nogal" -> 1; "Sumi" -> 2; "Sepia" -> 3; "Gris" -> 4; "Washi" -> 5; "Kraft" -> 6; else -> -1
+    }
+
+    /** Dirección de la textura del papel para la página ("" = papel liso). */
+    private fun texUrl(continuous: Boolean): String {
+        if (!ui.settings.texture) return ""
+        val f = Paper.file(this, paperNow()) ?: return ""
+        return if (continuous) "/__tex/$f" else "https://readium/assets/papel/$f"
+    }
+
     private fun contCss(): String {
         val r = ui.settings
         val p = ui.palette
@@ -862,7 +881,10 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         sb.append("section.zk-ch + section.zk-ch{margin-top:2.6em !important}")
         sb.append(".zk-body{margin:0 !important;padding:0 !important}")
         // Como en el modo Páginas: el texto nunca más ancho que ~66 letras (en tabletas y pantallas anchas)
-        sb.append("section.zk-ch{max-width:${Fit.MAX_REM}rem !important;margin-left:auto !important;margin-right:auto !important}")
+        sb.append("section.zk-ch{max-width:${Fit.maxRem(r)}rem !important;margin-left:auto !important;margin-right:auto !important}")
+        texUrl(true).takeIf { it.isNotEmpty() }?.let { t ->
+            sb.append("html{background-image:url('$t') !important;background-size:512px auto !important;background-repeat:repeat !important}body{background-color:transparent !important}")
+        }
         if (override) {
             if (fam != null) sb.append("section.zk-ch *:not(code):not(pre):not(kbd){font-family:inherit !important}")
             sb.append("section.zk-ch p,section.zk-ch li,section.zk-ch div,section.zk-ch blockquote{line-height:inherit !important}")
@@ -890,7 +912,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             // 1 px: así "pageMargins" son directamente los px de margen (tus milímetros convertidos)
             pageGutter = org.readium.r2.navigator.epub.css.Length.Px(1.0),
         )
-        servedAssets = listOf("fonts/.*")
+        servedAssets = listOf("fonts/.*", "papel/.*")
         // Letra de Google elegida: va declarada en cada capítulo que Readium sirve (así nunca falta al reabrir)
         runCatching {
             GoogleFonts.get(this@ReaderActivity, ui.settings.font)?.let { g ->
@@ -1279,6 +1301,80 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         }
     }
 
+    // ---------------- perfiles ----------------
+    private fun applyProfile(id: String, quiet: Boolean = false) {
+        val pr = com.sebas.zerkalo.data.Profiles.get(id) ?: return
+        Prefs.profile = id
+        ui.profile = id
+        updateSettings(com.sebas.zerkalo.data.Profiles.apply(ui.settings, pr.values))
+        if (!quiet) ui.say(pr.name)
+    }
+
+    /** Siguiente perfil (dos toques en la hora, o el botón de luz presionado). */
+    private fun nextProfile() {
+        val all = com.sebas.zerkalo.data.Profiles.list.value
+        if (all.isEmpty()) return
+        val i = all.indexOfFirst { it.id == ui.profile }
+        applyProfile(all[(i + 1).mod(all.size)].id)
+    }
+
+    /** Cambio automático por hora: Día, Noche y Oscuro total. Solo cambia al cruzar una hora, así lo que elijas a mano se respeta. */
+    private fun watchProfileHours() {
+        lifecycleScope.launch {
+            var last = ""
+            while (true) {
+                if (Prefs.profileAuto) {
+                    val want = com.sebas.zerkalo.data.Profiles.forHour(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY))
+                    if (want != last) { if (last.isNotEmpty() || ui.profile != want) applyProfile(want, quiet = last.isEmpty()); last = want }
+                } else last = ""
+                delay(60_000)
+            }
+        }
+    }
+
+    // ---------------- guía de lectura rápida ----------------
+    private var guideJob: kotlinx.coroutines.Job? = null
+
+    /** Una franja que baja renglón por renglón a tus palabras por minuto; al final de la página, pasa sola. */
+    private fun startGuide() {
+        stopAuto()
+        guideJob?.cancel()
+        ui.guide = true
+        setControls(false)
+        val dm = resources.displayMetrics
+        guideJob = lifecycleScope.launch {
+            val top = ((scrollPadTop.takeIf { it > 0 } ?: 40f) * dm.density + 20 * dm.density) / dm.heightPixels
+            ui.rulerY = top.coerceIn(0.06f, 0.3f)
+            while (true) {
+                val r = ui.settings
+                val linePx = 16f * r.size / 100f * dm.density * r.lineHeight
+                val words = ((if (ui.cpl > 0) ui.cpl else 60) / 6.0).coerceAtLeast(2.0)
+                delay((60_000.0 / r.wpm.coerceIn(80, 900) * words).toLong().coerceAtLeast(120))
+                if (ui.sheet != null || ui.controls || ui.lookup != null) continue
+                val c = cont
+                if (c != null) {
+                    // Continuo: la franja queda quieta y el texto sube un renglón
+                    ui.rulerY = 0.4f
+                    c.evaluateJavascript("window.scrollBy(0, ${linePx / dm.density});", null)
+                    continue
+                }
+                val next = ui.rulerY + linePx / dm.heightPixels
+                if (next > 0.9f) {
+                    val nav = navigator ?: break
+                    if (!nav.goForward(animated = r.animate)) { stopGuide(); ui.say("Llegaste al final"); break }
+                    delay(350)
+                    ui.rulerY = top.coerceIn(0.06f, 0.3f)
+                } else ui.rulerY = next
+            }
+        }
+    }
+
+    private fun stopGuide() {
+        guideJob?.cancel(); guideJob = null
+        ui.guide = false
+        ui.rulerY = 0.42f
+    }
+
     fun stopAuto() {
         autoJob?.cancel(); autoJob = null
         ui.auto = false
@@ -1436,6 +1532,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         2 -> SumiPalette
         3 -> SepiaPalette
         4 -> GrisPalette
+        5 -> WashiPalette
+        6 -> KraftPalette
         // Según la hora: papel claro de día (se lee mejor), oscuro de noche (menos luz en los ojos).
         -2 -> java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY).let { if (it in 7..18) Chashitsu else Nogal }
         else -> when (Prefs.paper.value) {
@@ -1503,7 +1601,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         lifecycleScope.launch {
             // Como en Books: el capítulo se acomoda apenas aparece, sin parpadeos ni papel encima.
             // Las pasadas siguientes solo actúan si algo cambió (letras o imágenes que terminaron de cargar).
-            val pad = PagePad(scrollPadTop, scrollPadBottom, ui.palette.bg.toArgb(), scrollPadLeft, scrollPadRight)
+            val pad = PagePad(scrollPadTop, scrollPadBottom, ui.palette.bg.toArgb(), scrollPadLeft, scrollPadRight, texUrl(false))
             for ((i, wait) in listOf(0L, 240L, 700L).withIndex()) {
                 if (wait > 0) delay(wait)
                 // Letra de Google: va dentro de la página. Se revisa en cada pasada, porque al abrir el libro
@@ -1582,6 +1680,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         if (old.copy(
                 brightness = r.brightness, veil = r.veil, ruler = r.ruler, haptic = r.haptic, volumeKeys = r.volumeKeys, breaks = r.breaks, animate = r.animate,
                 fullscreen = r.fullscreen, vMargin = r.vMargin, autoSpeed = r.autoSpeed, autoPage = r.autoPage, info = r.info,
+                noteButton = r.noteButton, wpm = r.wpm,
                 mmLeft = r.mmLeft, mmRight = r.mmRight, mmTop = r.mmTop, mmBottom = r.mmBottom, respectCamera = r.respectCamera,
             ) == r
         ) return
@@ -1742,6 +1841,20 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         seek = { f -> seek(f) },
         brightnessLive = { v -> applyBrightness(v) },
         toggleAuto = { if (ui.auto) stopAuto() else startAuto() },
+        toggleGuide = { if (ui.guide) stopGuide() else startGuide() },
+        profile = { applyProfile(it) },
+        nextProfile = { nextProfile() },
+        saveProfile = { id ->
+            com.sebas.zerkalo.data.Profiles.update(id, ui.settings)
+            ui.profile = id; Prefs.profile = id
+            ui.say("Guardado en «${com.sebas.zerkalo.data.Profiles.get(id)?.name}»")
+        },
+        newProfile = { name ->
+            val pr = com.sebas.zerkalo.data.Profiles.create(name, ui.settings)
+            ui.profile = pr.id; Prefs.profile = pr.id
+            ui.say("Perfil «${pr.name}» guardado")
+        },
+        deleteProfile = { id -> com.sebas.zerkalo.data.Profiles.delete(id); if (ui.profile == id) ui.profile = "" },
         findAudio = { com.sebas.zerkalo.data.AudioStore.findFor(book) },
         searchAudio = { q ->
             val lang = book.lang.ifBlank { "es" }
@@ -2097,6 +2210,12 @@ class ReaderActions(
     val seek: (Float) -> Unit,
     val brightnessLive: (Float) -> Unit,
     val toggleAuto: () -> Unit,
+    val toggleGuide: () -> Unit,
+    val profile: (String) -> Unit,
+    val nextProfile: () -> Unit,
+    val saveProfile: (String) -> Unit,
+    val newProfile: (String) -> Unit,
+    val deleteProfile: (String) -> Unit,
     val findAudio: suspend () -> List<com.sebas.zerkalo.data.AudioBook>,
     val searchAudio: suspend (String) -> List<com.sebas.zerkalo.data.AudioBook>,
     val linkedAudio: () -> com.sebas.zerkalo.data.AudioBook?,
