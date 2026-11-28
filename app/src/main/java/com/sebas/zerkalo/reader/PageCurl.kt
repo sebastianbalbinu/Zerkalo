@@ -388,6 +388,9 @@ class CurlRoot(context: Context) : FrameLayout(context) {
 }
 
 object Snap {
+    /** Se fija al abrir la app (ZerkaloApp): teléfono con poca memoria. */
+    @Volatile var lowDevice = false
+
     fun isLow(ctx: Context): Boolean {
         val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
         return am.isLowRamDevice || am.memoryClass < 256

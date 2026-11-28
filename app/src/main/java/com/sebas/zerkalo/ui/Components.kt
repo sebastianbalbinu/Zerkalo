@@ -65,6 +65,15 @@ import dev.chrisbanes.haze.HazeStyle
 import dev.chrisbanes.haze.HazeTint
 import dev.chrisbanes.haze.hazeEffect
 
+/**
+ * El vidrio se calcula a menor resolución (un desenfoque no lo nota): en teléfonos y tabletas
+ * sencillos, desenfocar toda la pantalla en cada cuadro trababa la app al desplazar.
+ */
+@OptIn(dev.chrisbanes.haze.ExperimentalHazeApi::class)
+val glassScale: dev.chrisbanes.haze.HazeEffectScope.() -> Unit = {
+    inputScale = dev.chrisbanes.haze.HazeInputScale.Fixed(if (com.sebas.zerkalo.reader.Snap.lowDevice) 0.25f else 0.4f)
+}
+
 /** Vidrio esmerilado (cápsulas flotantes, barra de pestañas). */
 fun glassStyle(p: Palette) = HazeStyle(
     backgroundColor = p.bg,
@@ -173,7 +182,7 @@ fun CircleButton(icon: String, onClick: () -> Unit, modifier: Modifier = Modifie
     val pressed by src.collectIsPressedAsState()
     val s by animateFloatAsState(if (pressed) 0.92f else 1f, label = "press")
     var m = modifier.scale(s).size(size).clip(CircleShape)
-    m = if (glass != null) m.hazeEffect(glass, glassStyle(p)) else m.background(p.surface.copy(alpha = if (p.isDark) 0.85f else 1f))
+    m = if (glass != null) m.hazeEffect(glass, glassStyle(p), glassScale) else m.background(p.surface.copy(alpha = if (p.isDark) 0.85f else 1f))
     Box(m.clickable(src, null, onClick = onClick), contentAlignment = Alignment.Center) {
         ZIcon(icon, p.text, size = size * 0.46f)
     }

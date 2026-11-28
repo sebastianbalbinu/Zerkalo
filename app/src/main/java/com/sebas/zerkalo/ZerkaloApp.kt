@@ -20,6 +20,7 @@ class ZerkaloApp : Application(), ImageLoaderFactory {
         // ni archivos de la app, así que no se prepara nada: solo dibuja el PDF.
         if (android.os.Build.VERSION.SDK_INT >= 28 && android.os.Process.isIsolated()) return
         com.sebas.zerkalo.data.Crashes.install(this)
+        com.sebas.zerkalo.reader.Snap.lowDevice = runCatching { com.sebas.zerkalo.reader.Snap.isLow(this) }.getOrDefault(false)
         Prefs.init(this)
         com.sebas.zerkalo.data.Profiles.init()
         Library.init(this)

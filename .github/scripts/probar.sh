@@ -80,7 +80,8 @@ if [ -n "$W" ]; then
   # Toque a la derecha: foto a mitad de la animación
   $T adb shell input tap $((W*88/100)) $((H/2)) &
   sleep 0.25; $T adb exec-out screencap -p > shot12.png; wait; sleep 2
-  # Dedo lento hacia la derecha (volver): foto a mitad
+  # Volver dos veces seguidas (la segunda con foto a mitad): la página anterior debe entrar nítida
+  $T adb shell input swipe $((W*15/100)) $((H*80/100)) $((W*75/100)) $((H*70/100)) 500; sleep 2
   $T adb shell input swipe $((W*15/100)) $((H*80/100)) $((W*75/100)) $((H*70/100)) 1800 &
   sleep 1.0; $T adb exec-out screencap -p > shot13.png; wait; sleep 2
   # Dos toques seguidos rápido: la segunda hoja no puede quedarse trabada
