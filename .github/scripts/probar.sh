@@ -64,10 +64,13 @@ $T adb shell am start -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bien
 sleep 12
 $T adb exec-out screencap -p > shot10.png
 # Papel 3D: deslizar lento (foto a mitad del doblez), tocar, y volver atrás
+$T adb shell settings put secure immersive_mode_confirmations confirmed
+$T adb shell input keyevent KEYCODE_BACK; sleep 1
 $T adb shell am start -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bienvenida --ez zerkalo.papel true
 sleep 12
 if [ -n "$W" ]; then
   $T adb shell input tap $((W*85/100)) $((H/2)); sleep 3
+  $T adb shell input tap $((W/2)) $((H/2)); sleep 1; $T adb shell input tap $((W/2)) $((H/2)); sleep 2
   $T adb shell input swipe $((W*92/100)) $((H*85/100)) $((W*30/100)) $((H*72/100)) 1800 &
   sleep 1.0; $T adb exec-out screencap -p > shot11.png; wait; sleep 2
   $T adb exec-out screencap -p > shot12.png
