@@ -23,6 +23,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Volver desde el ícono con un libro abierto: se vuelve al libro, tal como estaba (no se cierra)
+        if (!isTaskRoot && intent?.action == android.content.Intent.ACTION_MAIN && intent.hasCategory(android.content.Intent.CATEGORY_LAUNCHER)) {
+            finish(); return
+        }
         enableEdgeToEdge()
         setContent {
             val p = currentPalette()

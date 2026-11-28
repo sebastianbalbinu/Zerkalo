@@ -24,7 +24,7 @@ if [ -n "$W" ]; then
 fi
 $T adb shell dumpsys gfxinfo com.sebas.zerkalo > gfx-tansu.txt
 # Abrir el libro de bienvenida en el lector
-$T adb shell am start -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bienvenida
+$T adb shell am start --activity-clear-top --activity-single-top -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bienvenida
 # Espera a que el libro abra (hasta 60 s: el emulador de Android 16 a veces es lento)
 for i in $(seq 1 30); do $T adb logcat -d | grep -q ZK_READER_OK && break; sleep 2; done
 sleep 3
@@ -36,14 +36,17 @@ sleep 3
 sleep 3
 $T adb exec-out screencap -p > shot4.png
 # Modo continuo: el mismo libro, todo seguido (sin cambiar los ajustes guardados)
-$T adb shell am start -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bienvenida --ez zerkalo.continuo true
+$T adb shell am start --activity-clear-top --activity-single-top -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bienvenida --ez zerkalo.continuo true
 for i in $(seq 1 30); do $T adb logcat -d | grep -q ZK_CONT_OK && break; sleep 2; done
 sleep 3
 [ -n "$W" ] && for i in 1 2 3 4 5 6; do $T adb shell input swipe $((W/2)) $((H*75/100)) $((W/2)) $((H*25/100)) 300; sleep 1; done
 sleep 3
+# Continuo: pasar "página" tocando a la derecha (ningún renglón debe quedar cortado)
+[ -n "$W" ] && for i in 1 2; do $T adb shell input tap $((W*90/100)) $((H/2)); sleep 2; done
+sleep 1
 $T adb exec-out screencap -p > shot5.png
 # Lector de PDF: abre un PDF corto, mantiene presionado un texto (menú con "Al apunte") y toma fotos
-$T adb shell am start -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir prueba-pdf
+$T adb shell am start --activity-clear-top --activity-single-top -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir prueba-pdf
 for i in $(seq 1 30); do $T adb logcat -d | grep -q ZK_PDF_READY && break; sleep 2; done
 sleep 3
 $T adb exec-out screencap -p > shot6.png
@@ -51,22 +54,22 @@ $T adb exec-out screencap -p > shot6.png
 sleep 3
 $T adb exec-out screencap -p > shot7.png
 # Letra de Google descargada + letra grande (22 pt) en el lector por páginas
-$T adb shell am start -n com.sebas.zerkalo/.MainActivity --es zerkalo.gfont Alegreya
+$T adb shell am start --activity-clear-top --activity-single-top -n com.sebas.zerkalo/.MainActivity --es zerkalo.gfont Alegreya
 for i in $(seq 1 30); do $T adb logcat -d | grep -qE "ZK_GFONT_OK|ZK_GFONT_FAIL" && break; sleep 2; done
-$T adb shell am start -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bienvenida
+$T adb shell am start --activity-clear-top --activity-single-top -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bienvenida
 sleep 12
 $T adb exec-out screencap -p > shot8.png
 [ -n "$W" ] && $T adb shell input tap $((W*85/100)) $((H/2))
 sleep 4
 $T adb exec-out screencap -p > shot9.png
 # El menú Aa nuevo (lo básico) abierto sobre el libro
-$T adb shell am start -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bienvenida --es zerkalo.hoja type
+$T adb shell am start --activity-clear-top --activity-single-top -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bienvenida --es zerkalo.hoja type
 sleep 12
 $T adb exec-out screencap -p > shot10.png
 # Papel 3D: deslizar lento (foto a mitad del doblez), tocar, y volver atrás
 $T adb shell settings put secure immersive_mode_confirmations confirmed
 $T adb shell input keyevent KEYCODE_BACK; sleep 1
-$T adb shell am start -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bienvenida --ez zerkalo.papel true
+$T adb shell am start --activity-clear-top --activity-single-top -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bienvenida --ez zerkalo.papel true
 sleep 12
 if [ -n "$W" ]; then
   $T adb shell input tap $((W*85/100)) $((H/2)); sleep 3
