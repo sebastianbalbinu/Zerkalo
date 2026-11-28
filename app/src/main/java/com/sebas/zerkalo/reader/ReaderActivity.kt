@@ -1467,7 +1467,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private fun curlAllowed(): Boolean {
         val s = ui.settings
         return navigator != null && cont == null && !s.scroll && s.animate && s.pageAnim == 2 &&
-            !ui.pairOn && !inkUi.on && ui.sheet == null && !ui.controls && ui.lookup == null && curl != null
+            !ui.pairOn && !inkUi.on && ui.sheet == null && ui.lookup == null && curl != null
     }
 
     private fun curlColor(): Int = android.graphics.Color.argb(
@@ -1537,6 +1537,13 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     /** La foto de la página de ahora: la del álbum (si es esta página) o una nueva. */
     private fun curlShot(got: (Bitmap?) -> Unit) {
         val key = hereKey()
+        // Con el menú abierto: se cierra (como en Kindle) y la foto se toma cuando ya no se ve
+        if (ui.controls) {
+            setControls(false)
+            albumGet(key)?.let { got(it); return }
+            root.postDelayed({ curlShot(got) }, 320)
+            return
+        }
         albumGet(key)?.let { got(it); return }
         gpuShot { b ->
             if (b != null && !ui.controls && ui.sheet == null) runCatching { b.copy(b.config ?: Bitmap.Config.ARGB_8888, false) }.getOrNull()?.let { albumPut(key, it) }
@@ -1788,6 +1795,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         4 -> GrisPalette
         5 -> WashiPalette
         6 -> KraftPalette
+        7 -> com.sebas.zerkalo.ui.TintaPalette
         // Según la hora: papel claro de día (se lee mejor), oscuro de noche (menos luz en los ojos).
         -2 -> java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY).let { if (it in 7..18) Chashitsu else Nogal }
         else -> when (Prefs.paper.value) {

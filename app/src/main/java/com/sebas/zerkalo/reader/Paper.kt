@@ -8,8 +8,8 @@ import android.content.Context
  */
 object Paper {
     /** Papel del lector (número) → nombre del archivo de su textura. */
-    private val FILES = mapOf(0 to "crema", 1 to "nogal", 2 to "negro", 3 to "sepia", 4 to "gris", 5 to "washi", 6 to "kraft")
-    val NAMES = listOf("Crema" to 0, "Sepia" to 3, "Washi" to 5, "Kraft" to 6, "Gris" to 4, "Nogal" to 1, "Negro" to 2)
+    private val FILES = mapOf(0 to "crema", 1 to "nogal", 2 to "negro", 3 to "sepia", 4 to "gris", 5 to "washi", 6 to "kraft", 7 to "tinta")
+    val NAMES = listOf("Tinta" to 7, "Crema" to 0, "Sepia" to 3, "Washi" to 5, "Kraft" to 6, "Gris" to 4, "Nogal" to 1, "Negro" to 2)
 
     private var have: Set<String>? = null
 
