@@ -1522,6 +1522,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private fun curlPreShot() {
         val pf = curl ?: return
         if (pf.busy) return
+        // Solo con la página limpia (sin menús ni hojas abiertas): si no, la hoja llevaría los botones pintados
+        if (ui.controls || ui.sheet != null || ui.lookup != null || ui.backTo != null) { curlCacheSoon(); return }
         val key = hereKey() ?: return
         if (album.containsKey(key)) return
         gpuShot { bmp ->
@@ -1537,7 +1539,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val key = hereKey()
         albumGet(key)?.let { got(it); return }
         gpuShot { b ->
-            if (b != null) runCatching { b.copy(b.config ?: Bitmap.Config.ARGB_8888, false) }.getOrNull()?.let { albumPut(key, it) }
+            if (b != null && !ui.controls && ui.sheet == null) runCatching { b.copy(b.config ?: Bitmap.Config.ARGB_8888, false) }.getOrNull()?.let { albumPut(key, it) }
             got(b)
         }
     }
@@ -1747,6 +1749,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     // ---------------- controles ----------------
     fun setControls(show: Boolean) {
         ui.controls = show
+        if (!show) curlCacheSoon() // con la página limpia, se guarda su foto
         val c = WindowInsetsControllerCompat(window, root)
         c.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
         if (show) c.show(WindowInsetsCompat.Type.systemBars()) else c.hide(WindowInsetsCompat.Type.systemBars())
