@@ -111,7 +111,8 @@ object AppEvents {
     val openBook = MutableStateFlow<String?>(null)
     /** Solo para la prueba automática: abrir el libro en modo continuo. */
     var testContinuous = false
-    var testSheet: String? = null   // prueba automática: abrir el lector con un menú ya abierto
+    var testSheet: String? = null
+    var testPaper = false           // prueba automática: pasar página con papel 3D   // prueba automática: abrir el lector con un menú ya abierto
     /** Pestaña que hay que mostrar (por ejemplo, al tocar la notificación del audiolibro). */
     val tab = MutableStateFlow<Int?>(null)
     fun toast(msg: String) { toast.value = msg to System.currentTimeMillis() }
@@ -119,7 +120,7 @@ object AppEvents {
 
 fun openReader(ctx: Context, book: Book) {
     if (book.isPdf) { ctx.startActivity(Intent(ctx, com.sebas.zerkalo.reader.PdfReaderActivity::class.java).putExtra("id", book.id)); return }
-    ctx.startActivity(Intent(ctx, ReaderActivity::class.java).putExtra("id", book.id).putExtra("continuo", AppEvents.testContinuous).putExtra("hoja", AppEvents.testSheet))
+    ctx.startActivity(Intent(ctx, ReaderActivity::class.java).putExtra("id", book.id).putExtra("continuo", AppEvents.testContinuous).putExtra("hoja", AppEvents.testSheet).putExtra("papel", AppEvents.testPaper))
 }
 
 private val TABS = listOf("home" to "Biblioteca", "tansu" to "Tansu", "escuchar" to "Escuchar", "notas" to "Estudio", "sellos" to "Sellos")

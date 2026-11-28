@@ -391,6 +391,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         Prefs.bookLook(book.id)?.let { ui.settings = ui.settings.withLook(it); ui.ownLook = true }
         // La prueba automática abre el libro en modo continuo sin cambiar los ajustes guardados
         if (intent.getBooleanExtra("continuo", false)) ui.settings = ui.settings.copy(scroll = true, continuous = true)
+        if (intent.getBooleanExtra("papel", false)) ui.settings = ui.settings.copy(scroll = false, continuous = false, animate = true, pageAnim = 2)
         intent.getStringExtra("hoja")?.let { h -> lifecycleScope.launch { delay(6000); ui.sheet = h } }
         ui.profile = Prefs.profile
         ui.palette = paletteFor(ui.settings)
@@ -1506,6 +1507,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private fun curlTap(nav: EpubNavigatorFragment, dir: Int) {
         if (curl?.busy == true) return
         curlStart(nav, dir, waitUnder = true) { r ->
+            Log.i("Zerkalo", "ZK_CURL toque dir=$dir r=$r")
             when (r) {
                 1 -> curl?.flip()
                 0 -> runCatching { if (dir > 0) nav.goForward(animated = false) else nav.goBackward(animated = false) } // sin foto: pasa sin animación
@@ -1518,6 +1520,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         if (curl?.busy == true) return false
         curlLive = false; curlPending = null; curlEnd = null
         curlStart(nav, dir, waitUnder = false) { r ->
+            Log.i("Zerkalo", "ZK_CURL dedo dir=$dir r=$r")
             if (r != 1) { curlPending = null; curlEnd = null; return@curlStart }
             curlLive = true
             curl?.press(y)
@@ -1544,6 +1547,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
     /** Terminó el doblez: si pasó, listo; si volvió, el libro también vuelve a la página de antes. */
     private fun curlDone(d: Int, completed: Boolean) {
+        Log.i("Zerkalo", "ZK_CURL fin dir=$d pasó=$completed")
         val pf = curl ?: return
         val nav = navigator
         if (completed || nav == null) {
