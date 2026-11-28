@@ -1436,6 +1436,8 @@ open class GLTextureView @JvmOverloads constructor(
          */
         fun surfaceCreated() {
             glThreadManager.lock.withLock {
+                // Zerkalo: nunca esperar más de ~1/3 de segundo (si no, la app se congela al cambiar de app)
+                var waits = 0
                 if (LOG_THREADS) {
                     Log.i("GLThread", "surfaceCreated tid=$id")
                 }
@@ -1443,7 +1445,7 @@ open class GLTextureView @JvmOverloads constructor(
                 glThreadManager.condition.signalAll()
                 while (waitingForSurface && !exited) {
                     try {
-                        glThreadManager.condition.await()
+                        glThreadManager.condition.await(40, java.util.concurrent.TimeUnit.MILLISECONDS); if (++waits > 8) break
                     } catch (_: InterruptedException) {
                         currentThread().interrupt()
                     }
@@ -1456,6 +1458,8 @@ open class GLTextureView @JvmOverloads constructor(
          */
         fun surfaceDestroyed() {
             glThreadManager.lock.withLock {
+                // Zerkalo: nunca esperar más de ~1/3 de segundo (si no, la app se congela al cambiar de app)
+                var waits = 0
                 if (LOG_THREADS) {
                     Log.i("GLThread", "surfaceDestroyed tid=$id")
                 }
@@ -1463,7 +1467,7 @@ open class GLTextureView @JvmOverloads constructor(
                 glThreadManager.condition.signalAll()
                 while (!waitingForSurface && !exited) {
                     try {
-                        glThreadManager.condition.await()
+                        glThreadManager.condition.await(40, java.util.concurrent.TimeUnit.MILLISECONDS); if (++waits > 8) break
                     } catch (_: InterruptedException) {
                         currentThread().interrupt()
                     }
@@ -1476,6 +1480,8 @@ open class GLTextureView @JvmOverloads constructor(
          */
         fun onPause() {
             glThreadManager.lock.withLock {
+                // Zerkalo: nunca esperar más de ~1/3 de segundo (si no, la app se congela al cambiar de app)
+                var waits = 0
                 if (LOG_PAUSE_RESUME) {
                     Log.i("GLThread", "onPause tid=$id")
                 }
@@ -1486,7 +1492,7 @@ open class GLTextureView @JvmOverloads constructor(
                         Log.i(MAIN_THREAD, "onPause waiting for paused.")
                     }
                     try {
-                        glThreadManager.condition.await()
+                        glThreadManager.condition.await(40, java.util.concurrent.TimeUnit.MILLISECONDS); if (++waits > 8) break
                     } catch (_: InterruptedException) {
                         currentThread().interrupt()
                     }
@@ -1499,6 +1505,8 @@ open class GLTextureView @JvmOverloads constructor(
          */
         fun onResume() {
             glThreadManager.lock.withLock {
+                // Zerkalo: nunca esperar más de ~1/3 de segundo (si no, la app se congela al cambiar de app)
+                var waits = 0
                 if (LOG_PAUSE_RESUME) {
                     Log.i("GLThread", "onResume tid=$id")
                 }
@@ -1511,7 +1519,7 @@ open class GLTextureView @JvmOverloads constructor(
                         Log.i(MAIN_THREAD, "onResume waiting for !paused")
                     }
                     try {
-                        glThreadManager.condition.await()
+                        glThreadManager.condition.await(40, java.util.concurrent.TimeUnit.MILLISECONDS); if (++waits > 8) break
                     } catch (_: InterruptedException) {
                         currentThread().interrupt()
                     }
@@ -1527,6 +1535,8 @@ open class GLTextureView @JvmOverloads constructor(
          */
         fun onWindowResize(w: Int, h: Int) {
             glThreadManager.lock.withLock {
+                // Zerkalo: nunca esperar más de ~1/3 de segundo (si no, la app se congela al cambiar de app)
+                var waits = 0
                 width = w
                 height = h
                 sizeChanged = true
@@ -1543,7 +1553,7 @@ open class GLTextureView @JvmOverloads constructor(
                         )
                     }
                     try {
-                        glThreadManager.condition.await()
+                        glThreadManager.condition.await(40, java.util.concurrent.TimeUnit.MILLISECONDS); if (++waits > 8) break
                     } catch (_: InterruptedException) {
                         currentThread().interrupt()
                     }
@@ -1558,11 +1568,13 @@ open class GLTextureView @JvmOverloads constructor(
             // don't call this from GLThread thread or it is a guaranteed
             // deadlock!
             glThreadManager.lock.withLock {
+                // Zerkalo: nunca esperar más de ~1/3 de segundo (si no, la app se congela al cambiar de app)
+                var waits = 0
                 shouldExit = true
                 glThreadManager.condition.signalAll()
                 while (!exited) {
                     try {
-                        glThreadManager.condition.await()
+                        glThreadManager.condition.await(40, java.util.concurrent.TimeUnit.MILLISECONDS); if (++waits > 8) break
                     } catch (_: InterruptedException) {
                         currentThread().interrupt()
                     }

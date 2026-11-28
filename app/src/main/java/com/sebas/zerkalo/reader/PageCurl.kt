@@ -16,7 +16,6 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.Window
-import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import com.irurueta.android.gl.curl.CurlPage
 import com.irurueta.android.gl.curl.CurlTextureView
@@ -66,11 +65,15 @@ class PaperFlip(context: Context) {
 
     init {
         // El dibujo del doblez se ajusta antes de darle las páginas
-        view.maxCurlSplitsInMesh = if (low) 12 else 26
+        view.maxCurlSplitsInMesh = if (low) 14 else 30
         view.drawShadowInMesh = true
-        view.shadowInnerColorInMesh = floatArrayOf(0f, 0f, 0f, 0.22f) // sombra suave, nada de negro marcado
+        view.shadowInnerColorInMesh = floatArrayOf(0f, 0f, 0f, 0.16f) // sombra suave, nada de negro marcado
         view.shadowOuterColorInMesh = floatArrayOf(0f, 0f, 0f, 0f)
-        view.colorFactorOffsetInMesh = 0.55f
+        // Papel mate: el doblez se oscurece apenas (sin brillo de plástico)
+        view.colorFactorOffsetInMesh = 0.84f
+        // Radio del doblez como el de una hoja de libro (ni tubo apretado ni lámina rígida)
+        view.restPressure = 0.6f
+        view.catchUpDurationTime = 60L
         view.allowLastPageCurl = true
         view.renderLeftPage = false
         view.enableTouchPressure = false
@@ -87,9 +90,11 @@ class PaperFlip(context: Context) {
                     page.setColor(paper, CurlPage.SIDE_BOTH)
                     page.setTexture(null, CurlPage.SIDE_BOTH)
                 }
-                // Reverso: el texto al revés, apenas visible a través del papel
-                val veil = if (dark) 0xB4 else 0xBC
-                page.setColor(Color.argb(veil, Color.red(paper), Color.green(paper), Color.blue(paper)), CurlPage.SIDE_BACK)
+                // Reverso: papel opaco, un poco más oscuro (le da menos luz), con la tinta del otro lado apenas insinuada,
+                // como en un libro impreso (no una hoja transparente)
+                val k = if (dark) 0.92f else 0.95f
+                val back = Color.rgb((Color.red(paper) * k).toInt(), (Color.green(paper) * k).toInt(), (Color.blue(paper) * k).toInt())
+                page.setColor(Color.argb(if (dark) 0x12 else 0x10, Color.red(back), Color.green(back), Color.blue(back)), CurlPage.SIDE_BACK)
             }
         }
         view.currentIndexChangedListener = object : CurlTextureView.CurrentIndexChangedListener {
@@ -152,17 +157,22 @@ class PaperFlip(context: Context) {
 
     fun drag(x: Float, y: Float) = send(ev(MotionEvent.ACTION_MOVE, x, y))
 
-    /** Suelta: [completed] decide si pasa o vuelve (la librería mira de qué lado de la mitad quedó). */
-    fun release(x: Float, y: Float, completed: Boolean) {
+    /**
+     * Suelta donde está el dedo, sin saltos. [completed] decide si pasa o vuelve; [vx] es la velocidad del dedo
+     * (px/s, positiva hacia la derecha): la hoja sigue con ese impulso y se asienta, como una hoja que cae.
+     */
+    fun release(x: Float, y: Float, completed: Boolean, vx: Float = 0f, maxMs: Int = 380) {
         val w = view.width.toFloat().coerceAtLeast(1f)
-        val fx = when {
-            dir > 0 && completed -> min(x, w * 0.3f)
-            dir > 0 -> x.coerceAtLeast(w * 0.72f)
-            completed -> x.coerceAtLeast(w * 0.72f)
-            else -> min(x, w * 0.3f)
-        }
-        send(ev(MotionEvent.ACTION_MOVE, fx, y))
-        send(ev(MotionEvent.ACTION_UP, fx, y))
+        // Adónde va la hoja: adelante y pasa → izquierda; atrás y pasa → derecha; si vuelve, al revés
+        val toLeft = (dir > 0) == completed
+        val target = if (toLeft) 0f else w
+        val remaining = abs(target - x)
+        val speed = if (toLeft) -vx else vx // velocidad hacia donde va
+        val ms = if (speed > 300f) 3f * remaining / speed * 1000f else 150f + 230f * remaining / w
+        view.forcedTarget = if (toLeft) 1 else 2
+        view.nextReleaseDuration = ms.toInt().coerceIn(130, maxMs)
+        send(ev(MotionEvent.ACTION_MOVE, x, y))
+        send(ev(MotionEvent.ACTION_UP, x, y))
         // Si el dedo casi no movió la hoja, la librería no avisa: se da por devuelta
         val d = dir
         val token = ++releases
@@ -172,25 +182,28 @@ class PaperFlip(context: Context) {
     }
     private var releases = 0
 
-    /** Un toque a un lado: la esquina de abajo se levanta y la hoja cae, como al pasarla con el pulgar. */
-    fun flip(durationMs: Long = 190) {
+    /** Un toque a un lado: la esquina de abajo se levanta y la hoja cae con impulso, como al pasarla con el pulgar. */
+    fun flip() {
         val w = view.width.toFloat().coerceAtLeast(1f)
         val h = view.height.toFloat().coerceAtLeast(1f)
-        val y0 = h * 0.94f
-        val y1 = h * 0.82f
+        val y0 = h * 0.93f
+        val y1 = h * 0.86f
+        val reach = w * 0.42f
+        val lift = 120L
         press(y0)
         tapAnim = ValueAnimator.ofFloat(0f, 1f).apply {
-            duration = durationMs
-            interpolator = DecelerateInterpolator(1.3f)
+            duration = lift
+            interpolator = android.view.animation.AccelerateInterpolator(1.2f) // el pulgar empuja y la hoja toma vuelo
             addUpdateListener {
                 val t = it.animatedValue as Float
-                val x = if (dir > 0) (w - 2f) - t * (w * 0.80f) else 2f + t * (w * 0.80f)
+                val x = if (dir > 0) (w - 2f) - t * reach else 2f + t * reach
                 drag(x, y0 + (y1 - y0) * t)
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
-                    val x = if (dir > 0) w * 0.2f else w * 0.8f
-                    release(x, y1, completed = true)
+                    val x = if (dir > 0) (w - 2f) - reach else 2f + reach
+                    val v = reach / lift * 1000f * 1.6f * (if (dir > 0) -1f else 1f)
+                    release(x, y1, completed = true, vx = v, maxMs = 300)
                 }
             })
             start()
@@ -226,7 +239,7 @@ class CurlRoot(context: Context) : FrameLayout(context) {
     var onStart: (dir: Int, y: Float) -> Boolean = { _, _ -> false }
     /** El dedo se mueve: [dx] cuánto se corrió de lado desde que tocó (siempre ≥ 0, en la dirección del doblez). */
     var onMove: (dx: Float, y: Float) -> Unit = { _, _ -> }
-    var onEnd: (dx: Float, y: Float, complete: Boolean) -> Unit = { _, _, _ -> }
+    var onEnd: (dx: Float, y: Float, complete: Boolean, vx: Float) -> Unit = { _, _, _, _ -> }
 
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private var downX = 0f
@@ -287,7 +300,7 @@ class CurlRoot(context: Context) : FrameLayout(context) {
                 vt?.recycle(); vt = null
                 // Como Kindle: pasa si un toque rápido lo lanza, o si ya se llevó un tercio de la hoja
                 val complete = ev.actionMasked == MotionEvent.ACTION_UP && !backFling && (forwardFling || dx > w * 0.33f)
-                onEnd(dx, ev.y, complete)
+                onEnd(dx, ev.y, complete, vx)
             }
         }
     }

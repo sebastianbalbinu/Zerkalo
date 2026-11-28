@@ -30,7 +30,14 @@ object Profiles {
     }
 
     /** Los ajustes de ahora con lo que el perfil cambia encima. */
-    fun apply(r: ReaderSettings, o: JSONObject): ReaderSettings {
+    fun apply(r0: ReaderSettings, o: JSONObject): ReaderSettings {
+        // Lo del aspecto que el perfil no menciona vuelve a lo normal; lo demás (márgenes, gestos…) se respeta
+        val base = ReaderSettings()
+        val r = r0.copy(
+            font = base.font, size = base.size, lineHeight = base.lineHeight, weight = base.weight, align = base.align, justify = base.justify,
+            paragraph = base.paragraph, spacing = base.spacing, cpl = base.cpl, texture = base.texture, paper = base.paper, ink = base.ink,
+            warmth = base.warmth, veil = base.veil, dyslexia = base.dyslexia, layout = base.layout, pageAnim = base.pageAnim, animate = base.animate,
+        )
         fun i(k: String, d: Int) = if (o.has(k)) o.optInt(k, d) else d
         fun f(k: String, d: Float) = if (o.has(k)) o.optDouble(k, d.toDouble()).toFloat() else d
         fun b(k: String, d: Boolean) = if (o.has(k)) o.optBoolean(k, d) else d
@@ -62,19 +69,26 @@ object Profiles {
     private fun j(vararg kv: Pair<String, Any>) = JSONObject().apply { kv.forEach { (k, v) -> put(k, v) } }
 
     /** Los que trae Zerkalo. */
+    // Cada perfil trae su letra, su tamaño, su papel y su forma de pasar página: con solo tocarlo, todo cambia.
+    // (Letras: 0 Literata, 2 Garamond, 5 Atkinson, 7 Inter, 17 Lora, 20 Bitter.)
     val BUILTIN: List<Profile> = listOf(
-        Profile("dia", "Día", j("paper" to 0, "ink" to 0, "brightness" to -1.0, "warmth" to 0.0, "veil" to 0.0, "weight" to 0, "texture" to true, "info" to true), true),
-        Profile("noche", "Noche", j("paper" to 1, "ink" to 0, "brightness" to 0.45, "warmth" to 0.25, "veil" to 0.0, "weight" to 0, "info" to true), true),
-        Profile("oscuro", "Oscuro total", j("paper" to 2, "ink" to 3, "brightness" to 0.12, "warmth" to 0.35, "veil" to 0.0, "weight" to 0, "info" to false), true),
-        Profile("sol", "Sol", j("paper" to 0, "ink" to 0, "brightness" to 1.0, "warmth" to 0.0, "veil" to 0.0, "weight" to 2, "texture" to false, "size" to 125), true),
-        Profile("cama", "Cama", j("paper" to 1, "ink" to 4, "brightness" to 0.2, "warmth" to 0.7, "veil" to 0.0, "info" to false), true),
-        Profile("rapida", "Rápida", j("cpl" to 38, "align" to 0, "lineHeight" to 1.6, "paragraph" to 0, "continuous" to false), true),
-        // Como un libro de Alfaguara: Garamond justificada con sangría, papel crema con textura, páginas que se doblan
-        Profile("realista", "Realista", j(
-            "font" to 2, "paper" to 0, "ink" to 0, "texture" to true, "continuous" to false, "align" to 1, "paragraph" to 0,
-            "lineHeight" to 1.5, "spacing" to 0, "weight" to 0, "layout" to 1, "cpl" to 0, "info" to true, "pageAnim" to 2,
-        ), true),
-        Profile("estudio", "Estudio", j("paper" to 5, "ink" to 0, "lineHeight" to 1.75, "paragraph" to 1, "continuous" to false, "cpl" to 0, "align" to 2), true),
+        Profile("dia", "Día", j("font" to 0, "size" to 100, "lineHeight" to 1.6, "weight" to 0, "paper" to 0, "ink" to 0, "brightness" to -1.0, "warmth" to 0.0, "veil" to 0.0,
+            "texture" to true, "info" to true, "align" to 2, "paragraph" to 0, "continuous" to false, "pageAnim" to 1), true),
+        Profile("noche", "Noche", j("font" to 20, "size" to 104, "lineHeight" to 1.65, "weight" to 0, "paper" to 1, "ink" to 0, "brightness" to 0.45, "warmth" to 0.25, "veil" to 0.0,
+            "texture" to false, "info" to true, "align" to 2, "paragraph" to 0, "continuous" to false, "pageAnim" to 1), true),
+        Profile("oscuro", "Oscuro total", j("font" to 20, "size" to 106, "lineHeight" to 1.65, "weight" to 1, "paper" to 2, "ink" to 3, "brightness" to 0.12, "warmth" to 0.35, "veil" to 0.0,
+            "texture" to false, "info" to false, "align" to 2, "paragraph" to 0, "continuous" to false, "pageAnim" to 0), true),
+        Profile("sol", "Sol", j("font" to 5, "size" to 125, "lineHeight" to 1.55, "weight" to 2, "paper" to 0, "ink" to 0, "brightness" to 1.0, "warmth" to 0.0, "veil" to 0.0,
+            "texture" to false, "info" to true, "align" to 0, "paragraph" to 1, "continuous" to false, "pageAnim" to 1), true),
+        Profile("cama", "Cama", j("font" to 17, "size" to 112, "lineHeight" to 1.7, "weight" to 0, "paper" to 1, "ink" to 4, "brightness" to 0.2, "warmth" to 0.7, "veil" to 0.0,
+            "texture" to false, "info" to false, "align" to 2, "paragraph" to 0, "continuous" to false, "pageAnim" to 1), true),
+        Profile("rapida", "Rápida", j("font" to 7, "size" to 100, "lineHeight" to 1.6, "weight" to 0, "cpl" to 38, "align" to 0, "paragraph" to 0, "texture" to false,
+            "continuous" to false, "pageAnim" to 0), true),
+        Profile("estudio", "Estudio", j("font" to 0, "size" to 100, "lineHeight" to 1.75, "weight" to 0, "paper" to 5, "ink" to 0, "texture" to true, "paragraph" to 1,
+            "continuous" to false, "cpl" to 0, "align" to 2, "pageAnim" to 1), true),
+        // Como un libro de Alfaguara: Garamond justificada con sangría, papel crema con textura, la hoja se dobla
+        Profile("realista", "Realista", j("font" to 2, "size" to 106, "lineHeight" to 1.5, "weight" to 0, "paper" to 0, "ink" to 0, "texture" to true, "continuous" to false,
+            "align" to 1, "paragraph" to 0, "spacing" to 0, "layout" to 1, "cpl" to 0, "info" to true, "pageAnim" to 2), true),
     )
 
     val list = MutableStateFlow<List<Profile>>(emptyList())

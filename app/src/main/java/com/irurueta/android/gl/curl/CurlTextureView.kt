@@ -211,7 +211,7 @@ class CurlTextureView @JvmOverloads constructor(
             val targetIndex = this@CurlTextureView.targetIndex
 
             val currentTime = System.nanoTime()
-            if (currentTime >= animationStartTime + millisToNanos(animationDurationTime)) {
+            if (currentTime >= animationStartTime + millisToNanos(releaseDuration)) {
                 // If animation is done
                 if (animationTargetEvent == SET_CURL_TO_RIGHT) {
                     // Switch curled page to right.
@@ -262,9 +262,10 @@ class CurlTextureView @JvmOverloads constructor(
                 requestRender()
             } else {
                 pointerPos.pos.set(animationSource)
-                var t =
-                    1.0f - (currentTime - animationStartTime).toFloat() / animationDurationTime.toFloat()
-                t = 1.0f - (t * t * t * (3.0f - 2.0f * t))
+                // Sale con la velocidad del dedo y se asienta suave (como una hoja que cae), sin arrancar lento
+                val p = ((currentTime - animationStartTime).toFloat() / millisToNanos(releaseDuration).toFloat()).coerceIn(0f, 1f)
+                val q = 1.0f - p
+                val t = 1.0f - q * q * q
                 pointerPos.pos.x += (animationTarget.x - animationSource.x) * t
                 pointerPos.pos.y += (animationTarget.y - animationSource.y) * t
                 updateCurlPos(pointerPos)
@@ -306,6 +307,17 @@ class CurlTextureView @JvmOverloads constructor(
      * Allows curl on last page.
      */
     var allowLastPageCurl: Boolean = ALLOW_LAST_PAGE_CURL
+
+    // ---- Zerkalo: ajustes para que se sienta como papel ----
+    /** Presión fija sin sensor: decide el radio del doblez (0.8 = muy cerrado; 0.62 ≈ como un libro). */
+    var restPressure: Float = 0.8f
+    /** Cuánto tarda la hoja en alcanzar el dedo al empezar (corto: va pegada al dedo). */
+    var catchUpDurationTime: Long = 70L
+    /** Duración del final al soltar, calculada con la velocidad del dedo (0 = la de siempre). */
+    var nextReleaseDuration: Int = 0
+    /** Al soltar: 1 = la hoja termina a la izquierda (pasa), 2 = vuelve a la derecha; 0 = según la mitad. */
+    var forcedTarget: Int = 0
+    private var releaseDuration: Int = ANIMATION_DURATION_MILLIS
 
     /**
      * Curl animation duration expressed in milliseconds.
@@ -698,7 +710,7 @@ class CurlTextureView @JvmOverloads constructor(
         // Store pointer position.
         pointerPos.pos.set(x, y)
         curlRenderer.translate(pointerPos.pos)
-        pointerPos.pressure = if (enableTouchPressure) pressure else 0.8f
+        pointerPos.pressure = if (enableTouchPressure) pressure else restPressure
 
         if (curlState == CURL_LEFT || curlState == CURL_RIGHT) {
             // Animation source is the point from where animation starts.
@@ -713,10 +725,16 @@ class CurlTextureView @JvmOverloads constructor(
 
             // Given the explanation, here we decide whether to simulate
             // drag to left or right end.
-            if ((viewMode == SHOW_ONE_PAGE && pointerPos.pos.x > (rightRect.left + rightRect.right) / 2.0f)
-                || viewMode == SHOW_TWO_PAGES
-                && pointerPos.pos.x > rightRect.left
-            ) {
+            releaseDuration = if (nextReleaseDuration > 0) nextReleaseDuration else animationDurationTime
+            nextReleaseDuration = 0
+            val toRight = when (forcedTarget) {
+                1 -> false
+                2 -> true
+                else -> (viewMode == SHOW_ONE_PAGE && pointerPos.pos.x > (rightRect.left + rightRect.right) / 2.0f)
+                    || viewMode == SHOW_TWO_PAGES && pointerPos.pos.x > rightRect.left
+            }
+            forcedTarget = 0
+            if (toRight) {
                 // On right side target is always right page's right border.
                 animationTarget.set(dragStartPos)
                 animationTarget.x = rightRect.right
@@ -794,8 +812,8 @@ class CurlTextureView @JvmOverloads constructor(
 
             updateCurlPos(x, y, pressure)
         }
-        curlAnimator.duration = animationDurationTime.toLong()
-        curlAnimator.interpolator = LinearInterpolator()
+        curlAnimator.duration = catchUpDurationTime
+        curlAnimator.interpolator = android.view.animation.DecelerateInterpolator(1.5f)
 
         curlAnimator.start()
     }
@@ -824,7 +842,7 @@ class CurlTextureView @JvmOverloads constructor(
         // Store pointer position.
         pointerPos.pos.set(x, y)
         curlRenderer.translate(pointerPos.pos)
-        pointerPos.pressure = if (enableTouchPressure) pressure else 0.8f
+        pointerPos.pressure = if (enableTouchPressure) pressure else restPressure
 
         // Once we receive pointer down event its position is mapped to
         // right or left edge of page and that'll be the position from where
@@ -914,7 +932,7 @@ class CurlTextureView @JvmOverloads constructor(
         // Store pointer position.
         pointerPos.pos.set(x, y)
         curlRenderer?.translate(pointerPos.pos)
-        pointerPos.pressure = if (enableTouchPressure) pressure else 0.8f
+        pointerPos.pressure = if (enableTouchPressure) pressure else restPressure
 
         updateCurlPos(pointerPos)
     }

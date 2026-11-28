@@ -71,12 +71,24 @@ sleep 12
 if [ -n "$W" ]; then
   $T adb shell input tap $((W*85/100)) $((H/2)); sleep 3
   $T adb shell input tap $((W/2)) $((H/2)); sleep 1; $T adb shell input tap $((W/2)) $((H/2)); sleep 2
+  # Dedo lento hacia la izquierda: foto a mitad del doblez
   $T adb shell input swipe $((W*85/100)) $((H*85/100)) $((W*25/100)) $((H*72/100)) 1800 &
   sleep 1.0; $T adb exec-out screencap -p > shot11.png; wait; sleep 2
-  $T adb exec-out screencap -p > shot12.png
+  # Toque a la derecha: foto a mitad de la animación
+  $T adb shell input tap $((W*88/100)) $((H/2)) &
+  sleep 0.25; $T adb exec-out screencap -p > shot12.png; wait; sleep 2
+  # Dedo lento hacia la derecha (volver): foto a mitad
   $T adb shell input swipe $((W*15/100)) $((H*80/100)) $((W*75/100)) $((H*70/100)) 1800 &
   sleep 1.0; $T adb exec-out screencap -p > shot13.png; wait; sleep 2
+  # Salir a la pantalla de inicio y volver: la app no puede congelarse
+  $T adb shell input keyevent KEYCODE_HOME; sleep 3
+  $T adb shell monkey -p com.sebas.zerkalo -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+  sleep 3
+  $T adb shell input tap $((W*88/100)) $((H/2)); sleep 3
   $T adb exec-out screencap -p > shot14.png
+  $T adb shell input keyevent KEYCODE_HOME; sleep 2
+  $T adb shell monkey -p com.sebas.zerkalo -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1; sleep 4
+  $T adb shell input tap $((W*88/100)) $((H/2)); sleep 2
 fi
 $T adb logcat -d > logcat-full.txt
 {
@@ -90,4 +102,4 @@ $T adb logcat -d > logcat-full.txt
 } > metricas.txt
 cat metricas.txt
 { $T adb shell getprop ro.build.version.release; grep -E "ZK_|FATAL|AndroidRuntime|Zerkalo" logcat-full.txt | tail -300; } > logcat.txt
-grep -q "ZK_READY" logcat-full.txt && grep -q "ZK_READER_OK" logcat-full.txt && grep -q "ZK_CONT_OK" logcat-full.txt && grep -q "ZK_PDF_READY" logcat-full.txt && ! grep -q "FATAL EXCEPTION" logcat-full.txt
+grep -q "ZK_READY" logcat-full.txt && grep -q "ZK_READER_OK" logcat-full.txt && grep -q "ZK_CONT_OK" logcat-full.txt && grep -q "ZK_PDF_READY" logcat-full.txt && ! grep -q "FATAL EXCEPTION" logcat-full.txt && ! grep -q "ANR in com.sebas.zerkalo" logcat-full.txt
