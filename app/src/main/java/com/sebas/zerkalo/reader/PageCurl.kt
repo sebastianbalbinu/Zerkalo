@@ -136,6 +136,7 @@ class PaperFlip(context: Context) {
     /** Pone [shown] encima (la página de ahora) y avisa con [ready] cuando ya se ve. */
     fun cover(direction: Int, shown: Bitmap, ready: () -> Unit) {
         tapAnim?.cancel()
+        runCatching { view.stopCurl() }
         dir = direction
         armed = false
         clearPages()
@@ -231,7 +232,10 @@ class PaperFlip(context: Context) {
                 drag(x, y0 + (y1 - y0) * t)
             }
             addListener(object : android.animation.AnimatorListenerAdapter() {
+                var cut = false
+                override fun onAnimationCancel(animation: android.animation.Animator) { cut = true }
                 override fun onAnimationEnd(animation: android.animation.Animator) {
+                    if (cut || !armed) return // se cortó (otra hoja empezó): no soltar nada
                     val x = if (dir > 0) (w - 2f) - reach else 2f + reach
                     val v = reach / lift * 1000f * 1.3f * (if (dir > 0) -1f else 1f)
                     release(x, y1, completed = true, vx = v, maxMs = 340)
@@ -279,6 +283,7 @@ class PaperFlip(context: Context) {
         armed = false; finishing = false
         releases++
         dir = 0
+        runCatching { view.stopCurl() }
         clearPages()
         count = 0
         runCatching { view.setCurrentIndex(0) }

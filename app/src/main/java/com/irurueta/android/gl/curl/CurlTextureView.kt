@@ -319,6 +319,14 @@ class CurlTextureView @JvmOverloads constructor(
     var forcedTarget: Int = 0
     private var releaseDuration: Int = ANIMATION_DURATION_MILLIS
 
+    /** Zerkalo: corta en seco cualquier doblez en curso (para que no "termine" encima de la hoja siguiente). */
+    fun stopCurl() {
+        animate = false
+        curlState = CURL_NONE
+        forcedTarget = 0
+        nextReleaseDuration = 0
+    }
+
     /**
      * Curl animation duration expressed in milliseconds.
      */
