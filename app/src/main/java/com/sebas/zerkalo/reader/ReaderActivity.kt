@@ -1568,7 +1568,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                     // Atrás: entra la página anterior. Casi siempre ya está en el álbum (nítida, al instante);
                     // si no, se le toma la foto por la tarjeta gráfica con la hoja escondida dos cuadros.
                     waitRedraw(nav, before)
-                    val prev = albumGet(hereKey()) ?: kotlinx.coroutines.suspendCancellableCoroutine { k ->
+                    val prev: Bitmap? = albumGet(hereKey()) ?: kotlinx.coroutines.suspendCancellableCoroutine<Bitmap?> { k ->
                         pf.layer.alpha = 0f
                         root.postOnAnimation {
                             root.postOnAnimation {
