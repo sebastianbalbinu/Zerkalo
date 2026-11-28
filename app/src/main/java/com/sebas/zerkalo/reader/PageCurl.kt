@@ -206,11 +206,16 @@ class PaperFlip(context: Context) {
         view.nextReleaseDuration = ms.toInt().coerceIn(170, maxMs)
         send(ev(MotionEvent.ACTION_MOVE, x, y))
         send(ev(MotionEvent.ACTION_UP, x, y))
-        // Si el dedo casi no movió la hoja, la librería no avisa: se da por devuelta
+        // Si la librería no avisa del final (el dedo casi no movió la hoja), se da por hecho lo decidido.
+        // En teléfonos lentos la hoja puede tardar más en caer: mientras se mueva, se espera.
         val d = dir
         val token = ++releases
-        main.postDelayed({
-            if (armed && dir == d && token == releases) { armed = false; onFinished?.invoke(d, false) }
+        main.postDelayed(object : Runnable {
+            override fun run() {
+                if (!armed || dir != d || token != releases) return
+                if (view.curling) { main.postDelayed(this, 300); return }
+                armed = false; onFinished?.invoke(d, completed)
+            }
         }, 1100)
     }
     private var releases = 0
@@ -263,6 +268,7 @@ class PaperFlip(context: Context) {
         main.postDelayed(object : Runnable {
             override fun run() {
                 if (!busy) return
+                if (view.curling) lastAction = SystemClock.uptimeMillis() // aún se mueve: no está pegada
                 if (SystemClock.uptimeMillis() - lastAction > 2200) {
                     val d = dir; val done = finishing && finishingDone
                     armed = false
