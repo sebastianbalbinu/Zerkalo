@@ -135,7 +135,7 @@ jobs:
       - name: Renombrar capturas
         if: always()
         run: |
-          for f in shot1.png shot2.png shot3.png shot4.png shot5.png shot6.png shot7.png shot8.png shot9.png shot10.png logcat.txt metricas.txt; do [ -f "$f" ] && mv "$f" "api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-$f"; done; ls
+          for f in shot1.png shot2.png shot3.png shot4.png shot5.png shot6.png shot7.png shot8.png shot9.png shot10.png shot11.png shot12.png shot13.png shot14.png logcat.txt metricas.txt; do [ -f "$f" ] && mv "$f" "api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-$f"; done; ls
 
       - name: Publicar capturas de la prueba
         if: always()
@@ -157,6 +157,10 @@ jobs:
             api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot8.png
             api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot9.png
             api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot10.png
+            api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot11.png
+            api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot12.png
+            api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot13.png
+            api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-shot14.png
             api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-logcat.txt
             api${{ matrix.api }}${{ matrix.device == 'tablet' && '-tablet' || '' }}-metricas.txt
 
