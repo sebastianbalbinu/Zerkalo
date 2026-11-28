@@ -328,7 +328,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private var curl: PaperFlip? = null
     private var curlLive = false                       // la hoja ya sigue al dedo
     private var curlPending: Pair<Float, Float>? = null // último movimiento del dedo mientras se prepara
-    private var curlEnd: Triple<Float, Float, Boolean>? = null // el dedo se soltó antes de estar lista
+    private var curlEnd: List<Float>? = null // el dedo se soltó antes de estar lista: dx, y, pasa(1/0), velocidad
     private var snapDown: Bitmap? = null               // foto tomada al tocar (para arrancar al instante)
     private var snapAt = 0L
     private var snapLoc: String? = null
@@ -409,10 +409,10 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         ui.studyTap = Prefs.studyTap
         root = CurlRoot(this).apply {
             enabled = { curlAllowed() }
-            onDown = { curlPreShot() }
+            onDown = { if (snapLoc != hereKey()) root.post { curlPreShot() } }
             onStart = { d, y -> curlBegin(d, y) }
             onMove = { dx, y -> if (curlLive) curlDrag(dx, y) else curlPending = dx to y }
-            onEnd = { dx, y, ok -> if (curlLive) curlRelease(dx, y, ok) else curlEnd = Triple(dx, y, ok) }
+            onEnd = { dx, y, ok, vx -> if (curlLive) curlRelease(dx, y, ok, vx) else curlEnd = listOf(dx, y, if (ok) 1f else 0f, vx) }
         }
         // Dos paneles: el libro y, si se activa, su versión en otro idioma (al lado o debajo).
         panes = LinearLayout(this)
@@ -504,6 +504,17 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         }
         applyPaper()
         applyBrightness(ui.settings.brightness)
+        // El perfil de la hora se pone ANTES de abrir el libro: así nada se reacomoda mientras lees
+        if (Prefs.profileAuto && !intent.getBooleanExtra("papel", false)) {
+            val want = com.sebas.zerkalo.data.Profiles.forHour(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY))
+            com.sebas.zerkalo.data.Profiles.get(want)?.let { pr ->
+                if (ui.profile != want) {
+                    val r = com.sebas.zerkalo.data.Profiles.apply(ui.settings, pr.values)
+                    if (r.continuous == ui.settings.continuous) { ui.settings = r; Prefs.setReader(r); Prefs.profile = want; ui.profile = want }
+                }
+            }
+            autoProfileAtOpen = want
+        }
         lifecycleScope.launch { open() }
         onBackPressedDispatcher.addCallback(this, object : androidx.activity.OnBackPressedCallback(true) {
             override fun handleOnBackPressed() { back() }
@@ -1187,6 +1198,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
      * hacia atrás abre el anterior por el final, justo donde lo dejaste.
      */
     private fun chapterJump(nav: EpubNavigatorFragment, dir: Int) {
+        userMoves++
         val pub = pubOf(nav) ?: return
         val idx = resourceIndex(pub, nav.currentLocator.value)
         val link = pub.readingOrder.getOrNull(idx + dir) ?: run { ui.say(if (dir > 0) "Es el final del libro" else "Es el inicio del libro"); return }
@@ -1363,9 +1375,12 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     }
 
     /** Cambio automático por hora: Día, Noche y Oscuro total. Solo cambia al cruzar una hora, así lo que elijas a mano se respeta. */
+    private var autoProfileAtOpen = ""
+    private var userMoves = 0 // cuántas veces pasaste página tú (para no devolverte nunca a otra)
+
     private fun watchProfileHours() {
         lifecycleScope.launch {
-            var last = ""
+            var last = autoProfileAtOpen
             while (true) {
                 if (Prefs.profileAuto) {
                     val want = com.sebas.zerkalo.data.Profiles.forHour(java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY))
@@ -1427,6 +1442,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
     /** Pasa página. En desplazamiento continuo avanza una pantalla dejando dos líneas de referencia. */
     private fun turn(nav: EpubNavigatorFragment?, dir: Int) {
+        userMoves++
         if (ui.aloudPlaying) lifecycleScope.launch { delay(520); raFromView() }
         if (nav == null) { contPage(dir); return }
         if (ui.controls) setControls(false)
@@ -1459,14 +1475,24 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         255, (ui.palette.bg.red * 255).toInt(), (ui.palette.bg.green * 255).toInt(), (ui.palette.bg.blue * 255).toInt(),
     )
 
-    private fun hereKey(): String? = navigator?.currentLocator?.value?.let { it.href.toString() + "@" + it.locations.progression + "@" + it.locations.position }
+    private fun hereKey(): String? = navigator?.currentLocator?.value?.let {
+        it.href.toString() + "@" + it.locations.progression + "@" + it.locations.position + "@" + ui.settings.hashCode() + "@" + ui.palette.name + "@" + ui.marks.size
+    }
+
+    /** Cuando la página queda quieta, se guarda su foto: así la hoja se dobla al instante, sin trabar el toque. */
+    private val curlCacheRun = Runnable { curlPreShot() }
+    private fun curlCacheSoon() {
+        if (!::root.isInitialized || curl == null || ui.settings.pageAnim != 2 || ui.settings.scroll) return
+        root.removeCallbacks(curlCacheRun)
+        root.postDelayed(curlCacheRun, 900)
+    }
 
     /** Al tocar la pantalla se toma ya la foto de la página: si el dedo se desliza, la hoja arranca al instante. */
     private fun curlPreShot() {
         val pf = curl ?: return
         if (pf.busy) return
         val key = hereKey()
-        if (snapDown != null && snapLoc == key && System.currentTimeMillis() - snapAt < 1500) return
+        if (snapDown != null && snapLoc == key) return
         // Se dibuja solo la página (sin los botones que flotan encima, como la bolita 記)
         val bmp = Snap.draw(panes, Snap.scale(this, panes.height), curlColor())
         if (bmp != null) { snapDown?.recycle(); snapDown = bmp; snapAt = System.currentTimeMillis(); snapLoc = key; return }
@@ -1480,7 +1506,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
     /** La foto de la página de ahora: la que se tomó al tocar (si sigue siendo esta página) o una nueva. */
     private fun curlShot(got: (Bitmap?) -> Unit) {
-        val fresh = snapDown?.takeIf { !it.isRecycled && snapLoc == hereKey() && System.currentTimeMillis() - snapAt < 4000 }
+        val fresh = snapDown?.takeIf { !it.isRecycled && snapLoc == hereKey() }
         if (fresh != null) { snapDown = null; got(fresh); return }
         val drawn = Snap.draw(panes, Snap.scale(this, panes.height), curlColor())
         if (drawn != null) { got(drawn); return }
@@ -1522,7 +1548,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
     private fun curlTap(nav: EpubNavigatorFragment, dir: Int) {
         if (curl?.busy == true) return
-        curlStart(nav, dir, waitUnder = true) { r ->
+        curlStart(nav, dir, waitUnder = false) { r ->
             Log.i("Zerkalo", "ZK_CURL toque dir=$dir r=$r")
             when (r) {
                 1 -> curl?.flip()
@@ -1533,6 +1559,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
     private fun curlBegin(dir: Int, y: Float): Boolean {
         val nav = navigator ?: return false
+        userMoves++
         if (curl?.busy == true) return false
         curlLive = false; curlPending = null; curlEnd = null
         curlStart(nav, dir, waitUnder = false) { r ->
@@ -1541,7 +1568,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             curlLive = true
             curl?.press(y)
             curlPending?.let { (dx, py) -> curlDrag(dx, py) }
-            curlEnd?.let { (dx, py, c) -> curlRelease(dx, py, c) }
+            curlEnd?.let { e -> curlRelease(e[0], e[1], e[2] > 0.5f, e[3]) }
             curlPending = null; curlEnd = null
         }
         return true
@@ -1556,9 +1583,9 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
     private fun curlDrag(dx: Float, y: Float) { curl?.drag(curlX(dx), y) }
 
-    private fun curlRelease(dx: Float, y: Float, complete: Boolean) {
+    private fun curlRelease(dx: Float, y: Float, complete: Boolean, vx: Float) {
         curlLive = false
-        curl?.release(curlX(dx), y, complete)
+        curl?.release(curlX(dx), y, complete, vx)
     }
 
     /** Terminó el doblez: si pasó, listo; si volvió, el libro también vuelve a la página de antes. */
@@ -1638,6 +1665,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         ui.minutesToday = Library.minutesToday() + ((activeMs + pendingMs()) / 60_000).toInt()
         val pos = loc.locations.position
         updateShiori(loc)
+        curlCacheSoon()
         ui.chapterLeft = chapterLeft(pos)
         if (turn && ui.pairLinked && System.currentTimeMillis() > ignoreMainUntil) syncPair(loc)
         val json = loc.toJSON().toString()
@@ -1776,6 +1804,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val lang = if (nav === pairNav) pairLang else ui.lang
         val entry = nav.currentLocator.value
         val fresh = !force && nav === navigator
+        val movesAtEntry = userMoves
         lifecycleScope.launch {
             // Como en Books: el capítulo se acomoda apenas aparece, sin parpadeos ni papel encima.
             // Las pasadas siguientes solo actúan si algo cambió (letras o imágenes que terminaron de cargar).
@@ -1797,7 +1826,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                     // Al entrar por el final (o a un punto guardado), volver a ese punto tras reacomodar
                     val p = entry.locations.progression ?: 0.0
                     val now = nav.currentLocator.value
-                    if (fresh && !ui.settings.scroll && p > 0.001 && now.href.toString() == href &&
+                    if (fresh && userMoves == movesAtEntry && curl?.busy != true && !ui.settings.scroll && p > 0.001 && now.href.toString() == href &&
                         abs((now.locations.progression ?: 0.0) - p) > 0.0005
                     ) nav.go(entry, animated = false)
                 }
