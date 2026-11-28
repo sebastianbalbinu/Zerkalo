@@ -74,7 +74,7 @@ class PaperFlip(context: Context) {
         view.allowLastPageCurl = true
         view.renderLeftPage = false
         view.enableTouchPressure = false
-        view.animationDurationTime = 260
+        view.animationDurationTime = 230
         view.setBackgroundColor(Color.TRANSPARENT)
         view.pageProvider = object : CurlTextureView.PageProvider {
             override val pageCount: Int get() = count
@@ -88,7 +88,7 @@ class PaperFlip(context: Context) {
                     page.setTexture(null, CurlPage.SIDE_BOTH)
                 }
                 // Reverso: el texto al revés, apenas visible a través del papel
-                val veil = if (dark) 0xCC else 0xD6
+                val veil = if (dark) 0xB4 else 0xBC
                 page.setColor(Color.argb(veil, Color.red(paper), Color.green(paper), Color.blue(paper)), CurlPage.SIDE_BACK)
             }
         }
@@ -173,7 +173,7 @@ class PaperFlip(context: Context) {
     private var releases = 0
 
     /** Un toque a un lado: la esquina de abajo se levanta y la hoja cae, como al pasarla con el pulgar. */
-    fun flip(durationMs: Long = 230) {
+    fun flip(durationMs: Long = 190) {
         val w = view.width.toFloat().coerceAtLeast(1f)
         val h = view.height.toFloat().coerceAtLeast(1f)
         val y0 = h * 0.94f

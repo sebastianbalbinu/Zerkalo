@@ -447,6 +447,17 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         }, onCommit = { key -> snapInk(key) })
         root.addView(inkView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         // La hoja de papel que se dobla al pasar página (encima del libro, debajo de los menús)
+        // Con papel, las esquinas de abajo son para tomar la hoja (no para el gesto de volver de Android)
+        root.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                val d = resources.displayMetrics.density
+                val w = v.width; val h = v.height
+                val top = (h - 260 * d).toInt().coerceAtLeast(0); val bottom = (h - 60 * d).toInt().coerceAtLeast(top)
+                val edge = (32 * d).toInt()
+                v.systemGestureExclusionRects = if (ui.settings.pageAnim == 2 && ui.settings.animate && !ui.settings.scroll)
+                    listOf(android.graphics.Rect(0, top, edge, bottom), android.graphics.Rect(w - edge, top, w, bottom)) else emptyList()
+            }
+        }
         curl = runCatching { PaperFlip(this) }.getOrNull()?.also { pf ->
             pf.onFinished = { d, done -> curlDone(d, done) }
             root.addView(pf.layer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
@@ -1456,11 +1467,14 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         if (pf.busy) return
         val key = hereKey()
         if (snapDown != null && snapLoc == key && System.currentTimeMillis() - snapAt < 1500) return
-        Snap.take(window, panes, Snap.scale(this, panes.height)) { bmp ->
-            if (bmp == null) return@take
-            if (pf.busy) { bmp.recycle(); return@take }
+        // Se dibuja solo la página (sin los botones que flotan encima, como la bolita 記)
+        val bmp = Snap.draw(panes, Snap.scale(this, panes.height), curlColor())
+        if (bmp != null) { snapDown?.recycle(); snapDown = bmp; snapAt = System.currentTimeMillis(); snapLoc = key; return }
+        Snap.take(window, panes, Snap.scale(this, panes.height)) { b ->
+            if (b == null) return@take
+            if (pf.busy) { b.recycle(); return@take }
             snapDown?.recycle()
-            snapDown = bmp; snapAt = System.currentTimeMillis(); snapLoc = key
+            snapDown = b; snapAt = System.currentTimeMillis(); snapLoc = key
         }
     }
 
@@ -1468,6 +1482,8 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private fun curlShot(got: (Bitmap?) -> Unit) {
         val fresh = snapDown?.takeIf { !it.isRecycled && snapLoc == hereKey() && System.currentTimeMillis() - snapAt < 4000 }
         if (fresh != null) { snapDown = null; got(fresh); return }
+        val drawn = Snap.draw(panes, Snap.scale(this, panes.height), curlColor())
+        if (drawn != null) { got(drawn); return }
         Snap.take(window, panes, Snap.scale(this, panes.height), got)
     }
 
