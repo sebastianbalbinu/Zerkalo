@@ -171,6 +171,7 @@ class PaperFlip(context: Context) {
         downTime = SystemClock.uptimeMillis()
         lastAction = downTime
         armed = true; finishing = false
+        releases++ // los avisos de la hoja anterior ya no cuentan
         startY = y
         send(ev(MotionEvent.ACTION_DOWN, if (dir > 0) w - 2f else 2f, y))
         watch()
@@ -276,6 +277,7 @@ class PaperFlip(context: Context) {
         tapAnim?.cancel()
         awaiting = null
         armed = false; finishing = false
+        releases++
         dir = 0
         clearPages()
         count = 0
