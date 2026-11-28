@@ -34,6 +34,6 @@ object Crashes {
 
     fun has(): Boolean = ::file.isInitialized && file.isFile && file.length() > 0
     fun count(): Int = if (has()) file.readText().lines().count { it.startsWith("— ") } else 0
-    fun file(): File = file
+    fun log(): File = file
     fun clear() { if (::file.isInitialized) file.delete() }
 }

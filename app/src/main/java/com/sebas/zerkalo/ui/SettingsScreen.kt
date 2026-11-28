@@ -184,7 +184,7 @@ fun SettingsScreen() {
                 Column {
                     ListRow("Informe de cierres inesperados", if (fails == 1) "La app se cerró 1 vez. Mándalo para poder arreglarlo" else "La app se cerró $fails veces. Mándalo para poder arreglarlo", onClick = {
                         val f = java.io.File(com.sebas.zerkalo.data.Export.outDir(ctx), "Zerkalo fallos.txt")
-                        runCatching { com.sebas.zerkalo.data.Crashes.file().copyTo(f, overwrite = true); com.sebas.zerkalo.data.Export.share(ctx, f, "text/plain") }
+                        runCatching { com.sebas.zerkalo.data.Crashes.log().copyTo(f, overwrite = true); com.sebas.zerkalo.data.Export.share(ctx, f, "text/plain") }
                     }) { ZIcon("share", p.text2, 18.dp) }
                     ListRow("Borrar el informe", "", onClick = { com.sebas.zerkalo.data.Crashes.clear(); fails = 0 }) { ZIcon("chevron", p.text2, 16.dp) }
                 }
