@@ -319,6 +319,9 @@ class CurlTextureView @JvmOverloads constructor(
     var forcedTarget: Int = 0
     private var releaseDuration: Int = ANIMATION_DURATION_MILLIS
 
+    /** Zerkalo: ¿la hoja todavía se está moviendo (animación o dedo)? */
+    val curling: Boolean get() = animate || curlState != CURL_NONE
+
     /** Zerkalo: corta en seco cualquier doblez en curso (para que no "termine" encima de la hoja siguiente). */
     fun stopCurl() {
         animate = false
