@@ -329,7 +329,6 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private var curlLive = false                       // la hoja ya sigue al dedo
     private var curlPending: Pair<Float, Float>? = null // último movimiento del dedo mientras se prepara
     private var curlEnd: List<Float>? = null // el dedo se soltó antes de estar lista: dx, y, pasa(1/0), velocidad
-    private var snapDown: Bitmap? = null               // foto tomada al tocar (para arrancar al instante)
     private var snapAt = 0L
     private var snapLoc: String? = null
     private lateinit var panes: LinearLayout
@@ -409,7 +408,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         ui.studyTap = Prefs.studyTap
         root = CurlRoot(this).apply {
             enabled = { curlAllowed() }
-            onDown = { if (snapLoc != hereKey()) root.post { curlPreShot() } }
+            onDown = { if (hereKey()?.let { album.containsKey(it) } != true) root.post { curlPreShot() } }
             onStart = { d, y -> curlBegin(d, y) }
             onMove = { dx, y -> if (curlLive) curlDrag(dx, y) else curlPending = dx to y }
             onEnd = { dx, y, ok, vx -> if (curlLive) curlRelease(dx, y, ok, vx) else curlEnd = listOf(dx, y, if (ok) 1f else 0f, vx) }
@@ -1489,8 +1488,26 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         root.postDelayed(curlCacheRun, 900)
     }
 
-    private var prevShot: Bitmap? = null   // foto de la página anterior (la que se acaba de pasar)
-    private var prevKey: String? = null
+    /**
+     * Álbum de fotos de las últimas páginas vistas (las más recientes). Al volver atrás, la página
+     * anterior casi siempre ya está aquí: entra al instante y nítida, sin tomar otra foto.
+     */
+    private val album = object : LinkedHashMap<String, Bitmap>(8, 0.75f, true) {
+        override fun removeEldestEntry(e: MutableMap.MutableEntry<String, Bitmap>?): Boolean {
+            val drop = size > (if (Snap.isLow(this@ReaderActivity)) 3 else 5)
+            if (drop) e?.value?.recycle()
+            return drop
+        }
+    }
+
+    private fun albumPut(key: String?, b: Bitmap) {
+        if (key == null) return
+        album.remove(key)?.takeIf { it !== b }?.recycle()
+        album[key] = b
+    }
+
+    private fun albumGet(key: String?): Bitmap? =
+        key?.let { album[it] }?.takeIf { !it.isRecycled }?.let { runCatching { it.copy(it.config ?: Bitmap.Config.ARGB_8888, false) }.getOrNull() }
 
     /** Foto de la página por la tarjeta gráfica (no traba nada), sin la hora, la cinta ni la bolita encima. */
     private fun gpuShot(done: (Bitmap?) -> Unit) {
@@ -1501,25 +1518,28 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         }
     }
 
-    /** Cuando la página queda quieta se guarda su foto: así la hoja se dobla al instante. */
+    /** Cuando la página queda quieta se guarda su foto en el álbum: así la hoja se dobla al instante. */
     private fun curlPreShot() {
         val pf = curl ?: return
         if (pf.busy) return
-        val key = hereKey()
-        if (snapDown != null && snapLoc == key) return
+        val key = hereKey() ?: return
+        if (album.containsKey(key)) return
         gpuShot { bmp ->
             if (bmp == null) return@gpuShot
             if (pf.busy || hereKey() != key) { bmp.recycle(); return@gpuShot }
-            snapDown?.recycle()
-            snapDown = bmp; snapAt = System.currentTimeMillis(); snapLoc = key
+            albumPut(key, bmp)
+            pf.warmUp(bmp) // la primera vez, la tarjeta gráfica se prepara sin que se vea (así la primera hoja no se traba)
         }
     }
 
-    /** La foto de la página de ahora: la guardada (si sigue siendo esta página) o una nueva. */
+    /** La foto de la página de ahora: la del álbum (si es esta página) o una nueva. */
     private fun curlShot(got: (Bitmap?) -> Unit) {
-        val fresh = snapDown?.takeIf { !it.isRecycled && snapLoc == hereKey() }
-        if (fresh != null) { snapDown = null; got(fresh); return }
-        gpuShot(got)
+        val key = hereKey()
+        albumGet(key)?.let { got(it); return }
+        gpuShot { b ->
+            if (b != null) runCatching { b.copy(b.config ?: Bitmap.Config.ARGB_8888, false) }.getOrNull()?.let { albumPut(key, it) }
+            got(b)
+        }
     }
 
     /** Espera a que el libro se haya dibujado en su nueva página (después de pasarla por debajo). */
@@ -1545,11 +1565,21 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                     if (!waitUnder) { ready(1); return@cover }
                     lifecycleScope.launch { waitRedraw(nav, before); ready(1) }
                 } else lifecycleScope.launch {
-                    // Atrás: entra la página anterior. Si vienes de ella, ya está su foto; si no, se dibuja.
-                    val key = hereKeyOf(before)
-                    val cached = prevShot?.takeIf { !it.isRecycled && prevKey == key }?.also { prevShot = null; prevKey = null }
+                    // Atrás: entra la página anterior. Casi siempre ya está en el álbum (nítida, al instante);
+                    // si no, se le toma la foto por la tarjeta gráfica con la hoja escondida dos cuadros.
                     waitRedraw(nav, before)
-                    val prev = cached ?: Snap.draw(panes, Snap.scale(this@ReaderActivity, panes.height) * 0.6f, curlColor())
+                    val prev = albumGet(hereKey()) ?: kotlinx.coroutines.suspendCancellableCoroutine { k ->
+                        pf.layer.alpha = 0f
+                        root.postOnAnimation {
+                            root.postOnAnimation {
+                                gpuShot { b ->
+                                    pf.layer.alpha = 1f
+                                    b?.let { runCatching { it.copy(it.config ?: Bitmap.Config.ARGB_8888, false) }.getOrNull()?.let { c -> albumPut(hereKey(), c) } }
+                                    if (k.isActive) k.resumeWith(Result.success(b))
+                                }
+                            }
+                        }
+                    }
                     if (prev == null) { pf.clear(); ready(-1); return@launch } // sin foto: queda pasada, sin animación
                     pf.setPrevious(prev) { ready(1) }
                 }
@@ -1610,11 +1640,6 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val nav = navigator
         if (completed || nav == null) {
             if (ui.settings.haptic && completed) root.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-            // Adelante: la foto de la página que se fue sirve para volver atrás sin tomar otra
-            if (completed && d > 0) {
-                prevShot?.recycle()
-                prevShot = pf.takeShown(); prevKey = hereKey()
-            }
             pf.clear()
             if (ui.aloudPlaying) lifecycleScope.launch { raFromView() }
             return

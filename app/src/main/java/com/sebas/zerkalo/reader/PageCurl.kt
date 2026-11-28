@@ -55,7 +55,7 @@ class PaperFlip(context: Context) {
     private fun backOf(front: Bitmap): Bitmap {
         val out = Bitmap.createBitmap(front.width, front.height, cfg)
         val c = Canvas(out)
-        val k = if (dark) 0.90f else 0.94f
+        val k = if (dark) 0.93f else 0.97f
         c.drawColor(Color.rgb((Color.red(paper) * k).toInt(), (Color.green(paper) * k).toInt(), (Color.blue(paper) * k).toInt()))
         c.drawBitmap(front, 0f, 0f, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG).apply { alpha = if (dark) 26 else 20 })
         return out
@@ -91,7 +91,7 @@ class PaperFlip(context: Context) {
         view.shadowInnerColorInMesh = floatArrayOf(0f, 0f, 0f, 0.16f) // sombra suave, nada de negro marcado
         view.shadowOuterColorInMesh = floatArrayOf(0f, 0f, 0f, 0f)
         // Papel mate: el doblez se oscurece apenas (sin brillo de plástico)
-        view.colorFactorOffsetInMesh = 0.84f
+        view.colorFactorOffsetInMesh = 0.88f
         // Radio del doblez como el de una hoja de libro (ni tubo apretado ni lámina rígida)
         view.restPressure = 0.6f
         view.catchUpDurationTime = 60L
@@ -137,6 +137,7 @@ class PaperFlip(context: Context) {
     fun cover(direction: Int, shown: Bitmap, ready: () -> Unit) {
         tapAnim?.cancel()
         runCatching { view.stopCurl() }
+        layer.alpha = 1f
         dir = direction
         armed = false
         clearPages()
@@ -273,8 +274,20 @@ class PaperFlip(context: Context) {
         }, 500)
     }
 
-    /** Se queda con la foto de la página que se acaba de pasar (sirve para volver atrás sin tomar otra). */
-    fun takeShown(): Bitmap? = pages[0]?.also { pages[0] = null }
+    private var warmed = false
+
+    /**
+     * La primera vez: la tarjeta gráfica arma la hoja con una página, escondida, y la quita.
+     * Así lo lento (preparar todo por primera vez) no pasa justo cuando tocas.
+     */
+    fun warmUp(b: Bitmap) {
+        if (warmed || busy) return
+        warmed = true
+        val copy = runCatching { b.copy(b.config ?: Bitmap.Config.ARGB_8888, false) }.getOrNull() ?: return
+        layer.alpha = 0f
+        clearPages(); pages[0] = copy; count = 1
+        show(0) { main.postDelayed({ if (!busy) { clearPages(); count = 0; runCatching { view.setCurrentIndex(0) } }; layer.alpha = 1f }, 150) }
+    }
 
     /** Quita la hoja (ya no se ve nada encima del libro). */
     fun clear() {
