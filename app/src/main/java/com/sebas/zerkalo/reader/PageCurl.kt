@@ -1,7 +1,6 @@
 package com.sebas.zerkalo.reader
 
 import android.animation.ValueAnimator
-import android.annotation.SuppressLint
 import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Bitmap
@@ -234,37 +233,46 @@ class CurlRoot(context: Context) : FrameLayout(context) {
     private var downY = 0f
     private var downAt = 0L
     private var dragging = false
+    private var multi = false
     private var dir = 0
     private var vt: VelocityTracker? = null
 
     private fun dxOf(ev: MotionEvent) = (if (dir > 0) downX - ev.x else ev.x - downX).coerceAtLeast(0f)
 
-    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+    // Se mira el dedo aquí (antes que el libro): la página del libro pide que nadie más tome sus gestos,
+    // así que si se esperara a que los suelte, el doblez nunca empezaría.
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (dragging) { follow(ev); return true }
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                downX = ev.x; downY = ev.y; downAt = ev.eventTime; dragging = false
+                downX = ev.x; downY = ev.y; downAt = ev.eventTime; dragging = false; multi = false
                 vt?.recycle(); vt = VelocityTracker.obtain(); vt?.addMovement(ev)
                 if (enabled()) onDown()
             }
+            MotionEvent.ACTION_POINTER_DOWN -> multi = true // dos dedos: es para agrandar, no para pasar
             MotionEvent.ACTION_MOVE -> {
                 vt?.addMovement(ev)
-                if (dragging) return true
                 val dx = ev.x - downX
                 val dy = ev.y - downY
-                // De lado y claro (no un dedo que baja o que selecciona texto)
-                if (abs(dx) > slop && abs(dx) > abs(dy) * 1.4f && ev.eventTime - downAt < 400 && enabled()) {
-                    dir = if (dx < 0) 1 else -1
-                    if (onStart(dir, ev.y)) { dragging = true; return true }
+                // De lado y claro (no un dedo que baja ni uno que se quedó quieto para seleccionar texto)
+                if (!multi && abs(dx) > slop && abs(dx) > abs(dy) * 1.4f && ev.eventTime - downAt < 400 && enabled()) {
+                    val d = if (dx < 0) 1 else -1
+                    if (onStart(d, ev.y)) {
+                        dir = d; dragging = true
+                        // El libro suelta el gesto
+                        val c = MotionEvent.obtain(ev); c.action = MotionEvent.ACTION_CANCEL
+                        super.dispatchTouchEvent(c); c.recycle()
+                        follow(ev)
+                        return true
+                    }
                 }
             }
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { vt?.recycle(); vt = null }
         }
-        return false
+        return super.dispatchTouchEvent(ev)
     }
 
-    @SuppressLint("ClickableViewAccessibility")
-    override fun onTouchEvent(ev: MotionEvent): Boolean {
-        if (!dragging) return super.onTouchEvent(ev)
+    private fun follow(ev: MotionEvent) {
         vt?.addMovement(ev)
         when (ev.actionMasked) {
             MotionEvent.ACTION_MOVE -> onMove(dxOf(ev), ev.y)
@@ -282,7 +290,6 @@ class CurlRoot(context: Context) : FrameLayout(context) {
                 onEnd(dx, ev.y, complete)
             }
         }
-        return true
     }
 }
 
