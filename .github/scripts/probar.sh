@@ -6,6 +6,7 @@ $T adb shell getprop ro.build.version.release
 $T adb shell dumpsys package com.google.android.webview | grep versionName | head -2
 $T adb install -r $( [ -f Zerkalo-x86_64.apk ] && echo Zerkalo-x86_64.apk || echo Zerkalo.apk )
 $T adb logcat -c
+$T adb shell settings put secure immersive_mode_confirmations confirmed
 $T adb shell am start -W -n com.sebas.zerkalo/.MainActivity
 sleep 20
 $T adb exec-out screencap -p > shot1.png
@@ -67,7 +68,6 @@ $T adb shell am start --activity-clear-top --activity-single-top -n com.sebas.ze
 sleep 12
 $T adb exec-out screencap -p > shot10.png
 # Papel 3D: deslizar lento (foto a mitad del doblez), tocar, y volver atrás
-$T adb shell settings put secure immersive_mode_confirmations confirmed
 $T adb shell input keyevent KEYCODE_BACK; sleep 1
 $T adb shell am start --activity-clear-top --activity-single-top -n com.sebas.zerkalo/.MainActivity --es zerkalo.abrir bienvenida --ez zerkalo.papel true
 sleep 12
