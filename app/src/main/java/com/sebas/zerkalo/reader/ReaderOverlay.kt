@@ -1913,7 +1913,7 @@ private fun PageTab(ui: ReaderUi, act: ReaderActions) {
             act.settings(ui.settings.copy(animate = i != 0, pageAnim = if (i == 0) ui.settings.pageAnim else i))
         })
         Text(
-            when { !s.animate -> "Cambio instantáneo."; s.pageAnim == 2 -> "La hoja se dobla con un pliegue suave y sigue tu dedo. Por detrás se ve el texto al revés, tenue."; else -> "La página se corre de lado." },
+            when { !s.animate -> "Cambio instantáneo."; s.pageAnim == 2 -> "Como un libro de verdad: la hoja se levanta desde la esquina, sigue tu dedo y por detrás deja ver el texto al revés, tenue."; else -> "La página se corre de lado." },
             style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp),
         )
     }

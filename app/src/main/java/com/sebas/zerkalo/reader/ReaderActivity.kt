@@ -1,5 +1,7 @@
 package com.sebas.zerkalo.reader
 
+import android.graphics.Bitmap
+import kotlinx.coroutines.flow.first
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -323,11 +325,13 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private val containerId = View.generateViewId()
     private val pairId = View.generateViewId()
     private lateinit var root: FrameLayout
-    private var curl: CurlView? = null
-    private var curlDir = 0          // doblez en curso: 1 adelante, -1 atrás
-    private var curlMoved = false    // ya se pasó la página debajo de la foto
-    private var curlPending = Float.NaN to 0f // posición del dedo mientras se toma la foto
-    private var curlEnd: Boolean? = null      // el dedo se soltó antes de tener la foto
+    private var curl: PaperFlip? = null
+    private var curlLive = false                       // la hoja ya sigue al dedo
+    private var curlPending: Pair<Float, Float>? = null // último movimiento del dedo mientras se prepara
+    private var curlEnd: Triple<Float, Float, Boolean>? = null // el dedo se soltó antes de estar lista
+    private var snapDown: Bitmap? = null               // foto tomada al tocar (para arrancar al instante)
+    private var snapAt = 0L
+    private var snapLoc: String? = null
     private lateinit var panes: LinearLayout
     private lateinit var pairContainer: FragmentContainerView
     private lateinit var divider: ComposeView
@@ -404,9 +408,10 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         ui.studyTap = Prefs.studyTap
         root = CurlRoot(this).apply {
             enabled = { curlAllowed() }
+            onDown = { curlPreShot() }
             onStart = { d, y -> curlBegin(d, y) }
-            onMove = { p, y -> if (curlMoved) curl?.follow(p, y) else curlPending = p to y }
-            onEnd = { ok -> curlFinish(ok) }
+            onMove = { dx, y -> if (curlLive) curlDrag(dx, y) else curlPending = dx to y }
+            onEnd = { dx, y, ok -> if (curlLive) curlRelease(dx, y, ok) else curlEnd = Triple(dx, y, ok) }
         }
         // Dos paneles: el libro y, si se activa, su versión en otro idioma (al lado o debajo).
         panes = LinearLayout(this)
@@ -441,14 +446,9 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         }, onCommit = { key -> snapInk(key) })
         root.addView(inkView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         // La hoja de papel que se dobla al pasar página (encima del libro, debajo de los menús)
-        curl = CurlView(this).also { cv ->
-            cv.onSlow = {
-                if (ui.settings.pageAnim == 2) {
-                    updateSettings(ui.settings.copy(pageAnim = 1))
-                    ui.say("Tu celular va lento con el papel: pasé a Deslizar")
-                }
-            }
-            root.addView(cv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        curl = runCatching { PaperFlip(this) }.getOrNull()?.also { pf ->
+            pf.onFinished = { d, done -> curlDone(d, done) }
+            root.addView(pf.layer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         }
         val overlay = ComposeView(this).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
@@ -652,7 +652,10 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                 ui.toc = named
             }
         }
-        val initial = book.locator?.let { runCatching { Locator.fromJSON(JSONObject(it)) }.getOrNull() }
+        // Si el libro tiene shiori, se abre directo en su página (como abrir un libro por la cinta)
+        val shiori = Library.marks.value.filter { it.bookId == book.id && it.type == "shiori" }.maxByOrNull { it.id }
+        val initial = (shiori?.locator ?: book.locator)?.let { runCatching { Locator.fromJSON(JSONObject(it)) }.getOrNull() }
+            ?: book.locator?.let { runCatching { Locator.fromJSON(JSONObject(it)) }.getOrNull() }
         // "Desplazamiento" ya no existe: todo lo que baja con el dedo se lee en Continuo
         if (ui.settings.continuous || ui.settings.scroll) { openContinuous(pub, initial); return }
         val factory = EpubNavigatorFactory(pub, EpubNavigatorFactory.Configuration(defaults = EpubDefaults(pageMargins = 1.2)))
@@ -1437,58 +1440,123 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private fun curlAllowed(): Boolean {
         val s = ui.settings
         return navigator != null && cont == null && !s.scroll && s.animate && s.pageAnim == 2 &&
-            !ui.pairOn && !inkUi.on && ui.sheet == null && !ui.controls && ui.lookup == null && curl?.busy != true
+            !ui.pairOn && !inkUi.on && ui.sheet == null && !ui.controls && ui.lookup == null && curl != null && curl?.busy != true
     }
 
     private fun curlColor(): Int = android.graphics.Color.argb(
         255, (ui.palette.bg.red * 255).toInt(), (ui.palette.bg.green * 255).toInt(), (ui.palette.bg.blue * 255).toInt(),
     )
 
-    /** Toma la foto de la página y, debajo de ella, pasa la página de verdad (sin animación). */
-    private fun curlShoot(nav: EpubNavigatorFragment, dir: Int, ready: (Boolean) -> Unit) {
-        val cv = curl ?: return ready(false)
-        Snap.take(window, panes, Snap.scale(this)) { bmp ->
-            if (bmp == null || isFinishing) { ready(false); return@take }
-            cv.prepare(bmp, dir, curlColor(), ui.palette.isDark)
-            val moved = runCatching { if (dir > 0) nav.goForward(animated = false) else nav.goBackward(animated = false) }.getOrDefault(false)
-            if (!moved) { cv.hide(); ready(false); return@take }
-            // Un instante para que la página nueva se dibuje debajo de la foto
-            root.postDelayed({ ready(true) }, 60)
+    private fun hereKey(): String? = navigator?.currentLocator?.value?.let { it.href.toString() + "@" + it.locations.progression + "@" + it.locations.position }
+
+    /** Al tocar la pantalla se toma ya la foto de la página: si el dedo se desliza, la hoja arranca al instante. */
+    private fun curlPreShot() {
+        val pf = curl ?: return
+        if (pf.busy) return
+        val key = hereKey()
+        if (snapDown != null && snapLoc == key && System.currentTimeMillis() - snapAt < 1500) return
+        Snap.take(window, panes, Snap.scale(this, panes.height)) { bmp ->
+            if (bmp == null) return@take
+            if (pf.busy) { bmp.recycle(); return@take }
+            snapDown?.recycle()
+            snapDown = bmp; snapAt = System.currentTimeMillis(); snapLoc = key
+        }
+    }
+
+    /** La foto de la página de ahora: la que se tomó al tocar (si sigue siendo esta página) o una nueva. */
+    private fun curlShot(got: (Bitmap?) -> Unit) {
+        val fresh = snapDown?.takeIf { !it.isRecycled && snapLoc == hereKey() && System.currentTimeMillis() - snapAt < 4000 }
+        if (fresh != null) { snapDown = null; got(fresh); return }
+        Snap.take(window, panes, Snap.scale(this, panes.height), got)
+    }
+
+    /** Espera a que el libro se haya dibujado en su nueva página (después de pasarla por debajo). */
+    private suspend fun waitRedraw(nav: EpubNavigatorFragment, before: Locator?) {
+        kotlinx.coroutines.withTimeoutOrNull(800) { nav.currentLocator.first { it != before } }
+        delay(70)
+    }
+
+    /**
+     * Prepara la hoja encima y pasa el libro por debajo. [waitUnder]: esperar a que la página nueva esté
+     * dibujada antes de soltar la hoja (para los toques; con el dedo se suelta enseguida).
+     */
+    private fun curlStart(nav: EpubNavigatorFragment, dir: Int, waitUnder: Boolean, ready: (Int) -> Unit) {
+        val pf = curl ?: return ready(0)
+        curlShot { bmp ->
+            if (bmp == null || isFinishing) { ready(0); return@curlShot }
+            pf.paper = curlColor(); pf.dark = ui.palette.isDark
+            pf.cover(dir, bmp) {
+                val before = nav.currentLocator.value
+                val moved = runCatching { if (dir > 0) nav.goForward(animated = false) else nav.goBackward(animated = false) }.getOrDefault(false)
+                if (!moved) { pf.clear(); ready(-1); return@cover }
+                if (dir > 0) {
+                    if (!waitUnder) { ready(1); return@cover }
+                    lifecycleScope.launch { waitRedraw(nav, before); ready(1) }
+                } else lifecycleScope.launch {
+                    // Atrás: se dibuja la página anterior (que ya está debajo) y es ella la que entra
+                    waitRedraw(nav, before)
+                    val prev = Snap.draw(panes, Snap.scale(this@ReaderActivity, panes.height), curlColor())
+                    if (prev == null) { pf.clear(); ready(-1); return@launch } // sin foto: queda pasada, sin animación
+                    pf.setPrevious(prev) { ready(1) }
+                }
+            }
         }
     }
 
     private fun curlTap(nav: EpubNavigatorFragment, dir: Int) {
-        curlShoot(nav, dir) { ok ->
-            if (!ok) { if (curl?.busy != true) runCatching { if (dir > 0) nav.goForward(false) else nav.goBackward(false) }; return@curlShoot }
-            curl?.animateTo(1f, 380) { curl?.hide() }
+        if (curl?.busy == true) return
+        curlStart(nav, dir, waitUnder = true) { r ->
+            when (r) {
+                1 -> curl?.flip()
+                0 -> runCatching { if (dir > 0) nav.goForward(animated = false) else nav.goBackward(animated = false) } // sin foto: pasa sin animación
+            }
         }
     }
 
     private fun curlBegin(dir: Int, y: Float): Boolean {
         val nav = navigator ?: return false
-        if (ui.settings.haptic) root.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-        curlDir = dir; curlMoved = false; curlEnd = null; curlPending = 0f to y
-        curlShoot(nav, dir) { ok ->
-            if (!ok) { curlDir = 0; return@curlShoot }
-            curlMoved = true
-            val (p, py) = curlPending
-            curl?.follow(p, py)
-            curlEnd?.let { curlFinish(it) }
+        if (curl?.busy == true) return false
+        curlLive = false; curlPending = null; curlEnd = null
+        curlStart(nav, dir, waitUnder = false) { r ->
+            if (r != 1) { curlPending = null; curlEnd = null; return@curlStart }
+            curlLive = true
+            curl?.press(y)
+            curlPending?.let { (dx, py) -> curlDrag(dx, py) }
+            curlEnd?.let { (dx, py, c) -> curlRelease(dx, py, c) }
+            curlPending = null; curlEnd = null
         }
         return true
     }
 
-    private fun curlFinish(complete: Boolean) {
-        if (!curlMoved) { curlEnd = complete; return } // la foto aún no está: se termina cuando llegue
-        val cv = curl ?: return
-        val d = curlDir
-        curlMoved = false; curlEnd = null; curlDir = 0
-        if (complete) cv.animateTo(1f, 340) { cv.hide(); if (ui.aloudPlaying) lifecycleScope.launch { raFromView() } }
-        else cv.animateTo(0f, 260) {
-            // Se arrepintió: se devuelve la página que ya había pasado debajo
-            val nav = navigator
-            runCatching { if (d > 0) nav?.goBackward(animated = false) else nav?.goForward(animated = false) }
-            root.postDelayed({ cv.hide() }, 70)
+    /** El dedo lleva la hoja: adelante la esquina derecha va hacia la izquierda; atrás, al revés. */
+    private fun curlX(dx: Float): Float {
+        val w = root.width.toFloat()
+        val d = curl?.dir ?: 1
+        return if (d > 0) (w - 2f - dx).coerceIn(0f, w) else (2f + dx).coerceIn(0f, w)
+    }
+
+    private fun curlDrag(dx: Float, y: Float) { curl?.drag(curlX(dx), y) }
+
+    private fun curlRelease(dx: Float, y: Float, complete: Boolean) {
+        curlLive = false
+        curl?.release(curlX(dx), y, complete)
+    }
+
+    /** Terminó el doblez: si pasó, listo; si volvió, el libro también vuelve a la página de antes. */
+    private fun curlDone(d: Int, completed: Boolean) {
+        val pf = curl ?: return
+        val nav = navigator
+        if (completed || nav == null) {
+            if (ui.settings.haptic && completed) root.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            pf.clear()
+            if (ui.aloudPlaying) lifecycleScope.launch { raFromView() }
+            return
+        }
+        lifecycleScope.launch {
+            val before = nav.currentLocator.value
+            runCatching { if (d > 0) nav.goBackward(animated = false) else nav.goForward(animated = false) }
+            waitRedraw(nav, before)
+            pf.clear()
         }
     }
 
@@ -2013,10 +2081,9 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     /** ¿La página que se ve es la del shiori? Se compara capítulo y lugar dentro del capítulo, con la medida de una página. */
     private fun updateShiori(loc: Locator) {
         val m = shioriMark()
-        ui.hasShiori = m != null
-        if (m == null) { ui.bookmarked = false; return }
+        if (m == null) { ui.hasShiori = false; ui.bookmarked = false; return }
         val at = runCatching { Locator.fromJSON(JSONObject(m.locator)) }.getOrNull() ?: run { ui.bookmarked = false; return }
-        if (hnorm(at.href.toString()) != hnorm(loc.href.toString())) { ui.bookmarked = false; return }
+        if (hnorm(at.href.toString()) != hnorm(loc.href.toString())) { ui.bookmarked = false; ui.hasShiori = true; return }
         val a = at.locations.progression ?: 0.0
         val b = loc.locations.progression ?: 0.0
         val href = hnorm(loc.href.toString())
@@ -2026,12 +2093,18 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             pages != null && pages > 0 -> 1.0 / pages
             else -> 0.0
         }
-        ui.bookmarked = if (span > 0) abs(a - b) < span * 0.5 else abs(a - b) < 1e-4
+        // Mientras no se sabe cuántas páginas tiene el capítulo, no se muestra nada (así no salta de punta a cinta)
+        if (span > 0) { ui.bookmarked = abs(a - b) < span * 0.5; ui.hasShiori = true }
         // Se aprende cuántas páginas tiene este capítulo (para comparar bien la próxima vez)
         val nav = navigator
         if (pages == null && nav != null && !ui.settings.scroll) lifecycleScope.launch {
-            val n = runCatching { nav.evaluateJavascript("Math.max(1, Math.round((document.scrollingElement || document.documentElement).scrollWidth / window.innerWidth))") }
-                .getOrNull()?.trim('"')?.toDoubleOrNull()?.toInt()
+            var n: Int? = null
+            for (t in 0 until 6) { // el capítulo puede estar terminando de cargar
+                n = runCatching { nav.evaluateJavascript("Math.max(1, Math.round((document.scrollingElement || document.documentElement).scrollWidth / window.innerWidth))") }
+                    .getOrNull()?.trim('"')?.toDoubleOrNull()?.toInt()
+                if (n != null && n > 0) break
+                delay(250)
+            }
             if (n != null && n > 0) { pagesIn[href] = n; nav.currentLocator.value.let { if (hnorm(it.href.toString()) == href) updateShiori(it) } }
         }
     }
@@ -2493,10 +2566,12 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     override fun onResume() {
         super.onResume()
         lastEvent = System.currentTimeMillis()
+        curl?.onResume()
     }
 
     override fun onPause() {
         super.onPause()
+        curl?.onPause()
         if (!::book.isInitialized) return
         activeMs += pendingMs()
         lastEvent = 0L
