@@ -145,7 +145,7 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
             val long by animateDpAsState(if (ui.bookmarked) 86.dp else 22.dp, tween(420), label = "cinta")
             ShioriRibbon(
                 SHIORI_COLORS[ui.shioriColor.coerceIn(0, SHIORI_COLORS.lastIndex)].second, long, p.isDark,
-                Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                Floaters.mark("cinta").clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
                     if (ui.bookmarked) ui.say("Aquí está tu shiori · tócalo en la barra de arriba para quitarlo") else act.goShiori()
                 },
             )
@@ -189,7 +189,7 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
             val c = p.text2.copy(alpha = 0.65f)
             val gap = (ui.camHalf + 10f).dp
             Row(
-                Modifier.fillMaxWidth().height(ui.band.coerceAtLeast(18f).dp).pointerInput(Unit) { detectTapGestures(onDoubleTap = { act.nextProfile() }) },
+                Modifier.fillMaxWidth().height(ui.band.coerceAtLeast(18f).dp).then(Floaters.mark("hora")).pointerInput(Unit) { detectTapGestures(onDoubleTap = { act.nextProfile() }) },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(Modifier.weight(ui.camX).fillMaxHeight(), contentAlignment = Alignment.CenterEnd) {

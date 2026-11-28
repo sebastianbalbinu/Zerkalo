@@ -17,6 +17,8 @@ import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.Window
 import android.widget.FrameLayout
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import com.irurueta.android.gl.curl.CurlPage
 import com.irurueta.android.gl.curl.CurlTextureView
 import kotlin.math.abs
@@ -43,6 +45,21 @@ class PaperFlip(context: Context) {
     private val low = Snap.isLow(context)
 
     private val pages = arrayOfNulls<Bitmap>(2)
+    // En teléfonos sencillos, imágenes de 16 bits: la mitad de memoria y de trabajo para la tarjeta gráfica
+    private val cfg = if (low) Bitmap.Config.RGB_565 else Bitmap.Config.ARGB_8888
+
+    /**
+     * El reverso: papel opaco un poco más oscuro (le llega menos luz) y la tinta del otro lado apenas insinuada,
+     * como en un libro impreso. Se dibuja sin espejo: al girar la hoja, se ve al revés solo.
+     */
+    private fun backOf(front: Bitmap): Bitmap {
+        val out = Bitmap.createBitmap(front.width, front.height, cfg)
+        val c = Canvas(out)
+        val k = if (dark) 0.90f else 0.94f
+        c.drawColor(Color.rgb((Color.red(paper) * k).toInt(), (Color.green(paper) * k).toInt(), (Color.blue(paper) * k).toInt()))
+        c.drawBitmap(front, 0f, 0f, android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG).apply { alpha = if (dark) 26 else 20 })
+        return out
+    }
     private var count = 0
 
     /** Color del papel (para el reverso de la hoja). */
@@ -60,6 +77,10 @@ class PaperFlip(context: Context) {
     private var awaiting: (() -> Unit)? = null // esperando a que la hoja se dibuje
     private var armed = false                   // ya empezó a doblarse
     private var downTime = 0L
+    private var startY = 0f
+    private var lastAction = 0L     // para el vigía: si nada se mueve, la hoja no se queda pegada
+    private var finishing = false   // ya soltada y pasando (un toque nuevo la termina al instante)
+    private var finishingDone = false
     private var tapAnim: ValueAnimator? = null
     private val main = Handler(Looper.getMainLooper())
 
@@ -82,19 +103,16 @@ class PaperFlip(context: Context) {
         view.pageProvider = object : CurlTextureView.PageProvider {
             override val pageCount: Int get() = count
             override fun updatePage(page: CurlPage, width: Int, height: Int, index: Int, backIndex: Int?) {
+                // Todo opaco: la pantalla mezcla el dibujo 3D "sumando luz" si algo es semitransparente
+                // (de ahí salía la hoja blanca y transparente). El papel del reverso se pinta en la imagen.
+                page.setColor(Color.WHITE, CurlPage.SIDE_BOTH)
                 val b = pages.getOrNull(index)
                 if (b != null && !b.isRecycled) {
-                    // La librería se queda con el dibujo (y lo recicla): se le da una copia
-                    page.setTexture(b.copy(Bitmap.Config.ARGB_8888, false), CurlPage.SIDE_BOTH)
+                    page.setTexture(b.copy(cfg, false), CurlPage.SIDE_FRONT)
+                    page.setTexture(backOf(b), CurlPage.SIDE_BACK)
                 } else {
-                    page.setColor(paper, CurlPage.SIDE_BOTH)
-                    page.setTexture(null, CurlPage.SIDE_BOTH)
+                    page.setTexture(Bitmap.createBitmap(4, 4, cfg).apply { eraseColor(paper) }, CurlPage.SIDE_BOTH)
                 }
-                // Reverso: papel opaco, un poco más oscuro (le da menos luz), con la tinta del otro lado apenas insinuada,
-                // como en un libro impreso (no una hoja transparente)
-                val k = if (dark) 0.92f else 0.95f
-                val back = Color.rgb((Color.red(paper) * k).toInt(), (Color.green(paper) * k).toInt(), (Color.blue(paper) * k).toInt())
-                page.setColor(Color.argb(if (dark) 0x12 else 0x10, Color.red(back), Color.green(back), Color.blue(back)), CurlPage.SIDE_BACK)
             }
         }
         view.currentIndexChangedListener = object : CurlTextureView.CurrentIndexChangedListener {
@@ -151,26 +169,38 @@ class PaperFlip(context: Context) {
     fun press(y: Float) {
         val w = view.width.toFloat().coerceAtLeast(1f)
         downTime = SystemClock.uptimeMillis()
-        armed = true
+        lastAction = downTime
+        armed = true; finishing = false
+        startY = y
         send(ev(MotionEvent.ACTION_DOWN, if (dir > 0) w - 2f else 2f, y))
+        watch()
     }
 
-    fun drag(x: Float, y: Float) = send(ev(MotionEvent.ACTION_MOVE, x, y))
+    /**
+     * La hoja está sujeta al lomo: si el dedo sube o baja, el doblez se inclina poco (como en Apple Books),
+     * en vez de abrir un triángulo enorme.
+     */
+    private fun yOf(y: Float) = startY + (y - startY) * 0.38f
+
+    fun drag(x: Float, y: Float) { lastAction = SystemClock.uptimeMillis(); send(ev(MotionEvent.ACTION_MOVE, x, yOf(y))) }
 
     /**
      * Suelta donde está el dedo, sin saltos. [completed] decide si pasa o vuelve; [vx] es la velocidad del dedo
      * (px/s, positiva hacia la derecha): la hoja sigue con ese impulso y se asienta, como una hoja que cae.
      */
-    fun release(x: Float, y: Float, completed: Boolean, vx: Float = 0f, maxMs: Int = 380) {
+    fun release(x: Float, y0: Float, completed: Boolean, vx: Float = 0f, maxMs: Int = 460) {
+        val y = yOf(y0)
+        lastAction = SystemClock.uptimeMillis()
+        finishing = true; finishingDone = completed
         val w = view.width.toFloat().coerceAtLeast(1f)
         // Adónde va la hoja: adelante y pasa → izquierda; atrás y pasa → derecha; si vuelve, al revés
         val toLeft = (dir > 0) == completed
         val target = if (toLeft) 0f else w
         val remaining = abs(target - x)
         val speed = if (toLeft) -vx else vx // velocidad hacia donde va
-        val ms = if (speed > 300f) 3f * remaining / speed * 1000f else 150f + 230f * remaining / w
+        val ms = if (speed > 300f) 3f * remaining / speed * 1000f else 200f + 260f * remaining / w
         view.forcedTarget = if (toLeft) 1 else 2
-        view.nextReleaseDuration = ms.toInt().coerceIn(130, maxMs)
+        view.nextReleaseDuration = ms.toInt().coerceIn(170, maxMs)
         send(ev(MotionEvent.ACTION_MOVE, x, y))
         send(ev(MotionEvent.ACTION_UP, x, y))
         // Si el dedo casi no movió la hoja, la librería no avisa: se da por devuelta
@@ -188,8 +218,8 @@ class PaperFlip(context: Context) {
         val h = view.height.toFloat().coerceAtLeast(1f)
         val y0 = h * 0.93f
         val y1 = h * 0.86f
-        val reach = w * 0.42f
-        val lift = 120L
+        val reach = w * 0.36f
+        val lift = 150L
         press(y0)
         tapAnim = ValueAnimator.ofFloat(0f, 1f).apply {
             duration = lift
@@ -202,19 +232,50 @@ class PaperFlip(context: Context) {
             addListener(object : android.animation.AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
                     val x = if (dir > 0) (w - 2f) - reach else 2f + reach
-                    val v = reach / lift * 1000f * 1.6f * (if (dir > 0) -1f else 1f)
-                    release(x, y1, completed = true, vx = v, maxMs = 300)
+                    val v = reach / lift * 1000f * 1.3f * (if (dir > 0) -1f else 1f)
+                    release(x, y1, completed = true, vx = v, maxMs = 340)
                 }
             })
             start()
         }
     }
 
+    /**
+     * Si llega un toque mientras la hoja todavía cae, se termina ya (el libro ya está en su página):
+     * así nunca se acumulan ni se traban animaciones.
+     */
+    fun finishNow(): Boolean {
+        if (!busy || !finishing || !finishingDone) return false
+        val d = dir
+        armed = false
+        onFinished?.invoke(d, true)
+        return true
+    }
+
+    /** Vigía: si la hoja lleva rato quieta sin terminar (algo se perdió), se da por terminada. */
+    private fun watch() {
+        main.postDelayed(object : Runnable {
+            override fun run() {
+                if (!busy) return
+                if (SystemClock.uptimeMillis() - lastAction > 2200) {
+                    val d = dir; val done = finishing && finishingDone
+                    armed = false
+                    onFinished?.invoke(d, done) ?: clear()
+                    return
+                }
+                main.postDelayed(this, 500)
+            }
+        }, 500)
+    }
+
+    /** Se queda con la foto de la página que se acaba de pasar (sirve para volver atrás sin tomar otra). */
+    fun takeShown(): Bitmap? = pages[0]?.also { pages[0] = null }
+
     /** Quita la hoja (ya no se ve nada encima del libro). */
     fun clear() {
         tapAnim?.cancel()
         awaiting = null
-        armed = false
+        armed = false; finishing = false
         dir = 0
         clearPages()
         count = 0
@@ -353,5 +414,41 @@ object Snap {
             if (b.getPixel(b.width * i / 15, b.height * j / 15) != first) diff++
         }
         return diff < 3
+    }
+}
+
+
+/**
+ * Lo que flota encima de la página (hora, cinta, bolita de apuntes…). La foto de la hoja que se dobla
+ * no debe llevarlos: se tapan en la foto con el color del papel (encima siguen los de verdad).
+ */
+object Floaters {
+    val rects = java.util.concurrent.ConcurrentHashMap<String, android.graphics.Rect>()
+
+    fun mark(key: String): androidx.compose.ui.Modifier = androidx.compose.ui.Modifier.onGloballyPositioned { c ->
+        val r = c.boundsInWindow()
+        rects[key] = android.graphics.Rect(r.left.toInt(), r.top.toInt(), r.right.toInt(), r.bottom.toInt())
+    }
+
+    fun forget(key: String) { rects.remove(key) }
+
+    /** Tapa en [bmp] (foto de [view], a escala [scale]) lo que flota encima, con el papel de al lado. */
+    fun erase(bmp: Bitmap, view: View, scale: Float) {
+        val loc = IntArray(2); view.getLocationInWindow(loc)
+        val c = Canvas(bmp)
+        val paint = android.graphics.Paint()
+        for (r in rects.values) {
+            val l = ((r.left - loc[0]) * scale).toInt().coerceIn(0, bmp.width - 1)
+            val t = ((r.top - loc[1]) * scale).toInt().coerceIn(0, bmp.height - 1)
+            val rr = ((r.right - loc[0]) * scale).toInt().coerceIn(0, bmp.width)
+            val b = ((r.bottom - loc[1]) * scale).toInt().coerceIn(0, bmp.height)
+            if (rr - l < 2 || b - t < 2) continue
+            // El papel de al lado (la mediana de una franja: así no cuenta la tinta)
+            val sx = if (l > 6) l - 4 else (rr + 4).coerceAtMost(bmp.width - 1)
+            val samples = IntArray(9) { i -> bmp.getPixel(sx, (t + (b - t) * i / 8).coerceIn(0, bmp.height - 1)) }
+            samples.sortBy { Color.red(it) + Color.green(it) + Color.blue(it) }
+            paint.color = samples[6] // de los más claros: papel, no letras
+            c.drawRect(l.toFloat() - 1, t.toFloat() - 1, rr.toFloat() + 1, b.toFloat() + 1, paint)
+        }
     }
 }

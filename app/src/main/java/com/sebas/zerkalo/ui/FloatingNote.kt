@@ -130,7 +130,7 @@ fun FloatingNote(bookId: String, title: String, state: NoteState, modifier: Modi
             }
             var pulled by remember { mutableStateOf(0f) }
             Box(
-                Modifier.offset { IntOffset(x.roundToInt(), y.roundToInt()) }.size(15.dp, 68.dp)
+                Modifier.offset { IntOffset(x.roundToInt(), y.roundToInt()) }.then(com.sebas.zerkalo.reader.Floaters.mark("nota")).size(15.dp, 68.dp)
                     .shadow(8.dp, if (left) RoundedCornerShape(topEnd = 10.dp, bottomEnd = 10.dp) else RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp))
                     .clip(if (left) RoundedCornerShape(topEnd = 10.dp, bottomEnd = 10.dp) else RoundedCornerShape(topStart = 10.dp, bottomStart = 10.dp))
                     .background(p.accent)
@@ -182,7 +182,7 @@ fun FloatingNote(bookId: String, title: String, state: NoteState, modifier: Modi
                 )
             }
         }
-        val box = Modifier.offset { IntOffset(x.roundToInt(), y.roundToInt()) }.size(w, h)
+        val box = Modifier.offset { IntOffset(x.roundToInt(), y.roundToInt()) }.then(com.sebas.zerkalo.reader.Floaters.mark("nota")).size(w, h)
 
         if (bubble) {
             val n = Apuntes.quotes(text)

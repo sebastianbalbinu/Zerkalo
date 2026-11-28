@@ -1468,14 +1468,16 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private fun curlAllowed(): Boolean {
         val s = ui.settings
         return navigator != null && cont == null && !s.scroll && s.animate && s.pageAnim == 2 &&
-            !ui.pairOn && !inkUi.on && ui.sheet == null && !ui.controls && ui.lookup == null && curl != null && curl?.busy != true
+            !ui.pairOn && !inkUi.on && ui.sheet == null && !ui.controls && ui.lookup == null && curl != null
     }
 
     private fun curlColor(): Int = android.graphics.Color.argb(
         255, (ui.palette.bg.red * 255).toInt(), (ui.palette.bg.green * 255).toInt(), (ui.palette.bg.blue * 255).toInt(),
     )
 
-    private fun hereKey(): String? = navigator?.currentLocator?.value?.let {
+    private fun hereKey(): String? = hereKeyOf(navigator?.currentLocator?.value)
+
+    private fun hereKeyOf(l: Locator?): String? = l?.let {
         it.href.toString() + "@" + it.locations.progression + "@" + it.locations.position + "@" + ui.settings.hashCode() + "@" + ui.palette.name + "@" + ui.marks.size
     }
 
@@ -1487,30 +1489,37 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         root.postDelayed(curlCacheRun, 900)
     }
 
-    /** Al tocar la pantalla se toma ya la foto de la página: si el dedo se desliza, la hoja arranca al instante. */
+    private var prevShot: Bitmap? = null   // foto de la página anterior (la que se acaba de pasar)
+    private var prevKey: String? = null
+
+    /** Foto de la página por la tarjeta gráfica (no traba nada), sin la hora, la cinta ni la bolita encima. */
+    private fun gpuShot(done: (Bitmap?) -> Unit) {
+        val sc = Snap.scale(this, panes.height)
+        Snap.take(window, panes, sc) { b ->
+            if (b != null) runCatching { Floaters.erase(b, panes, sc) }
+            done(b)
+        }
+    }
+
+    /** Cuando la página queda quieta se guarda su foto: así la hoja se dobla al instante. */
     private fun curlPreShot() {
         val pf = curl ?: return
         if (pf.busy) return
         val key = hereKey()
         if (snapDown != null && snapLoc == key) return
-        // Se dibuja solo la página (sin los botones que flotan encima, como la bolita 記)
-        val bmp = Snap.draw(panes, Snap.scale(this, panes.height), curlColor())
-        if (bmp != null) { snapDown?.recycle(); snapDown = bmp; snapAt = System.currentTimeMillis(); snapLoc = key; return }
-        Snap.take(window, panes, Snap.scale(this, panes.height)) { b ->
-            if (b == null) return@take
-            if (pf.busy) { b.recycle(); return@take }
+        gpuShot { bmp ->
+            if (bmp == null) return@gpuShot
+            if (pf.busy || hereKey() != key) { bmp.recycle(); return@gpuShot }
             snapDown?.recycle()
-            snapDown = b; snapAt = System.currentTimeMillis(); snapLoc = key
+            snapDown = bmp; snapAt = System.currentTimeMillis(); snapLoc = key
         }
     }
 
-    /** La foto de la página de ahora: la que se tomó al tocar (si sigue siendo esta página) o una nueva. */
+    /** La foto de la página de ahora: la guardada (si sigue siendo esta página) o una nueva. */
     private fun curlShot(got: (Bitmap?) -> Unit) {
         val fresh = snapDown?.takeIf { !it.isRecycled && snapLoc == hereKey() }
         if (fresh != null) { snapDown = null; got(fresh); return }
-        val drawn = Snap.draw(panes, Snap.scale(this, panes.height), curlColor())
-        if (drawn != null) { got(drawn); return }
-        Snap.take(window, panes, Snap.scale(this, panes.height), got)
+        gpuShot(got)
     }
 
     /** Espera a que el libro se haya dibujado en su nueva página (después de pasarla por debajo). */
@@ -1536,9 +1545,11 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
                     if (!waitUnder) { ready(1); return@cover }
                     lifecycleScope.launch { waitRedraw(nav, before); ready(1) }
                 } else lifecycleScope.launch {
-                    // Atrás: se dibuja la página anterior (que ya está debajo) y es ella la que entra
+                    // Atrás: entra la página anterior. Si vienes de ella, ya está su foto; si no, se dibuja.
+                    val key = hereKeyOf(before)
+                    val cached = prevShot?.takeIf { !it.isRecycled && prevKey == key }?.also { prevShot = null; prevKey = null }
                     waitRedraw(nav, before)
-                    val prev = Snap.draw(panes, Snap.scale(this@ReaderActivity, panes.height), curlColor())
+                    val prev = cached ?: Snap.draw(panes, Snap.scale(this@ReaderActivity, panes.height) * 0.6f, curlColor())
                     if (prev == null) { pf.clear(); ready(-1); return@launch } // sin foto: queda pasada, sin animación
                     pf.setPrevious(prev) { ready(1) }
                 }
@@ -1547,7 +1558,11 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     }
 
     private fun curlTap(nav: EpubNavigatorFragment, dir: Int) {
-        if (curl?.busy == true) return
+        if (curl?.busy == true) {
+            // Toque mientras la hoja aún cae: se termina ya y, apenas la pantalla quede limpia, sigue la siguiente
+            if (curl?.finishNow() == true) root.postOnAnimation { root.postOnAnimation { curlTap(nav, dir) } }
+            return
+        }
         curlStart(nav, dir, waitUnder = false) { r ->
             Log.i("Zerkalo", "ZK_CURL toque dir=$dir r=$r")
             when (r) {
@@ -1560,7 +1575,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private fun curlBegin(dir: Int, y: Float): Boolean {
         val nav = navigator ?: return false
         userMoves++
-        if (curl?.busy == true) return false
+        if (curl?.busy == true) { curl?.finishNow(); if (curl?.busy == true) return false }
         curlLive = false; curlPending = null; curlEnd = null
         curlStart(nav, dir, waitUnder = false) { r ->
             Log.i("Zerkalo", "ZK_CURL dedo dir=$dir r=$r")
@@ -1595,6 +1610,11 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         val nav = navigator
         if (completed || nav == null) {
             if (ui.settings.haptic && completed) root.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+            // Adelante: la foto de la página que se fue sirve para volver atrás sin tomar otra
+            if (completed && d > 0) {
+                prevShot?.recycle()
+                prevShot = pf.takeShown(); prevKey = hereKey()
+            }
             pf.clear()
             if (ui.aloudPlaying) lifecycleScope.launch { raFromView() }
             return
