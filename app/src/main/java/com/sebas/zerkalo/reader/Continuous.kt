@@ -170,6 +170,14 @@ class ContinuousView(ctx: Context, private val pub: Publication, private val cb:
 
     fun js(code: String) { if (shellReady) evaluateJavascript(code, null) }
 
+    /** Corre JS y devuelve el resultado (como lo da el WebView: un texto JSON). */
+    suspend fun eval(code: String): String? {
+        if (!shellReady) return null
+        return kotlinx.coroutines.suspendCancellableCoroutine { c ->
+            evaluateJavascript(code) { r -> if (c.isActive) c.resumeWith(Result.success(r)) }
+        }
+    }
+
     /** El menú del texto seleccionado: el mismo que en el modo Páginas (lo más usado primero). */
     var menu: List<Pair<Int, String>> = emptyList()
 

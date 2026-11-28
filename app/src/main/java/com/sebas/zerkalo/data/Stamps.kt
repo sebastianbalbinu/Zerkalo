@@ -80,6 +80,18 @@ object Stamps {
         }
     }
 
+    /** Suma los sellos de una copia. */
+    fun merge(f: File) {
+        runCatching {
+            val o = JSONObject(f.readText())
+            o.optJSONObject("wax")?.let { w -> w.keys().forEach { k -> if (k !in waxMap) { val a = w.optJSONArray(k) ?: JSONArray(); waxMap[k] = (0 until a.length()).map { a.optInt(it) } } } }
+            o.optJSONObject("earned")?.let { e -> e.keys().forEach { k -> if (k !in earned) earned[k] = e.optLong(k) } }
+            o.optLong("since").takeIf { it > 0 && it < since }?.let { since = it }
+            save()
+            _version.value++
+        }
+    }
+
     private fun save() {
         if (!::dir.isInitialized) return
         val o = JSONObject().put("since", since)

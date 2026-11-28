@@ -19,6 +19,7 @@ class ZerkaloApp : Application(), ImageLoaderFactory {
         // El lector de PDF abre cada archivo en un proceso aislado (más seguro). Ahí no hay preferencias
         // ni archivos de la app, así que no se prepara nada: solo dibuja el PDF.
         if (android.os.Build.VERSION.SDK_INT >= 28 && android.os.Process.isIsolated()) return
+        Crashes.install(this)
         Prefs.init(this)
         com.sebas.zerkalo.data.Profiles.init()
         Library.init(this)

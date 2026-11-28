@@ -136,7 +136,16 @@ class ReaderUi {
     var progress by mutableFloatStateOf(0f)
     var chapterLeft by mutableStateOf("")
     var minutesToday by mutableIntStateOf(0)
-    var bookmarked by mutableStateOf(false)
+    var bookmarked by mutableStateOf(false)    // la página que se ve es la del shiori
+    var hasShiori by mutableStateOf(false)     // el libro tiene shiori (en otra página)
+    var backTo by mutableStateOf<String?>(null) // al ir al shiori: dónde ibas, para volver
+    var shioriColor by mutableIntStateOf(com.sebas.zerkalo.data.Prefs.shioriColor)
+    // Leer en voz alta (voz del teléfono)
+    var footnote by mutableStateOf<Pair<String, org.readium.r2.shared.publication.Link>?>(null)
+    var aloud by mutableStateOf(false)       // hay lectura en curso (aunque esté en pausa)
+    var aloudPlaying by mutableStateOf(false)
+    var aloudRate by mutableFloatStateOf(com.sebas.zerkalo.data.Prefs.aloudRate)
+    var aloudSleep by mutableIntStateOf(0)    // minutos del temporizador (0 = sin)
     var settings by mutableStateOf(ReaderSettings())
     var palette by mutableStateOf(Chashitsu)
     var toc by mutableStateOf<List<TocEntry>>(emptyList())
@@ -314,6 +323,11 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
     private val containerId = View.generateViewId()
     private val pairId = View.generateViewId()
     private lateinit var root: FrameLayout
+    private var curl: CurlView? = null
+    private var curlDir = 0          // doblez en curso: 1 adelante, -1 atrás
+    private var curlMoved = false    // ya se pasó la página debajo de la foto
+    private var curlPending = Float.NaN to 0f // posición del dedo mientras se toma la foto
+    private var curlEnd: Boolean? = null      // el dedo se soltó antes de tener la foto
     private lateinit var panes: LinearLayout
     private lateinit var pairContainer: FragmentContainerView
     private lateinit var divider: ComposeView
@@ -388,7 +402,12 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         ui.studyTap = Prefs.studyTap
-        root = FrameLayout(this)
+        root = CurlRoot(this).apply {
+            enabled = { curlAllowed() }
+            onStart = { d, y -> curlBegin(d, y) }
+            onMove = { p, y -> if (curlMoved) curl?.follow(p, y) else curlPending = p to y }
+            onEnd = { ok -> curlFinish(ok) }
+        }
         // Dos paneles: el libro y, si se activa, su versión en otro idioma (al lado o debajo).
         panes = LinearLayout(this)
         val container = FragmentContainerView(this).apply { id = containerId }
@@ -421,6 +440,16 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             if (k == null || root.width == 0) emptyList() else listOf(k to android.graphics.RectF(0f, 0f, root.width.toFloat(), root.height.toFloat()))
         }, onCommit = { key -> snapInk(key) })
         root.addView(inkView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        // La hoja de papel que se dobla al pasar página (encima del libro, debajo de los menús)
+        curl = CurlView(this).also { cv ->
+            cv.onSlow = {
+                if (ui.settings.pageAnim == 2) {
+                    updateSettings(ui.settings.copy(pageAnim = 1))
+                    ui.say("Tu celular va lento con el papel: pasé a Deslizar")
+                }
+            }
+            root.addView(cv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        }
         val overlay = ComposeView(this).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
             setContent { ReaderOverlay(ui, actions) }
@@ -1383,10 +1412,12 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
     /** Pasa página. En desplazamiento continuo avanza una pantalla dejando dos líneas de referencia. */
     private fun turn(nav: EpubNavigatorFragment?, dir: Int) {
+        if (ui.aloudPlaying) lifecycleScope.launch { delay(520); raFromView() }
         if (nav == null) { contPage(dir); return }
         if (ui.controls) setControls(false)
         if (ui.settings.haptic) root.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
         if (!ui.settings.scroll) {
+            if (curlAllowed()) { curlTap(nav, dir); return }
             if (dir > 0) nav.goForward(animated = ui.settings.animate) else nav.goBackward(animated = ui.settings.animate)
             return
         }
@@ -1399,6 +1430,65 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             val r = runCatching { nav.evaluateJavascript(js) }.getOrNull().orEmpty()
             // Al final (o al inicio) del capítulo, se pasa al siguiente (o al anterior).
             if (r.contains("edge")) chapterJump(nav, dir)
+        }
+    }
+
+    // ---------------- hoja de papel ----------------
+    private fun curlAllowed(): Boolean {
+        val s = ui.settings
+        return navigator != null && cont == null && !s.scroll && s.animate && s.pageAnim == 2 &&
+            !ui.pairOn && !inkUi.on && ui.sheet == null && !ui.controls && ui.lookup == null && curl?.busy != true
+    }
+
+    private fun curlColor(): Int = android.graphics.Color.argb(
+        255, (ui.palette.bg.red * 255).toInt(), (ui.palette.bg.green * 255).toInt(), (ui.palette.bg.blue * 255).toInt(),
+    )
+
+    /** Toma la foto de la página y, debajo de ella, pasa la página de verdad (sin animación). */
+    private fun curlShoot(nav: EpubNavigatorFragment, dir: Int, ready: (Boolean) -> Unit) {
+        val cv = curl ?: return ready(false)
+        Snap.take(window, panes, Snap.scale(this)) { bmp ->
+            if (bmp == null || isFinishing) { ready(false); return@take }
+            cv.prepare(bmp, dir, curlColor(), ui.palette.isDark)
+            val moved = runCatching { if (dir > 0) nav.goForward(animated = false) else nav.goBackward(animated = false) }.getOrDefault(false)
+            if (!moved) { cv.hide(); ready(false); return@take }
+            // Un instante para que la página nueva se dibuje debajo de la foto
+            root.postDelayed({ ready(true) }, 60)
+        }
+    }
+
+    private fun curlTap(nav: EpubNavigatorFragment, dir: Int) {
+        curlShoot(nav, dir) { ok ->
+            if (!ok) { if (curl?.busy != true) runCatching { if (dir > 0) nav.goForward(false) else nav.goBackward(false) }; return@curlShoot }
+            curl?.animateTo(1f, 380) { curl?.hide() }
+        }
+    }
+
+    private fun curlBegin(dir: Int, y: Float): Boolean {
+        val nav = navigator ?: return false
+        if (ui.settings.haptic) root.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+        curlDir = dir; curlMoved = false; curlEnd = null; curlPending = 0f to y
+        curlShoot(nav, dir) { ok ->
+            if (!ok) { curlDir = 0; return@curlShoot }
+            curlMoved = true
+            val (p, py) = curlPending
+            curl?.follow(p, py)
+            curlEnd?.let { curlFinish(it) }
+        }
+        return true
+    }
+
+    private fun curlFinish(complete: Boolean) {
+        if (!curlMoved) { curlEnd = complete; return } // la foto aún no está: se termina cuando llegue
+        val cv = curl ?: return
+        val d = curlDir
+        curlMoved = false; curlEnd = null; curlDir = 0
+        if (complete) cv.animateTo(1f, 340) { cv.hide(); if (ui.aloudPlaying) lifecycleScope.launch { raFromView() } }
+        else cv.animateTo(0f, 260) {
+            // Se arrepintió: se devuelve la página que ya había pasado debajo
+            val nav = navigator
+            runCatching { if (d > 0) nav?.goBackward(animated = false) else nav?.goForward(animated = false) }
+            root.postDelayed({ cv.hide() }, 70)
         }
     }
 
@@ -1459,7 +1549,7 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         ui.chapter = loc.title?.takeIf { it.isNotBlank() } ?: chapterFor(loc) ?: book.title
         ui.minutesToday = Library.minutesToday() + ((activeMs + pendingMs()) / 60_000).toInt()
         val pos = loc.locations.position
-        ui.bookmarked = pos != null && ui.marks.any { it.type == "shiori" && posOf(it) == pos }
+        updateShiori(loc)
         ui.chapterLeft = chapterLeft(pos)
         if (turn && ui.pairLinked && System.currentTimeMillis() > ignoreMainUntil) syncPair(loc)
         val json = loc.toJSON().toString()
@@ -1716,6 +1806,13 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
 
     private fun refreshMarks() {
         ui.marks = Library.marks.value.filter { it.bookId == book.id }
+        // Un libro tiene una sola cinta: si quedaron varios shioris de antes, se deja el último
+        val ss = ui.marks.filter { it.type == "shiori" }
+        if (ss.size > 1) {
+            val keep = ss.maxByOrNull { it.id }
+            ss.filter { it !== keep }.forEach { Library.removeMark(it.id) }
+            ui.marks = Library.marks.value.filter { it.bookId == book.id }
+        }
         cont?.setMarks(contMarks())
         contLoc?.let { onLocator(it, turn = false) }
         navigator?.currentLocator?.value?.let { onLocator(it, turn = false) }
@@ -1826,6 +1923,14 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         exportInk = { exportInkPages() },
         exportNote = { com.sebas.zerkalo.ui.shareTxt(this, book.title, com.sebas.zerkalo.data.Apuntes.flow(book.id).value) },
         toggleShiori = { toggleShiori() },
+        goShiori = { goShiori() },
+        aloud = { aloudStart() },
+        noteGo = { l -> ui.sheet = null; followLink(l) },
+        aloudToggle = { if (ui.aloudPlaying) aloudPause() else aloudResume() },
+        aloudStop = { aloudStop() },
+        aloudRate = { aloudRate() },
+        aloudSleep = { aloudSleep() },
+        backFromShiori = { goBackFromShiori() },
         go = { if (cont != null) contGo(it) else { navigator?.go(it, animated = false); setControls(false) } },
         goLink = { l ->
             val c = cont
@@ -1900,23 +2005,86 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         veilLive = { v -> ui.dim = 1f - (1f - (if (ui.settings.brightness in 0f..0.3f) (0.3f - ui.settings.brightness) / 0.3f * 0.78f else 0f)) * (1f - v) },
     )
 
-    private fun toggleShiori() {
-        val loc = navigator?.currentLocator?.value ?: contLoc ?: return
-        val pos = loc.locations.position
-        val existing = ui.marks.firstOrNull { it.type == "shiori" && pos != null && posOf(it) == pos }
-        if (existing != null) {
-            Library.removeMark(existing.id); ui.say("Shiori retirado")
-        } else {
-            Library.putMark(
-                Mark(
-                    id = "s" + System.currentTimeMillis().toString(36), bookId = book.id, type = "shiori",
-                    locator = loc.toJSON().toString(), chapter = ui.chapter, progress = ui.progress.toDouble(),
-                    text = loc.text.highlight?.take(120).orEmpty(),
-                ),
-            )
-            ui.say("Shiori puesto en esta página")
+    // ---------------- shiori: una sola cinta por libro, como un libro de verdad ----------------
+    private val pagesIn = HashMap<String, Int>() // páginas que tiene cada capítulo (modo páginas)
+
+    private fun shioriMark(): Mark? = ui.marks.filter { it.type == "shiori" }.maxByOrNull { it.id }
+
+    /** ¿La página que se ve es la del shiori? Se compara capítulo y lugar dentro del capítulo, con la medida de una página. */
+    private fun updateShiori(loc: Locator) {
+        val m = shioriMark()
+        ui.hasShiori = m != null
+        if (m == null) { ui.bookmarked = false; return }
+        val at = runCatching { Locator.fromJSON(JSONObject(m.locator)) }.getOrNull() ?: run { ui.bookmarked = false; return }
+        if (hnorm(at.href.toString()) != hnorm(loc.href.toString())) { ui.bookmarked = false; return }
+        val a = at.locations.progression ?: 0.0
+        val b = loc.locations.progression ?: 0.0
+        val href = hnorm(loc.href.toString())
+        val pages = pagesIn[href]
+        val span = when {
+            cont != null || ui.settings.scroll -> 0.02 // continuo: el lugar del shiori está en pantalla
+            pages != null && pages > 0 -> 1.0 / pages
+            else -> 0.0
         }
+        ui.bookmarked = if (span > 0) abs(a - b) < span * 0.5 else abs(a - b) < 1e-4
+        // Se aprende cuántas páginas tiene este capítulo (para comparar bien la próxima vez)
+        val nav = navigator
+        if (pages == null && nav != null && !ui.settings.scroll) lifecycleScope.launch {
+            val n = runCatching { nav.evaluateJavascript("Math.max(1, Math.round((document.scrollingElement || document.documentElement).scrollWidth / window.innerWidth))") }
+                .getOrNull()?.trim('"')?.toDoubleOrNull()?.toInt()
+            if (n != null && n > 0) { pagesIn[href] = n; nav.currentLocator.value.let { if (hnorm(it.href.toString()) == href) updateShiori(it) } }
+        }
+    }
+
+    /** Poner el shiori en esta página (si había uno en otra, se mueve aquí: es una sola cinta). */
+    private fun placeShiori() {
+        val loc = navigator?.currentLocator?.value ?: contLoc ?: return
+        ui.marks.filter { it.type == "shiori" }.forEach { Library.removeMark(it.id) }
+        Library.putMark(
+            Mark(
+                id = "s" + System.currentTimeMillis().toString(36), bookId = book.id, type = "shiori",
+                locator = loc.toJSON().toString(), chapter = ui.chapter, progress = ui.progress.toDouble(),
+                text = loc.text.highlight?.take(120).orEmpty(),
+            ),
+        )
+        ui.backTo = null
+        root.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+        ui.say("Shiori puesto en esta página")
         refreshMarks()
+    }
+
+    private fun removeShiori() {
+        ui.marks.filter { it.type == "shiori" }.forEach { Library.removeMark(it.id) }
+        ui.backTo = null
+        ui.say("Shiori retirado")
+        refreshMarks()
+    }
+
+    /** Ir a la página del shiori (recordando dónde ibas, para poder volver). */
+    private fun goShiori() {
+        val m = shioriMark() ?: return
+        val here = (navigator?.currentLocator?.value ?: contLoc)?.toJSON()?.toString()
+        val at = runCatching { Locator.fromJSON(JSONObject(m.locator)) }.getOrNull() ?: return
+        ui.backTo = here
+        setControls(false)
+        val c = cont
+        if (c != null) contGo(at) else navigator?.go(at, animated = false)
+        ui.say("Tu shiori")
+    }
+
+    private fun goBackFromShiori() {
+        val j = ui.backTo ?: return
+        ui.backTo = null
+        val at = runCatching { Locator.fromJSON(JSONObject(j)) }.getOrNull() ?: return
+        val c = cont
+        if (c != null) contGo(at) else navigator?.go(at, animated = false)
+    }
+
+    private fun toggleShiori() {
+        when {
+            ui.bookmarked -> removeShiori()
+            else -> placeShiori()
+        }
     }
 
     /** Saltar a un punto del libro (0..1) con la barra de progreso. */
@@ -2015,6 +2183,174 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
             ),
         )
         ui.lookup = l.copy(saved = true)
+    }
+
+    // ---------------- leer en voz alta ----------------
+    private var raSent: List<String> = emptyList()
+    private var raAt = 0
+    private var raQueued = -1
+    private var raGen = 0            // cambia cada vez que se reinicia (para ignorar avisos viejos de la voz)
+    private var raSleepJob: Job? = null
+    private var raBusy = false
+
+    private val raPaged get() = cont == null && !ui.settings.scroll
+
+    private suspend fun raEval(code: String): String? {
+        val raw = (cont?.eval(code) ?: navigator?.let { n -> runCatching { n.evaluateJavascript(code) }.getOrNull() }) ?: return null
+        return if (raw.startsWith("\"")) runCatching { org.json.JSONArray("[$raw]").getString(0) }.getOrNull() else raw
+    }
+
+    private fun raJs(code: String) = code.replace("__PAGED__", if (raPaged) "true" else "false")
+
+    private fun raHl(): String {
+        val a = ui.palette.accent
+        return "rgba(${(a.red * 255).toInt()},${(a.green * 255).toInt()},${(a.blue * 255).toInt()},${if (ui.palette.isDark) 0.30 else 0.22})"
+    }
+
+    /** Abre la voz (si hace falta) y empieza a leer desde la página que se ve. */
+    private fun aloudStart() {
+        setControls(false); ui.sheet = null
+        if (ui.pairOn) { ui.say("Para leer en voz alta, cierra el lado a lado"); return }
+        val go = {
+            ui.aloud = true
+            lifecycleScope.launch { raFromView() }
+        }
+        if (tts != null && ttsReady) { raListen(); go(); return }
+        tts = TextToSpeech(this) { st ->
+            ttsReady = st == TextToSpeech.SUCCESS
+            if (ttsReady) { raListen(); go() } else ui.say("Tu teléfono no tiene una voz instalada")
+        }
+    }
+
+    private fun raListen() {
+        tts?.setOnUtteranceProgressListener(object : android.speech.tts.UtteranceProgressListener() {
+            override fun onStart(id: String) { raEvent(id, false) }
+            override fun onDone(id: String) { raEvent(id, true) }
+            @Deprecated("Deprecated in Java") override fun onError(id: String) { raEvent(id, true) }
+        })
+    }
+
+    private fun raEvent(id: String, done: Boolean) {
+        val parts = id.removePrefix("ra").split('_')
+        val g = parts.getOrNull(0)?.toIntOrNull() ?: return
+        val i = parts.getOrNull(1)?.toIntOrNull() ?: return
+        runOnUiThread {
+            if (g != raGen || !ui.aloudPlaying) return@runOnUiThread
+            if (!done) { raAt = i; raQueue(); lifecycleScope.launch { raMark(i) } }
+            else if (i >= raSent.lastIndex) lifecycleScope.launch { raNextChapter() }
+        }
+    }
+
+    /** Siempre hay dos frases en la fila: así no hay silencios entre una y otra. */
+    private fun raQueue() {
+        val t = tts ?: return
+        while (raQueued < raAt + 2 && raQueued < raSent.lastIndex) {
+            raQueued++
+            t.speak(raSent[raQueued], TextToSpeech.QUEUE_ADD, null, "ra${raGen}_$raQueued")
+        }
+    }
+
+    private fun raPlayFrom(i: Int) {
+        val t = tts ?: return
+        if (raSent.isEmpty()) return
+        raGen++
+        raAt = i.coerceIn(0, raSent.lastIndex)
+        t.setLanguage(Locale.forLanguageTag(ui.lang.ifBlank { Locale.getDefault().language }))
+        t.setSpeechRate(ui.aloudRate)
+        ui.aloudPlaying = true
+        raQueued = raAt
+        t.speak(raSent[raAt], TextToSpeech.QUEUE_FLUSH, null, "ra${raGen}_$raAt")
+        raQueue()
+    }
+
+    private suspend fun raMark(i: Int) {
+        val r = raEval(raJs(ReadAloud.MARK).replace("__I__", i.toString())) ?: return
+        val nav = navigator
+        if (raPaged && nav != null) when (r) {
+            "next" -> { nav.goForward(animated = ui.settings.animate); delay(380); raEval(raJs(ReadAloud.MARK).replace("__I__", i.toString())) }
+            "prev" -> { nav.goBackward(animated = ui.settings.animate); delay(380) }
+        }
+    }
+
+    /** Lee desde la primera frase que se ve ahora. */
+    private suspend fun raFromView() {
+        if (raBusy) return
+        raBusy = true
+        try {
+            tts?.stop(); raGen++
+            val js = raJs(ReadAloud.INIT).replace("__HL__", raHl())
+            var j = raEval(js)?.let { runCatching { JSONObject(it) }.getOrNull() }
+            if (j == null) { delay(500); j = raEval(js)?.let { runCatching { JSONObject(it) }.getOrNull() } }
+            val arr = j?.optJSONArray("s")
+            raSent = if (arr == null) emptyList() else List(arr.length()) { arr.getString(it) }
+            if (raSent.isEmpty()) {
+                // Página sin texto (una imagen, una portada): se sigue con lo que viene
+                if (!raAdvance()) aloudStop("No encontré texto para leer aquí")
+                return
+            }
+            raPlayFrom(j!!.optInt("start", 0))
+        } finally { raBusy = false }
+    }
+
+    /** Se acabó el capítulo: se pasa al siguiente y se sigue leyendo. */
+    private suspend fun raNextChapter() {
+        raEval(ReadAloud.CLEAR)
+        if (!raAdvance()) { aloudStop("Fin del libro"); return }
+    }
+
+    private suspend fun raAdvance(): Boolean {
+        val c = cont
+        if (c != null) {
+            c.page(1); delay(700)
+        } else {
+            val nav = navigator ?: return false
+            val pub = publication ?: return false
+            val here = resourceIndex(pub, nav.currentLocator.value)
+            val next = pub.readingOrder.getOrNull(here + 1) ?: return false
+            val loc = pub.locatorFromLink(next) ?: return false
+            nav.go(loc, animated = false); delay(700)
+        }
+        raFromView()
+        return true
+    }
+
+    private fun aloudPause() {
+        ui.aloudPlaying = false; raGen++
+        tts?.stop()
+    }
+
+    private fun aloudResume() {
+        if (raSent.isEmpty()) lifecycleScope.launch { raFromView() } else raPlayFrom(raAt)
+    }
+
+    private fun aloudStop(msg: String? = null) {
+        ui.aloud = false; ui.aloudPlaying = false; raGen++
+        tts?.stop()
+        raSleepJob?.cancel(); ui.aloudSleep = 0
+        raSent = emptyList()
+        lifecycleScope.launch { raEval(ReadAloud.CLEAR) }
+        msg?.let { ui.say(it) }
+    }
+
+    private fun aloudRate() {
+        val r = ReadAloud.RATES
+        val next = r[(r.indexOfFirst { abs(it - ui.aloudRate) < 0.01f } + 1).mod(r.size)]
+        ui.aloudRate = next; com.sebas.zerkalo.data.Prefs.aloudRate = next
+        if (ui.aloudPlaying) raPlayFrom(raAt)
+    }
+
+    private fun aloudSleep() {
+        val s = ReadAloud.SLEEP
+        val next = s[(s.indexOf(ui.aloudSleep) + 1).mod(s.size)]
+        ui.aloudSleep = next
+        raSleepJob?.cancel()
+        if (next == 0) { ui.say("Sin temporizador"); return }
+        ui.say("Se apaga en $next minutos")
+        raSleepJob = lifecycleScope.launch {
+            delay(next * 60_000L)
+            aloudPause(); ui.aloudSleep = 0
+            ui.say("Lectura en pausa · que descanses")
+        }
     }
 
     private fun speak(text: String, lang: String) {
@@ -2175,6 +2511,54 @@ class ReaderActivity : AppCompatActivity(), EpubNavigatorFragment.Listener {
         runCatching { tts?.shutdown() }
     }
 
+    // ---------------- notas al pie: se leen en una ventanita, sin perder la página ----------------
+    override fun shouldFollowInternalLink(link: Link, context: org.readium.r2.navigator.HyperlinkNavigator.LinkContext?): Boolean {
+        if (context is org.readium.r2.navigator.HyperlinkNavigator.FootnoteContext) {
+            val t = BookText.plain(context.noteContent)
+            if (t.isNotBlank()) { showNote(t, link); return false }
+        }
+        val frag = link.href.toString().substringAfter('#', "")
+        if (frag.isEmpty()) return true
+        lifecycleScope.launch {
+            val t = runCatching { noteText(link, frag) }.getOrNull()
+            if (t != null) showNote(t, link) else followLink(link)
+        }
+        return false
+    }
+
+    private fun followLink(link: Link) {
+        val pub = publication ?: return
+        val loc = pub.locatorFromLink(link) ?: return
+        navigator?.go(loc, animated = false)
+    }
+
+    private fun showNote(text: String, link: Link) {
+        ui.footnote = text.take(4000) to link
+        ui.sheet = "footnote"
+    }
+
+    /** ¿El enlace lleva a una nota? Se mira el lugar al que apunta: si parece nota, se devuelve su texto. */
+    private suspend fun noteText(link: Link, frag: String): String? = withContext(Dispatchers.IO) {
+        val pub = publication ?: return@withContext null
+        val base = link.href.toString().substringBefore('#')
+        val target = (pub.readingOrder + pub.resources).firstOrNull { it.href.toString().substringBefore('#') == base } ?: return@withContext null
+        val html = pub.get(target.url())?.read()?.getOrNull()?.toString(Charsets.UTF_8) ?: return@withContext null
+        val doc = org.jsoup.Jsoup.parse(html)
+        var el = doc.getElementById(frag) ?: doc.select("[name=$frag]").firstOrNull() ?: return@withContext null
+        // Un ancla vacía: la nota es el párrafo (o el elemento de lista) donde está
+        if (el.text().trim().length < 6) el = el.parents().firstOrNull { it.tagName() in setOf("p", "li", "aside", "div", "dd", "section") } ?: el
+        val looks = Regex("foot|note|nota|endnote|rearnote|^fn|^n\\d", RegexOption.IGNORE_CASE)
+        fun noteish(e: org.jsoup.nodes.Element): Boolean {
+            val t = e.attr("epub:type") + " " + e.attr("role") + " " + e.className() + " " + e.id()
+            return looks.containsMatchIn(t)
+        }
+        val here = navigator?.currentLocator?.value?.href?.toString()?.substringBefore('#')
+        val isNote = noteish(el) || el.parents().take(4).any { noteish(it) } ||
+            (here != null && here != base && Regex("note|nota|endnote|footnote", RegexOption.IGNORE_CASE).containsMatchIn(base))
+        val text = el.text().trim()
+        if (!isNote || text.isEmpty() || text.length > 2500) null else text
+    }
+
     // ---------------- EpubNavigatorFragment.Listener ----------------
     override fun onExternalLinkActivated(url: AbsoluteUrl) {
         runCatching { startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url.toString()))) }
@@ -2199,6 +2583,14 @@ class ReaderActions(
     val exportInk: () -> Unit = {},
     val exportNote: () -> Unit = {},
     val toggleShiori: () -> Unit,
+    val goShiori: () -> Unit,
+    val aloud: () -> Unit,
+    val noteGo: (org.readium.r2.shared.publication.Link) -> Unit,
+    val aloudToggle: () -> Unit,
+    val aloudStop: () -> Unit,
+    val aloudRate: () -> Unit,
+    val aloudSleep: () -> Unit,
+    val backFromShiori: () -> Unit,
     val go: (Locator) -> Unit,
     val goLink: (Link) -> Unit,
     val find: (String) -> Unit,

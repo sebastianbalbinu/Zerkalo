@@ -37,6 +37,7 @@ object Backup {
                     (if (full) b else b.copy(progress = 0.0, locator = null, lastOpened = 0, finishedAt = 0, favorite = false, pair = null)).toJson()
                 }))
             if (full) {
+                meta.put("prefs", Prefs.dump())
                 meta.put("marks", JSONArray(Library.marks.value.filter { it.bookId in ids }.map { it.toJson() }))
                 meta.put("sessions", JSONArray(Library.sessions.value.filter { it.bookId in ids }.map { it.toJson() }))
             }
@@ -44,6 +45,10 @@ object Backup {
             for (b in books) {
                 put(z, "libros/${b.file}", File(Library.booksDir, b.file))
                 b.cover?.let { put(z, "portadas/$it", File(Library.coversDir, it)) }
+            }
+            if (full) {
+                put(z, "datos/tarjetas.json", File(ctx.filesDir, "tarjetas.json"))
+                put(z, "datos/sellos.json", File(ctx.filesDir, "sellos.json"))
             }
             if (full) for (d in EXTRA) {
                 val root = File(ctx.filesDir, d)
@@ -96,12 +101,16 @@ object Backup {
             meta.optJSONArray("marks")?.let { a ->
                 for (i in 0 until a.length()) {
                     val m = runCatching { Mark.fromJson(a.getJSONObject(i)) }.getOrNull() ?: continue
-                    if (m.bookId in added) Library.putMark(m)
+                    // Libros nuevos: todas sus marcas. Libros que ya tenías: solo las marcas que te falten.
+                    if (m.bookId in added || (Library.book(m.bookId) != null && Library.marks.value.none { it.id == m.id })) Library.putMark(m)
                 }
             }
             meta.optJSONArray("sessions")?.let { a ->
                 Library.importSessions((0 until a.length()).mapNotNull { runCatching { Session.fromJson(a.getJSONObject(it)) }.getOrNull() }.filter { it.bookId in added })
             }
+            File(tmp, "datos/tarjetas.json").takeIf { it.isFile }?.let { Cards.merge(it) }
+            File(tmp, "datos/sellos.json").takeIf { it.isFile }?.let { Stamps.merge(it) }
+            meta.optJSONObject("prefs")?.let { Prefs.load(it) }
             for (d in EXTRA) {
                 val root = File(tmp, d)
                 if (!root.isDirectory) continue

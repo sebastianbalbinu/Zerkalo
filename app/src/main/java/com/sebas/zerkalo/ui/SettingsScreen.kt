@@ -73,12 +73,29 @@ fun SettingsScreen() {
             working = false
         }
     }
+    // Guardar la copia directo en Drive (o en cualquier carpeta) con el selector del sistema
+    val savePicker = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/zip")) { uri ->
+        if (uri != null && !working) {
+            working = true
+            a.toast("Preparando la copia completa…")
+            scope.launch {
+                runCatching {
+                    val f = com.sebas.zerkalo.data.Backup.export(ctx, true)
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        ctx.contentResolver.openOutputStream(uri)?.use { out -> f.inputStream().use { it.copyTo(out) } } ?: error("no se pudo escribir")
+                        f.delete()
+                    }
+                }.onSuccess { a.toast("Copia guardada") }.onFailure { a.toast("No se pudo guardar la copia: ${it.message}") }
+                working = false
+            }
+        }
+    }
     val restorePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             a.toast("Leyendo la copia…")
             scope.launch {
                 com.sebas.zerkalo.data.Backup.restore(ctx, uri)
-                    .onSuccess { n -> a.toast(if (n == 0) "Ya tenías todos esos libros" else if (n == 1) "Llegó 1 libro a tu biblioteca" else "Llegaron $n libros a tu biblioteca") }
+                    .onSuccess { n -> a.toast((if (n == 0) "Ya tenías todos esos libros" else if (n == 1) "Llegó 1 libro a tu biblioteca" else "Llegaron $n libros a tu biblioteca") + " · tus ajustes se ven completos al volver a abrir la app") }
                     .onFailure { a.toast(it.message ?: "No se pudo leer la copia") }
             }
         }
@@ -142,7 +159,13 @@ fun SettingsScreen() {
         item {
             Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), PaddingValues(horizontal = 18.dp, vertical = 4.dp)) {
                 Column {
-                    ListRow("Guardar o enviar copia completa", "Libros, documentos, avance, subrayados, notas, trazos y apuntes en un .zip", onClick = { backup(true) }) {
+                    ListRow("Guardar copia en Drive o en una carpeta", "Todo: libros, avance, subrayados, notas, trazos, apuntes, tarjetas, sellos, perfiles y ajustes", onClick = {
+                        val day = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+                        savePicker.launch("Copia Zerkalo $day.zip")
+                    }) {
+                        ZIcon("share", p.text2, 18.dp)
+                    }
+                    ListRow("Enviar copia completa", "La misma copia, para mandarla por WhatsApp, correo o a otro teléfono", onClick = { backup(true) }) {
                         ZIcon("share", p.text2, 18.dp)
                     }
                     ListRow("Compartir solo los libros", "Sin tus notas ni tu avance, y sin documentos: para regalar tu biblioteca", onClick = { backup(false) }) {
@@ -151,6 +174,19 @@ fun SettingsScreen() {
                     ListRow("Recibir una copia", "Abre un .zip de Zerkalo y suma sus libros a los tuyos", onClick = {
                         restorePicker.launch(arrayOf("application/zip", "application/x-zip-compressed", "application/octet-stream"))
                     }) { ZIcon("chevron", p.text2, 16.dp) }
+                }
+            }
+        }
+        // Si la app se cerró por un error, se puede mandar el informe
+        item {
+            var fails by remember { mutableStateOf(com.sebas.zerkalo.data.Crashes.count()) }
+            if (fails > 0) Card(Modifier.padding(start = 16.dp, end = 16.dp, top = 12.dp), PaddingValues(horizontal = 18.dp, vertical = 4.dp)) {
+                Column {
+                    ListRow("Informe de cierres inesperados", if (fails == 1) "La app se cerró 1 vez. Mándalo para poder arreglarlo" else "La app se cerró $fails veces. Mándalo para poder arreglarlo", onClick = {
+                        val f = java.io.File(com.sebas.zerkalo.data.Export.outDir(ctx), "Zerkalo fallos.txt")
+                        runCatching { com.sebas.zerkalo.data.Crashes.file().copyTo(f, overwrite = true); com.sebas.zerkalo.data.Export.share(ctx, f, "text/plain") }
+                    }) { ZIcon("share", p.text2, 18.dp) }
+                    ListRow("Borrar el informe", "", onClick = { com.sebas.zerkalo.data.Crashes.clear(); fails = 0 }) { ZIcon("chevron", p.text2, 16.dp) }
                 }
             }
         }
