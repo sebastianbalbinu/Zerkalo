@@ -24,6 +24,7 @@ data class ReaderSettings(
     val paragraph: Int = 0,     // espacio entre párrafos: 0 como el libro, 1 separados, 2 aireados
     val spacing: Int = 0,       // espacio entre letras y palabras: 0 normal, 1 amplio, 2 muy amplio
     val animate: Boolean = true, // animación al pasar página
+    val pageAnim: Int = 1,       // 1 deslizar, 2 papel (si animate es falso: ninguna)
     val haptic: Boolean = false, // vibración suave al pasar página
     val volumeKeys: Boolean = true, // pasar página con los botones de volumen
     val ruler: Boolean = false, // regla de lectura
@@ -97,6 +98,29 @@ object Prefs {
     val reader = MutableStateFlow(ReaderSettings())
     val catalogs = MutableStateFlow<List<OpdsCatalog>>(emptyList())
 
+    /** Todos los ajustes, para la copia de seguridad. */
+    fun dump(): org.json.JSONObject {
+        val o = org.json.JSONObject()
+        for ((k, v) in sp.all) {
+            val t = when (v) { is Boolean -> "b"; is Int -> "i"; is Long -> "l"; is Float -> "f"; is String -> "s"; else -> continue }
+            o.put(k, org.json.JSONObject().put("t", t).put("v", if (v is Float) v.toDouble() else v))
+        }
+        return o
+    }
+
+    /** Pone los ajustes de una copia (se aplican del todo al volver a abrir la app). */
+    fun load(o: org.json.JSONObject) {
+        val e = sp.edit()
+        o.keys().forEach { k ->
+            val x = o.optJSONObject(k) ?: return@forEach
+            when (x.optString("t")) {
+                "b" -> e.putBoolean(k, x.optBoolean("v")); "i" -> e.putInt(k, x.optInt("v")); "l" -> e.putLong(k, x.optLong("v"))
+                "f" -> e.putFloat(k, x.optDouble("v").toFloat()); "s" -> e.putString(k, x.optString("v"))
+            }
+        }
+        e.apply()
+    }
+
     fun init(ctx: Context) {
         sp = ctx.getSharedPreferences("zerkalo", Context.MODE_PRIVATE)
         paper.value = runCatching { PaperPref.valueOf(sp.getString("paper", "SISTEMA")!!) }.getOrDefault(PaperPref.SISTEMA)
@@ -117,7 +141,7 @@ object Prefs {
             customInkLight = sp.getInt("rInkL", 0xFF3A3350.toInt()), continuous = sp.getBoolean("rCont", false),
             align = sp.getInt("rAlign", if (sp.getBoolean("rJustify", true)) 2 else 0),
             cpl = sp.getInt("rCpl", 0), weight = sp.getInt("rWeight", 0), texture = sp.getBoolean("rTex", true),
-            noteButton = sp.getBoolean("rNoteBtn", true), wpm = sp.getInt("rWpm", 250),
+            noteButton = sp.getBoolean("rNoteBtn", true), wpm = sp.getInt("rWpm", 250), pageAnim = sp.getInt("rPageAnim", 1),
         ).let { r ->
             // "Desplazamiento" se unió a "Continuo": quien lo usaba pasa a Continuo
             if (r.scroll && !r.continuous) r.copy(continuous = true) else r
@@ -169,7 +193,7 @@ object Prefs {
             .putInt("rLayout", r.layout).putInt("rMarkStyle", r.markStyle).putFloat("rVeil", r.veil).putBoolean("rInfo", r.info)
             .putFloat("rMmL", r.mmLeft).putFloat("rMmR", r.mmRight).putFloat("rMmT", r.mmTop).putFloat("rMmB", r.mmBottom).putBoolean("rCam", r.respectCamera)
             .putInt("rInkL", r.customInkLight).putBoolean("rCont", r.continuous).putInt("rAlign", r.align)
-            .putInt("rCpl", r.cpl).putInt("rWeight", r.weight).putBoolean("rTex", r.texture).putBoolean("rNoteBtn", r.noteButton).putInt("rWpm", r.wpm).apply()
+            .putInt("rCpl", r.cpl).putInt("rWeight", r.weight).putBoolean("rTex", r.texture).putBoolean("rNoteBtn", r.noteButton).putInt("rWpm", r.wpm).putInt("rPageAnim", r.pageAnim).apply()
     }
 
     fun setCatalogs(list: List<OpdsCatalog>) {
@@ -216,6 +240,15 @@ object Prefs {
     var profilesJson: String
         get() = sp.getString("profiles", "") ?: ""
         set(v) { sp.edit().putString("profiles", v).apply() }
+
+    var aloudRate: Float
+        get() = sp.getFloat("aloudRate", 1f)
+        set(v) { sp.edit().putFloat("aloudRate", v).apply() }
+
+    /** Color de la cinta del shiori (0 bermellón, 1 índigo, 2 musgo, 3 dorado, 4 burdeos, 5 negro). */
+    var shioriColor: Int
+        get() = sp.getInt("shioriColor", 0)
+        set(v) { sp.edit().putInt("shioriColor", v).apply() }
 
     var librarySort: Int
         get() = sp.getInt("librarySort", 0)

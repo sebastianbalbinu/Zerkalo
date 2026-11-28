@@ -80,6 +80,20 @@ object Cards {
         }.onFailure { android.util.Log.e("Zerkalo", "No se pudieron leer las tarjetas", it) }
     }
 
+    /** Suma las tarjetas de una copia (las que ya tienes no se repiten). */
+    fun merge(f: File) {
+        runCatching {
+            val o = JSONObject(f.readText())
+            val a = o.optJSONArray("cards") ?: JSONArray()
+            val have = _cards.value.map { it.id }.toHashSet()
+            val more = (0 until a.length()).mapNotNull { runCatching { Card.fromJson(a.getJSONObject(it)) }.getOrNull() }.filter { it.id !in have }
+            val d = o.optJSONArray("days") ?: JSONArray()
+            _cards.value = _cards.value + more
+            _days.value = _days.value + (0 until d.length()).map { d.optString(it) }
+            save()
+        }
+    }
+
     private fun save() {
         if (!::dir.isInitialized) return
         saveJob?.cancel()

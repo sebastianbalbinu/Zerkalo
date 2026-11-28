@@ -1,5 +1,9 @@
 package com.sebas.zerkalo.reader
 
+import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.graphics.drawscope.translate
 import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -132,9 +136,51 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
         // Brillo deslizando el dedo por el borde izquierdo, como en Moon+ Reader.
         BrightnessEdge(ui, act, Modifier.align(Alignment.CenterStart))
 
-        // Cinta del shiori en la esquina, como un marcapáginas de tela.
-        AnimatedVisibility(ui.bookmarked, Modifier.align(Alignment.TopEnd).padding(end = 28.dp), enter = slideInVertically { -it }, exit = slideOutVertically { -it }) {
-            Box(Modifier.size(14.dp, 54.dp).background(if (p.isDark) p.accent.copy(alpha = 0.45f) else p.accent))
+        // El shiori: una cinta de tela que cuelga sobre su página. En las demás páginas asoma solo la punta,
+        // como la cinta que sale por arriba de un libro cerrado: tocarla te lleva a tu página.
+        AnimatedVisibility(
+            ui.hasShiori && !ui.controls, Modifier.align(Alignment.TopEnd).padding(end = 30.dp),
+            enter = fadeIn(tween(250)), exit = fadeOut(tween(150)),
+        ) {
+            val long by animateDpAsState(if (ui.bookmarked) 86.dp else 22.dp, tween(420), label = "cinta")
+            ShioriRibbon(
+                SHIORI_COLORS[ui.shioriColor.coerceIn(0, SHIORI_COLORS.lastIndex)].second, long, p.isDark,
+                Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+                    if (ui.bookmarked) ui.say("Aquí está tu shiori · tócalo en la barra de arriba para quitarlo") else act.goShiori()
+                },
+            )
+        }
+        // Leer en voz alta: controles pequeños abajo, siempre a mano
+        AnimatedVisibility(ui.aloud && ui.sheet == null, Modifier.align(Alignment.BottomCenter), enter = fadeIn() + slideInVertically { it }, exit = fadeOut()) {
+            Row(
+                Modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(bottom = if (ui.controls) 150.dp else 18.dp)
+                    .clip(RoundedCornerShape(26.dp)).background(p.surface.copy(alpha = 0.96f)).border(1.dp, p.line, RoundedCornerShape(26.dp))
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                @Composable
+                fun Btn(label: String, w: androidx.compose.ui.unit.Dp = 44.dp, strong: Boolean = false, on: () -> Unit) {
+                    Box(Modifier.size(w, 40.dp).clip(RoundedCornerShape(20.dp)).clickable(onClick = on), contentAlignment = Alignment.Center) {
+                        Text(label, style = if (strong) Type.ui.copy(fontSize = 17.sp) else Type.uiSmall, color = if (strong) p.accent else p.text)
+                    }
+                }
+                Btn(if (ui.aloudPlaying) "❚❚" else "▶", strong = true) { act.aloudToggle() }
+                Btn(ui.aloudRate.toString().trimEnd('0').trimEnd('.') + "×", 52.dp) { act.aloudRate() }
+                Btn(if (ui.aloudSleep == 0) "☾" else "☾ ${ui.aloudSleep}", 56.dp) { act.aloudSleep() }
+                Btn("✕") { act.aloudStop() }
+            }
+        }
+        // Después de ir al shiori: volver a donde ibas
+        AnimatedVisibility(ui.backTo != null && !ui.controls, Modifier.align(Alignment.TopCenter), enter = fadeIn(), exit = fadeOut()) {
+            LaunchedEffect(ui.backTo) { kotlinx.coroutines.delay(9000); ui.backTo = null }
+            Row(
+                Modifier.windowInsetsPadding(WindowInsets.statusBars).padding(top = 26.dp).clip(RoundedCornerShape(18.dp))
+                    .background(p.surface.copy(alpha = 0.95f)).clickable { act.backFromShiori() }.padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                ZIcon("back", p.text, 14.dp)
+                Text("Volver a donde ibas", style = Type.uiSmall, color = p.text, modifier = Modifier.padding(start = 6.dp))
+            }
         }
 
         // Hora y avance junto a la cámara, en la franja de arriba (así el texto llega hasta abajo)
@@ -194,7 +240,7 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
                     Spacer(Modifier.width(8.dp))
                     RoundPill("toc", { ui.sheet = "toc" }, size = 44.dp)
                     Spacer(Modifier.width(8.dp))
-                    RoundPill("shiori", act.toggleShiori, active = ui.bookmarked, size = 44.dp)
+                    RoundPill("shiori", { if (!ui.bookmarked && ui.hasShiori) ui.sheet = "shiori" else act.toggleShiori() }, active = ui.bookmarked, size = 44.dp)
                 }
             }
         }
@@ -345,6 +391,25 @@ private fun Overlay(ui: ReaderUi, act: ReaderActions) {
     when (ui.sheet) {
         "toc" -> TocSheet(ui, act) { ui.sheet = null }
         "find" -> FindSheet(ui, act) { ui.sheet = null }
+        "footnote" -> ui.footnote?.let { (t, l) ->
+            Sheet({ ui.sheet = null }) {
+                Text("Nota", style = Type.title.copy(fontSize = 19.sp), color = p.text)
+                Text(
+                    t, style = Type.ui.copy(fontSize = 16.sp, lineHeight = 24.sp), color = p.text,
+                    modifier = Modifier.padding(top = 10.dp).heightIn(max = 360.dp).verticalScroll(rememberScrollState()),
+                )
+                Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    PillButton("Seguir leyendo", { ui.sheet = null }, Modifier.weight(1f))
+                    PillButton("Ir a la nota", { act.noteGo(l) }, Modifier.weight(1f), ghost = true)
+                }
+            }
+        }
+        "shiori" -> Sheet({ ui.sheet = null }) {
+            Text("Tu shiori", style = Type.title.copy(fontSize = 20.sp), color = p.text)
+            Text("Está en otra página. Un libro tiene una sola cinta.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
+            PillButton("Ir a mi shiori", { ui.sheet = null; act.goShiori() }, Modifier.fillMaxWidth().padding(top = 14.dp), icon = "shiori")
+            PillButton("Moverlo a esta página", { ui.sheet = null; act.toggleShiori() }, Modifier.fillMaxWidth().padding(top = 8.dp), ghost = true)
+        }
         "type", "luz", "ajustes" -> {
             // "type" y "luz" son los nombres de antes: abren la misma hoja, en su pestaña
             val sheet = ui.sheet
@@ -781,6 +846,13 @@ private fun ListenSheet(act: ReaderActions, onClose: () -> Unit) {
     }
     Sheet(onClose) {
         Text("Escuchar este libro", style = Type.title.copy(fontSize = 21.sp), color = p.text)
+        Card2 {
+            Text("Voz del teléfono", style = Type.ui.copy(fontWeight = FontWeight.SemiBold), color = p.text)
+            Text("Sirve con cualquier libro. Lee frase por frase, la resalta y pasa la página sola. Puedes cambiar la velocidad y poner un temporizador.", style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 4.dp))
+            PillButton("Leer desde esta página", { onClose(); act.aloud() }, Modifier.fillMaxWidth().padding(top = 10.dp))
+        }
+        Spacer(Modifier.height(16.dp))
+        Text("O con voz humana", style = Type.ui.copy(fontWeight = FontWeight.SemiBold), color = p.text)
         Text("Audiolibros de LibriVox, leídos por personas. Empieza en el capítulo donde vas.", style = Type.ui, color = p.text2, modifier = Modifier.padding(top = 6.dp))
         Spacer(Modifier.height(14.dp))
         when {
@@ -1835,7 +1907,27 @@ private fun PageTab(ui: ReaderUi, act: ReaderActions) {
         if (s.respectCamera) "El margen de arriba empieza debajo de la cámara" else "El texto sube hasta el borde de la pantalla; la hora queda encima",
         s.respectCamera,
     ) { act.settings(ui.settings.copy(respectCamera = it)) }
-    SwitchRow("Animación al pasar página", "Apágala si prefieres un cambio instantáneo", s.animate) { act.settings(ui.settings.copy(animate = it)) }
+    if (!(s.continuous || s.scroll)) {
+        Label("Animación al pasar página")
+        Segmented(listOf("Ninguna", "Deslizar", "Papel"), if (!s.animate) 0 else s.pageAnim.coerceIn(1, 2), { i ->
+            act.settings(ui.settings.copy(animate = i != 0, pageAnim = if (i == 0) ui.settings.pageAnim else i))
+        })
+        Text(
+            when { !s.animate -> "Cambio instantáneo."; s.pageAnim == 2 -> "La hoja se dobla con un pliegue suave y sigue tu dedo. Por detrás se ve el texto al revés, tenue."; else -> "La página se corre de lado." },
+            style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 6.dp),
+        )
+    }
+    Label("Color del shiori")
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        SHIORI_COLORS.forEachIndexed { i, (name, c) ->
+            Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable { ui.shioriColor = i; com.sebas.zerkalo.data.Prefs.shioriColor = i }) {
+                Box(
+                    Modifier.size(34.dp).clip(CircleShape).background(c).border(if (ui.shioriColor == i) 3.dp else 0.dp, p.text, CircleShape),
+                )
+                Text(name, style = Type.uiSmall.copy(fontSize = 10.sp), color = p.text2, modifier = Modifier.padding(top = 3.dp))
+            }
+        }
+    }
     SwitchRow("Hora y avance junto a la cámara", "Se ven arriba mientras lees", s.info) { act.settings(ui.settings.copy(info = it)) }
 }
 
@@ -1874,4 +1966,41 @@ private fun HelpTab(ui: ReaderUi, act: ReaderActions, onClose: () -> Unit) {
         "Toques: izquierda o arriba, página anterior · derecha o abajo, siguiente · centro, menú. El borde izquierdo cambia la luz y atrás cierra lo abierto antes de salir del libro.",
         style = Type.uiSmall, color = p.text2, modifier = Modifier.padding(top = 14.dp),
     )
+}
+
+
+/** Colores de cinta, como los de un libro de tapa dura. */
+val SHIORI_COLORS = listOf(
+    "Bermellón" to Color(0xFFA3402A), "Índigo" to Color(0xFF2F4670), "Musgo" to Color(0xFF55633A),
+    "Dorado" to Color(0xFFB08A3E), "Burdeos" to Color(0xFF6E2335), "Negro" to Color(0xFF222020),
+)
+
+/** Una cinta de tela: hilos finos a lo largo, bordes redondeados por la luz y la punta cortada en V. */
+@Composable
+private fun ShioriRibbon(color: Color, length: androidx.compose.ui.unit.Dp, dark: Boolean, modifier: Modifier) {
+    val alpha = if (dark) 0.72f else 1f
+    androidx.compose.foundation.Canvas(modifier.size(18.dp, length + 8.dp)) {
+        val w = size.width
+        val h = size.height - 8.dp.toPx()
+        val notch = w * 0.55f
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(0f, 0f); lineTo(w, 0f); lineTo(w, h); lineTo(w / 2f, h - notch); lineTo(0f, h); close()
+        }
+        // Sombra suave sobre el papel
+        translate(1.2.dp.toPx(), 2.dp.toPx()) { drawPath(path, Color.Black.copy(alpha = if (dark) 0.25f else 0.12f)) }
+        drawPath(path, color.copy(alpha = alpha))
+        clipPath(path) {
+            // Bordes redondeados por la luz (la tela no es plana)
+            drawRect(
+                androidx.compose.ui.graphics.Brush.horizontalGradient(
+                    0f to Color.Black.copy(alpha = 0.22f), 0.22f to Color.Transparent, 0.62f to Color.White.copy(alpha = 0.10f), 1f to Color.Black.copy(alpha = 0.25f),
+                ),
+            )
+            // Hilos del tejido
+            var x = 1.5f
+            while (x < w) { drawLine(Color.White.copy(alpha = 0.07f), androidx.compose.ui.geometry.Offset(x, 0f), androidx.compose.ui.geometry.Offset(x, h), 0.7f); x += 2.6f }
+            // Donde la cinta entra al libro, un poco más oscura
+            drawRect(Color.Black.copy(alpha = 0.18f), size = androidx.compose.ui.geometry.Size(w, 3.dp.toPx()))
+        }
+    }
 }
