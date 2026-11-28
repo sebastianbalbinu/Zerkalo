@@ -28,7 +28,8 @@ class PlaybackService : MediaSessionService() {
             .setSeekForwardIncrementMs(30_000)
             .build()
         val open = PendingIntent.getActivity(
-            this, 0, Intent(this, MainActivity::class.java).putExtra("zerkalo.tab", 2),
+            this, 0, Intent(this, MainActivity::class.java).putExtra("zerkalo.tab", 2)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
         session = MediaSession.Builder(this, player).setSessionActivity(open).build()

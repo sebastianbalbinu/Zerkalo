@@ -511,10 +511,57 @@ window.zk = {
     };
     if (sec(i)) then(); else { zk.go(i, 0); setTimeout(then, 400); }
   },
+  // Pasar "página" en continuo: se miden los renglones de verdad (con cualquier letra, títulos o imágenes),
+  // para que ninguno quede cortado: adelante, el primer renglón que no se veía entero queda arriba;
+  // atrás, el renglón cortado de arriba queda abajo, entero, y arriba empieza un renglón completo.
   page: function(dir) {
+    var top = pad();
+    var pb = parseFloat(getComputedStyle(d.documentElement).getPropertyValue('--zk-pb')) || 0;
+    var bottom = window.innerHeight - pb;
+    var visible = bottom - top;
     var lh = parseFloat(getComputedStyle(d.body).lineHeight) || 28;
-    var visible = window.innerHeight - pad() - (parseFloat(getComputedStyle(d.documentElement).getPropertyValue('--zk-pb')) || 0);
-    window.scrollBy({ top: dir * Math.max(lh * 3, visible - lh * 1.5), behavior: 'smooth' });
+    var fallback = function(){ window.scrollBy({ top: dir * Math.max(lh * 3, visible - lh * 1.5), behavior: 'smooth' }); };
+    // Renglones cerca de la pantalla (una pantalla arriba y otra abajo)
+    var from = top - visible - 40, to = bottom + visible + 40, lines = [];
+    var add = function(t, b){ if (b - t < 2 || b < from || t > to) return; lines.push([t, b]); };
+    var w = d.createTreeWalker(d.body, NodeFilter.SHOW_TEXT, null), n, r = d.createRange(), k = 0;
+    while ((n = w.nextNode())) {
+      if (!n.nodeValue || !/\S/.test(n.nodeValue)) continue;
+      var pe = n.parentElement; if (!pe) continue;
+      var pr = pe.getBoundingClientRect(); if (pr.bottom < from || pr.top > to) continue;
+      r.selectNodeContents(n);
+      var rs = r.getClientRects();
+      for (var i = 0; i < rs.length; i++) add(rs[i].top, rs[i].bottom);
+      if (++k > 4000) break;
+    }
+    [].slice.call(d.querySelectorAll('img,svg,hr,video,table')).forEach(function(e){ var q = e.getBoundingClientRect(); add(q.top, q.bottom); });
+    if (!lines.length) { fallback(); return; }
+    // Juntar los pedazos de un mismo renglón
+    lines.sort(function(a, b){ return a[0] - b[0]; });
+    var L = [];
+    lines.forEach(function(x){
+      var last = L[L.length - 1];
+      if (last && x[0] < last[1] - 2 && Math.abs(x[0] - last[0]) < (last[1] - last[0]) * 0.6) { last[1] = Math.max(last[1], x[1]); }
+      else L.push([x[0], x[1]]);
+    });
+    var gap = 2, delta = null, i2;
+    if (dir > 0) {
+      // El primer renglón que no cabe entero abajo
+      for (i2 = 0; i2 < L.length; i2++) { if (L[i2][1] > bottom + 0.5 && L[i2][0] > top + 0.5) { delta = L[i2][0] - top - gap; break; } }
+      if (delta === null || delta < lh * 2) { fallback(); return; }
+    } else {
+      // El renglón de arriba que está cortado (o el último que quedó encima)
+      var cut = -1;
+      for (i2 = L.length - 1; i2 >= 0; i2--) { if (L[i2][0] < top - 0.5) { cut = i2; break; } }
+      if (cut < 0) { fallback(); return; }
+      var end = L[cut][1];
+      // El primer renglón de la nueva pantalla: el más alto que todavía cabe entero junto con el cortado
+      var first = cut;
+      while (first > 0 && end - L[first - 1][0] <= visible - gap * 2) first--;
+      delta = L[first][0] - top - gap;
+      if (delta > -lh * 2) { fallback(); return; }
+    }
+    window.scrollBy({ top: delta, behavior: 'smooth' });
   },
   // El texto seleccionado: capítulo, punto del capítulo y las palabras de antes y después (para ubicarlo siempre)
   sel: function() {
