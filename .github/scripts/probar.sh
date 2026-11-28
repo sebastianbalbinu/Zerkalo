@@ -107,4 +107,10 @@ $T adb logcat -d > logcat-full.txt
 } > metricas.txt
 cat metricas.txt
 { $T adb shell getprop ro.build.version.release; grep -E "ZK_|FATAL|AndroidRuntime|Zerkalo" logcat-full.txt | tail -300; } > logcat.txt
+# Si la app dejó de responder: qué estaba haciendo (para arreglarlo)
+if grep -q "ANR in com.sebas.zerkalo" logcat-full.txt; then
+  grep -B3 -A30 "ANR in com.sebas.zerkalo" logcat-full.txt | head -80
+  $T adb root >/dev/null 2>&1; sleep 2
+  $T adb shell 'ls -t /data/anr/ 2>/dev/null | head -3; f=$(ls -t /data/anr/anr_* 2>/dev/null | head -1); [ -n "$f" ] && sed -n "/\"main\"/,/^$/p" "$f" | head -70'
+fi
 grep -q "ZK_READY" logcat-full.txt && grep -q "ZK_READER_OK" logcat-full.txt && grep -q "ZK_CONT_OK" logcat-full.txt && grep -q "ZK_PDF_READY" logcat-full.txt && ! grep -q "FATAL EXCEPTION" logcat-full.txt && ! grep -q "ANR in com.sebas.zerkalo" logcat-full.txt
