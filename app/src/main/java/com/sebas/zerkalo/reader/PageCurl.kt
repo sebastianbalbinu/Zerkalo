@@ -445,8 +445,8 @@ object Floaters {
             if (rr - l < 2 || b - t < 2) continue
             // El papel de al lado (la mediana de una franja: así no cuenta la tinta)
             val sx = if (l > 6) l - 4 else (rr + 4).coerceAtMost(bmp.width - 1)
-            val samples = IntArray(9) { i -> bmp.getPixel(sx, (t + (b - t) * i / 8).coerceIn(0, bmp.height - 1)) }
-            samples.sortBy { Color.red(it) + Color.green(it) + Color.blue(it) }
+            val samples = List(9) { i -> bmp.getPixel(sx, (t + (b - t) * i / 8).coerceIn(0, bmp.height - 1)) }
+                .sortedBy { Color.red(it) + Color.green(it) + Color.blue(it) }
             paint.color = samples[6] // de los más claros: papel, no letras
             c.drawRect(l.toFloat() - 1, t.toFloat() - 1, rr.toFloat() + 1, b.toFloat() + 1, paint)
         }
