@@ -332,7 +332,7 @@ private fun TabBar(selected: Int, haze: HazeState, modifier: Modifier, onSelect:
     Row(
         modifier.windowInsetsPadding(WindowInsets.navigationBars).padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth().height(66.dp)
             .shadow(18.dp, RoundedCornerShape(33.dp), ambientColor = Color(0x40000000), spotColor = Color(0x55000000))
-            .clip(RoundedCornerShape(33.dp)).hazeEffect(haze, glassStyle(p)),
+            .clip(RoundedCornerShape(33.dp)).hazeEffect(haze, glassStyle(p), glassScale),
         horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically,
     ) {
         TABS.forEachIndexed { i, (icon, name) ->
