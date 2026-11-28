@@ -71,10 +71,10 @@ sleep 12
 if [ -n "$W" ]; then
   $T adb shell input tap $((W*85/100)) $((H/2)); sleep 3
   $T adb shell input tap $((W/2)) $((H/2)); sleep 1; $T adb shell input tap $((W/2)) $((H/2)); sleep 2
-  $T adb shell input swipe $((W*92/100)) $((H*85/100)) $((W*30/100)) $((H*72/100)) 1800 &
+  $T adb shell input swipe $((W*85/100)) $((H*85/100)) $((W*25/100)) $((H*72/100)) 1800 &
   sleep 1.0; $T adb exec-out screencap -p > shot11.png; wait; sleep 2
   $T adb exec-out screencap -p > shot12.png
-  $T adb shell input swipe $((W*8/100)) $((H*80/100)) $((W*70/100)) $((H*70/100)) 1800 &
+  $T adb shell input swipe $((W*15/100)) $((H*80/100)) $((W*75/100)) $((H*70/100)) 1800 &
   sleep 1.0; $T adb exec-out screencap -p > shot13.png; wait; sleep 2
   $T adb exec-out screencap -p > shot14.png
 fi
