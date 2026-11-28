@@ -76,6 +76,11 @@ val WashiPalette = Palette(
     "Washi", bg = Color(0xFFF1EADB), surface = Color(0xFFE7DECB), card = Color(0xFFD9CDB6),
     text = Color(0xFF2B241E), text2 = Color(0xFF5A4C40), line = Color(0x1F2B241E), isDark = false, wood = Wood.KEYAKI,
 )
+/** Tinta: papel mate gris cálido, como la pantalla de un Kindle de día; letra gris muy oscura (no negro puro). */
+val TintaPalette = Palette(
+    "Tinta", bg = Color(0xFFE6E3DA), surface = Color(0xFFDCD9CF), card = Color(0xFFCFCBC0),
+    text = Color(0xFF262523), text2 = Color(0xFF55524C), line = Color(0x22262523), isDark = false, wood = Wood.KEYAKI,
+)
 val KraftPalette = Palette(
     "Kraft", bg = Color(0xFFD9C6A5), surface = Color(0xFFCDB894), card = Color(0xFFBFA883),
     text = Color(0xFF2A1F14), text2 = Color(0xFF55432F), line = Color(0x222A1F14), isDark = false, wood = Wood.KEYAKI,

@@ -86,8 +86,8 @@ object Profiles {
             "continuous" to false, "pageAnim" to 0), true),
         Profile("estudio", "Estudio", j("font" to 0, "size" to 100, "lineHeight" to 1.75, "weight" to 0, "paper" to 5, "ink" to 0, "texture" to true, "paragraph" to 1,
             "continuous" to false, "cpl" to 0, "align" to 2, "pageAnim" to 1), true),
-        // Como un libro de Alfaguara: Garamond justificada con sangría, papel crema con textura, la hoja se dobla
-        Profile("realista", "Realista", j("font" to 2, "size" to 106, "lineHeight" to 1.5, "weight" to 0, "paper" to 0, "ink" to 0, "texture" to true, "continuous" to false,
+        // Como un libro de Alfaguara leído en un Kindle de día: Garamond justificada, papel «Tinta» mate, la hoja se dobla
+        Profile("realista", "Realista", j("font" to 2, "size" to 106, "lineHeight" to 1.5, "weight" to 0, "paper" to 7, "ink" to 0, "texture" to true, "warmth" to 0.0, "veil" to 0.0, "continuous" to false,
             "align" to 1, "paragraph" to 0, "spacing" to 0, "layout" to 1, "cpl" to 0, "info" to true, "pageAnim" to 2), true),
     )
 
