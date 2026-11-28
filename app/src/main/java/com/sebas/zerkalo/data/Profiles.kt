@@ -16,7 +16,7 @@ object Profiles {
     private val KEYS = listOf(
         "font", "size", "lineHeight", "paper", "ink", "customInk", "customInkLight", "brightness", "warmth", "veil",
         "paragraph", "spacing", "dyslexia", "mmLeft", "mmRight", "mmTop", "mmBottom", "respectCamera", "align", "layout",
-        "continuous", "info", "ruler", "cpl", "weight", "texture",
+        "continuous", "info", "ruler", "cpl", "weight", "texture", "pageAnim",
     )
 
     fun ReaderSettings.toJson(): JSONObject = JSONObject().apply {
@@ -26,6 +26,7 @@ object Profiles {
         put("mmLeft", mmLeft.toDouble()); put("mmRight", mmRight.toDouble()); put("mmTop", mmTop.toDouble()); put("mmBottom", mmBottom.toDouble())
         put("respectCamera", respectCamera); put("align", align); put("layout", layout); put("continuous", continuous)
         put("info", info); put("ruler", ruler); put("cpl", cpl); put("weight", weight); put("texture", texture)
+        put("pageAnim", if (animate) pageAnim else 0)
     }
 
     /** Los ajustes de ahora con lo que el perfil cambia encima. */
@@ -44,6 +45,8 @@ object Profiles {
             respectCamera = b("respectCamera", r.respectCamera), align = al, justify = al != 0, layout = i("layout", r.layout),
             continuous = cont, scroll = cont, info = b("info", r.info), ruler = b("ruler", r.ruler),
             cpl = i("cpl", r.cpl), weight = i("weight", r.weight), texture = b("texture", r.texture),
+            animate = if (o.has("pageAnim")) o.optInt("pageAnim") != 0 else r.animate,
+            pageAnim = i("pageAnim", if (r.animate) r.pageAnim else 0).let { if (it == 0) r.pageAnim else it },
         )
     }
 
@@ -66,6 +69,11 @@ object Profiles {
         Profile("sol", "Sol", j("paper" to 0, "ink" to 0, "brightness" to 1.0, "warmth" to 0.0, "veil" to 0.0, "weight" to 2, "texture" to false, "size" to 125), true),
         Profile("cama", "Cama", j("paper" to 1, "ink" to 4, "brightness" to 0.2, "warmth" to 0.7, "veil" to 0.0, "info" to false), true),
         Profile("rapida", "Rápida", j("cpl" to 38, "align" to 0, "lineHeight" to 1.6, "paragraph" to 0, "continuous" to false), true),
+        // Como un libro de Alfaguara: Garamond justificada con sangría, papel crema con textura, páginas que se doblan
+        Profile("realista", "Realista", j(
+            "font" to 2, "paper" to 0, "ink" to 0, "texture" to true, "continuous" to false, "align" to 1, "paragraph" to 0,
+            "lineHeight" to 1.5, "spacing" to 0, "weight" to 0, "layout" to 1, "cpl" to 0, "info" to true, "pageAnim" to 2,
+        ), true),
         Profile("estudio", "Estudio", j("paper" to 5, "ink" to 0, "lineHeight" to 1.75, "paragraph" to 1, "continuous" to false, "cpl" to 0, "align" to 2), true),
     )
 
